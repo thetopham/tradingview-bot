@@ -31,7 +31,7 @@ A lightweight Flask service that receives TradingView webhook alerts, executes b
 1. **Clone the repo**  
    ```bash
    git clone https://github.com/thetopham/tradingview-bot.git
-   cd tradingview-projectx-bot
+   cd tradingview-bot
 
 
 2. **Create & activate a virtual environment**
@@ -157,4 +157,4 @@ Alerts arriving **outside** the window **5:00 PM CT → 3:10 PM CT** are acknowl
 MIT License — see [LICENSE](./LICENSE) for details.
 
 ```
-```
+
