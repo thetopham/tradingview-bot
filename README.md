@@ -1,5 +1,5 @@
 
-````markdown
+
 # TradingView → TopstepX Order Execution Bot
 
 A lightweight Flask service that listens for TradingView webhooks and executes bracketed futures orders on TopstepX (via ProjectX Gateway API).  
