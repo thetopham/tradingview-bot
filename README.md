@@ -156,5 +156,5 @@ Alerts arriving **outside** the window **5:00 PM CT → 3:10 PM CT** are acknowl
 
 MIT License — see [LICENSE](./LICENSE) for details.
 
-```
+
 
