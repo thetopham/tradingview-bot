@@ -187,6 +187,6 @@ sudo certbot --nginx -d alerts.yourdomain.com
 
 <sup>MIT License</sup>
 
-```
+
 
 
