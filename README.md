@@ -111,9 +111,10 @@ Set up your alert with a JSON payload:
 
 A background scheduler automatically runs **flatten\_all()** at **3:10 PM CT** Monday–Friday, ensuring compliance with Topstep’s daily close rules.
 
-### 4. Trading Hours Guard
+### 4. Trading-Hours Guard
 
-Alerts arriving **outside** the window **5:00 PM CT → 3:10 PM CT** are acknowledged but **skipped**, preventing off-hours execution.
+Alerts arriving **between 3:10 PM CT and 5:00 PM CT** (off-hours) are acknowledged but **skipped**, preventing execution during the daily maintenance window. All other times (5:00 PM CT → 3:10 PM CT) are live trading hours.
+
 
 ---
 
