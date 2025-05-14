@@ -1,5 +1,5 @@
 
-# TradingView → TopstepX Order Bot
+# TradingView Alerts → TopstepX Order Bot
 
 A lightweight Flask service that receives TradingView webhook alerts, executes bracketed orders through ProjectX api to TopstepX, and enforces Topstep “get-flat” rules and trading hours.
 
