@@ -168,21 +168,25 @@ def run_pivot(acct_id, sym, sig, size):
     exit_side= 1-side
 
     pos = [p for p in search_pos(acct_id) if p["contractId"]==cid]
+    net_pos = sum(p["size"] if p["type"]==1 else -p["size"] for p in pos)  # type 1 = long, type 2 = short
 
-    # FLAT or opposite => flatten
-    if sig=="FLAT" or any((side==0 and p["type"]==2) or (side==1 and p["type"]==1) for p in pos):
+    # FLAT => flatten any position
+    if sig=="FLAT":
         for o in search_open(acct_id): cancel(acct_id, o["id"])
         for p in pos: close_pos(acct_id, p["contractId"])
         return jsonify(status="ok",strategy="pivot",message="flattened"),200
 
-    # skip same
-    if any((side==0 and p["type"]==1) or (side==1 and p["type"]==2) for p in pos):
-        return jsonify(status="ok",strategy="pivot",message="skip same"),200
+    # If position already matches direction, skip
+    if (side == 0 and net_pos > 0) or (side == 1 and net_pos < 0):
+        return jsonify(status="ok",strategy="pivot",message="already in position"),200
 
-    # entry + single SL
-    ent = place_market(acct_id, cid, side, size)
+    # Calculate flip size: sum of current position (to flatten) + desired new position
+    flip_size = abs(size + net_pos) if net_pos != 0 else size
+
+    # Place market order in direction of new signal
+    ent = place_market(acct_id, cid, side, flip_size)
     trades=[t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"]==ent["orderId"]]
-       tot = sum(t["size"] for t in trades)
+    tot = sum(t["size"] for t in trades)
     price = None
     if tot:
         price = sum(t["price"]*t["size"] for t in trades) / tot
@@ -194,9 +198,10 @@ def run_pivot(acct_id, sym, sig, size):
         return jsonify(status="error", message="No fill price available"), 500
 
     slp = price-STOP_LOSS_POINTS if side==0 else price+STOP_LOSS_POINTS
-    sl  = place_stop(acct_id, cid, exit_side, size, slp)
+    sl  = place_stop(acct_id, cid, exit_side, flip_size, slp)
 
     return jsonify(status="ok",strategy="pivot",entry=ent,stop=sl),200
+
 
 # ─── Webhook Dispatcher ─────────────────────────────────
 @app.route("/webhook",methods=["POST"])
