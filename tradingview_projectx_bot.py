@@ -281,7 +281,8 @@ def tv_webhook():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 # ─── Main ───────────────────────────────────────────────
+authenticate()
+build_account_map()
+
 if __name__ == "__main__":
-    authenticate()
-    build_account_map()
     app.run(host="0.0.0.0", port=TV_PORT)
