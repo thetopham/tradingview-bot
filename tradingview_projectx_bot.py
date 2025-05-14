@@ -163,66 +163,66 @@ def run_bracket(acct_id, sym, sig, size):
 
 # ─── Strategy: Pivot ────────────────────────────────────
 def run_pivot(acct_id, sym, sig, size):
-    cid      = get_contract(sym)
-    side     = 0 if sig=="BUY" else 1
-    exit_side= 1-side
+    cid = get_contract(sym)
+    side = 0 if sig == "BUY" else 1
+    exit_side = 1 - side
 
-    # Find open positions for this contract
-    pos = [p for p in search_pos(acct_id) if p["contractId"]==cid]
-    long_pos = sum(p["size"] for p in pos if p["type"]==1)   # type 1 = long
-    short_pos = sum(p["size"] for p in pos if p["type"]==2)  # type 2 = short
+    # Find current net position for this contract
+    pos = [p for p in search_pos(acct_id) if p["contractId"] == cid]
+    net_pos = 0
+    for p in pos:
+        if p["type"] == 1:   # LONG
+            net_pos += p["size"]
+        elif p["type"] == 2: # SHORT
+            net_pos -= p["size"]
 
-    # --- FLAT: close everything ---
-    if sig=="FLAT":
-        for o in search_open(acct_id): cancel(acct_id, o["id"])
-        for p in pos: close_pos(acct_id, p["contractId"])
-        return jsonify(status="ok",strategy="pivot",message="flattened"),200
+    # Target net position (+size for long, -size for short, 0 for flat)
+    target = size if sig == "BUY" else -size
 
-    # --- BUY signal ---
-    if sig == "BUY":
-        # If already long, do nothing
-        if long_pos >= size and short_pos == 0:
-            return jsonify(status="ok",strategy="pivot",message="already long"),200
-        # If currently short, flip: buy (short_pos + size)
-        flip_size = short_pos + size
-        if short_pos > 0:
-            for o in search_open(acct_id): cancel(acct_id, o["id"])
-            close_pos(acct_id, cid)
-            ent = place_market(acct_id, cid, 0, flip_size)
-        else:
-            ent = place_market(acct_id, cid, 0, size)
-        # Add stop loss
-        trades=[t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"]==ent["orderId"]]
-        tot=sum(t["size"] for t in trades)
-        price = (sum(t["price"]*t["size"] for t in trades)/tot) if tot else ent.get("fillPrice")
-        slp = price - STOP_LOSS_POINTS
-        sl = place_stop(acct_id, cid, 1, flip_size if short_pos > 0 else size, slp)
-        return jsonify(status="ok",strategy="pivot",entry=ent,stop=sl),200
+    # If already at target, skip
+    if net_pos == target:
+        return jsonify(status="ok", strategy="pivot", message="already at target position"), 200
 
-    # --- SELL signal ---
-    if sig == "SELL":
-        # If already short, do nothing
-        if short_pos >= size and long_pos == 0:
-            return jsonify(status="ok",strategy="pivot",message="already short"),200
-        # If currently long, flip: sell (long_pos + size)
-        flip_size = long_pos + size
-        if long_pos > 0:
-            for o in search_open(acct_id): cancel(acct_id, o["id"])
-            close_pos(acct_id, cid)
-            ent = place_market(acct_id, cid, 1, flip_size)
-        else:
-            ent = place_market(acct_id, cid, 1, size)
-        # Add stop loss
-        trades=[t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"]==ent["orderId"]]
-        tot=sum(t["size"] for t in trades)
-        price = (sum(t["price"]*t["size"] for t in trades)/tot) if tot else ent.get("fillPrice")
-        slp = price + STOP_LOSS_POINTS
-        sl = place_stop(acct_id, cid, 0, flip_size if long_pos > 0 else size, slp)
-        return jsonify(status="ok",strategy="pivot",entry=ent,stop=sl),200
+    # Step 1: Cancel all stops for this contract
+    for o in search_open(acct_id):
+        if o["contractId"] == cid and o["type"] == 4:  # Stop order
+            cancel(acct_id, o["id"])
 
-    # fallback
-    return jsonify(status="error",strategy="pivot",message="invalid path"),400
+    # Step 2: If holding the opposite, flatten and then open reverse
+    trade_log = []
+    if net_pos * target < 0:
+        # Flatten first (close all current contracts)
+        flatten_side = 1 if net_pos > 0 else 0  # If net long, close with SELL
+        trade_log.append(place_market(acct_id, cid, flatten_side, abs(net_pos)))
+        # Now open new position in new direction
+        trade_log.append(place_market(acct_id, cid, side, size))
+    # If flat, just open new
+    elif net_pos == 0:
+        trade_log.append(place_market(acct_id, cid, side, size))
+    # If partial, adjust
+    elif abs(net_pos) != abs(target):
+        # Flatten then re-open (safe)
+        flatten_side = 1 if net_pos > 0 else 0
+        trade_log.append(place_market(acct_id, cid, flatten_side, abs(net_pos)))
+        trade_log.append(place_market(acct_id, cid, side, size))
 
+    # Step 3: Place new stop for the current position
+    # Find the latest entry trade price
+    trades = [t for t in search_trades(acct_id, datetime.utcnow() - timedelta(minutes=5))
+              if t["contractId"] == cid]
+    if trades:
+        # Use price from the last executed trade (entry)
+        entry_price = trades[-1]["price"]
+    else:
+        entry_price = None  # Could fallback to last fillPrice from response
+
+    if entry_price is not None:
+        stop_price = entry_price - STOP_LOSS_POINTS if side == 0 else entry_price + STOP_LOSS_POINTS
+        place_stop(acct_id, cid, exit_side, size, stop_price)
+    else:
+        app.logger.warning("No entry price available to place stop.")
+
+    return jsonify(status="ok", strategy="pivot", message="position set", trades=trade_log), 200
 
 
 # ─── Webhook Dispatcher ─────────────────────────────────
