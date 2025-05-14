@@ -30,9 +30,9 @@ A lightweight Flask service that receives TradingView webhook alerts, executes b
 
 1. **Clone the repo**  
    ```bash
-   git clone https://github.com/youruser/tradingview-projectx-bot.git
+   git clone https://github.com/thetopham/tradingview-bot.git
    cd tradingview-projectx-bot
-````
+
 
 2. **Create & activate a virtual environment**
 
