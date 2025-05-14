@@ -26,7 +26,7 @@ CONTRACT_CACHE = {}
 
 # Timezone for CT trading-hours logic
 CT = pytz.timezone("America/Chicago")
-GET_FLAT_START = (15, 10)  # 3:10pm
+GET_FLAT_START = (15, 8)  # 3:08pm
 GET_FLAT_END   = (17, 0)   #  5:00pm
 
 app = Flask(__name__)
