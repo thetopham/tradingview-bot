@@ -166,29 +166,51 @@ def run_pivot(acct_id, sym, sig, size):
     cid = get_contract(sym)
     side = 0 if sig == "BUY" else 1
     exit_side = 1 - side
-    pos = [p for p in search_pos(acct_id) if p["contractId"] == cid]
 
-    # Cancel all open stop orders first
+    # 1. Cancel ALL existing stop orders for this contract (type 4 = stop)
     for o in search_open(acct_id):
-        if o["contractId"] == cid and o["type"] == 4:  # type==4 is stop order
+        if o["contractId"] == cid and o.get("type", 0) == 4:
             cancel(acct_id, o["id"])
 
-    # Flatten (close) existing position if present
-    net_position = sum(p["size"] if p["type"] == 1 else -p["size"] for p in pos)
-    if net_position != 0:
-        close_pos(acct_id, cid)
+    # 2. Check net position (sum open positions: + = long, - = short)
+    pos_list = [p for p in search_pos(acct_id) if p["contractId"] == cid]
+    net_pos = 0
+    for p in pos_list:
+        if p["type"] == 1:  # long
+            net_pos += p["size"]
+        elif p["type"] == 2:  # short
+            net_pos -= p["size"]
 
-    # Place new market order for requested size in the direction of the signal
-    ent = place_market(acct_id, cid, side, size)
+    # 3. If there’s an existing position, flatten and reverse
+    total_trade_size = size
+    if (side == 0 and net_pos < 0):  # go long, currently short
+        total_trade_size = abs(net_pos) + size
+    elif (side == 1 and net_pos > 0):  # go short, currently long
+        total_trade_size = abs(net_pos) + size
+    elif net_pos == 0:
+        total_trade_size = size
+    elif (side == 0 and net_pos > 0) or (side == 1 and net_pos < 0):
+        # Already holding in same direction, do nothing or optionally add/scale in
+        return jsonify(status="ok",strategy="pivot",message="Already in position"),200
 
-    # Place new stop loss for *new* position only
+    # Flatten old position (if any), then place new position (single market order for total_trade_size)
+    if net_pos != 0 and ((side == 0 and net_pos < 0) or (side == 1 and net_pos > 0)):
+        close_pos(acct_id, cid)  # ensure old is closed
+
+    # 4. Market entry for the new position
+    ent = place_market(acct_id, cid, side, total_trade_size)
     trades = [t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"] == ent["orderId"]]
     tot = sum(t["size"] for t in trades)
-    price = (sum(t["price"] * t["size"] for t in trades) / tot) if tot else ent.get("fillPrice")
-    slp = price - STOP_LOSS_POINTS if side == 0 else price + STOP_LOSS_POINTS
-    sl = place_stop(acct_id, cid, exit_side, size, slp)
+    price = (sum(t["price"]*t["size"] for t in trades)/tot) if tot else ent.get("fillPrice")
+    if price is None:
+        return jsonify(status="error",message="No fill price found"),500
 
-    return jsonify(status="ok", strategy="pivot", entry=ent, stop=sl), 200
+    # 5. Place new stop loss for the correct size
+    slp = price - STOP_LOSS_POINTS if side == 0 else price + STOP_LOSS_POINTS
+    sl = place_stop(acct_id, cid, exit_side, total_trade_size, slp)
+
+    return jsonify(status="ok",strategy="pivot",entry=ent,stop=sl),200
+
 
 
 
