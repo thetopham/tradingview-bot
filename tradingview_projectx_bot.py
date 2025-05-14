@@ -115,8 +115,15 @@ def run_bracket(acct_id, sym, sig, size):
     # fill price
     trades = [t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"]==oid]
     tot = sum(t["size"] for t in trades)
-    price = sum(t["price"]*t["size"] for t in trades)/tot if tot else ent.get("fillPrice")
-
+    price = None
+    if tot:
+        price = sum(t["price"]*t["size"] for t in trades)/tot
+    else:
+        price = ent.get("fillPrice")
+    if price is None:
+        app.logger.error("Could not determine fill price from trades or entry response")
+        return jsonify(status="error", message="No fill price available"), 500
+  
     # initial SL
     slp = price - STOP_LOSS_POINTS if side==0 else price + STOP_LOSS_POINTS
     sl  = place_stop(acct_id, cid, exit_side, size, slp)
@@ -175,8 +182,17 @@ def run_pivot(acct_id, sym, sig, size):
     # entry + single SL
     ent = place_market(acct_id, cid, side, size)
     trades=[t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"]==ent["orderId"]]
-    tot=sum(t["size"] for t in trades)
-    price= (sum(t["price"]*t["size"] for t in trades)/tot) if tot else ent.get("fillPrice")
+       tot = sum(t["size"] for t in trades)
+    price = None
+    if tot:
+        price = sum(t["price"]*t["size"] for t in trades) / tot
+    else:
+        price = ent.get("fillPrice")
+
+    if price is None:
+        app.logger.error("Could not determine fill price from trades or entry response")
+        return jsonify(status="error", message="No fill price available"), 500
+
     slp = price-STOP_LOSS_POINTS if side==0 else price+STOP_LOSS_POINTS
     sl  = place_stop(acct_id, cid, exit_side, size, slp)
 
