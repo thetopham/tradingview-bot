@@ -229,6 +229,10 @@ def run_pivot(acct_id, sym, sig, size):
 @app.route("/webhook",methods=["POST"])
 def tv_webhook():
     data = request.get_json()
+    # Secret check
+    if data.get("secret") != os.getenv("WEBHOOK_SECRET"):
+        app.logger.warning("Unauthorized webhook attempt")
+        return jsonify(error="unauthorized"), 403
     strat = data.get("strategy","bracket").lower()
     acct  = data.get("account", DEFAULT_ACCOUNT)
     if acct: acct = acct.lower()
