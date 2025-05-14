@@ -5,30 +5,34 @@ import os
 import time
 import threading
 import requests
+import re
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 
 # ─── Load config ───────────────────────────────────────
 load_dotenv()
-TV_PORT   = int(os.getenv("TV_PORT", 5000))
-PX_BASE   = os.getenv("PROJECTX_BASE_URL")
-USER_NAME = os.getenv("PROJECTX_USERNAME")
-API_KEY   = os.getenv("PROJECTX_API_KEY")
+TV_PORT       = int(os.getenv("TV_PORT", 5000))
+PX_BASE       = os.getenv("PROJECTX_BASE_URL")
+USER_NAME     = os.getenv("PROJECTX_USERNAME")
+API_KEY       = os.getenv("PROJECTX_API_KEY")
+
+# In-memory cache for raw contract codes
+CONTRACT_MAP  = {}
 
 # Accounts will be discovered at runtime
-ACCOUNTS = {}             # name -> id
+ACCOUNTS             = {}    # name -> id
 DEFAULT_ACCOUNT_NAME = None
 
 # Bracket params
 STOP_LOSS_POINTS = 10.0
 TP_POINTS        = [2.5, 5.0, 10.0]
 
-app = Flask(__name__)
-token = None
+app        = Flask(__name__)
+token      = None
 token_expiry = 0
-lock = threading.Lock()
-ACCOUNT_ID = None  # set per‐request
+lock       = threading.Lock()
+ACCOUNT_ID = None  # set per-request
 
 # ─── Auth Helpers ──────────────────────────────────────
 def authenticate():
@@ -43,7 +47,7 @@ def authenticate():
     if not data.get("success"):
         raise RuntimeError(f"Auth failed: {data}")
     token = data["token"]
-    token_expiry = time.time() + 23*3600
+    token_expiry = time.time() + 23 * 3600
 
 def ensure_token():
     with lock:
@@ -92,7 +96,7 @@ def place_market(cid, side, size):
     return place_order({
         "accountId": ACCOUNT_ID,
         "contractId": cid,
-        "type": 2,
+        "type": 2,      # Market
         "side": side,
         "size": size
     })
@@ -101,7 +105,7 @@ def place_limit(cid, side, size, price):
     return place_order({
         "accountId": ACCOUNT_ID,
         "contractId": cid,
-        "type": 1,
+        "type": 1,      # Limit
         "side": side,
         "size": size,
         "limitPrice": price
@@ -111,7 +115,7 @@ def place_stop(cid, side, size, price):
     return place_order({
         "accountId": ACCOUNT_ID,
         "contractId": cid,
-        "type": 4,
+        "type": 4,      # Stop
         "side": side,
         "size": size,
         "stopPrice": price
@@ -182,25 +186,15 @@ def search_trades(since: datetime):
     resp.raise_for_status()
     return resp.json().get("trades", [])
 
-import re
-
 def search_contract(raw_symbol: str) -> str:
     """
-    Normalize a TradingView ticker (e.g. "MES1!") down to its root
-    ("MES"), call POST /api/Contract/search, and pick the active or
-    first contract ID.
+    Lookup by arbitrary raw_symbol via POST /api/Contract/search
+    (used as a fallback when no contractId/contract field is provided).
     """
     ensure_token()
-
-    # 1) Extract the alphabetical root (e.g. "MES" from "MES1!")
-    m = re.match(r"([A-Za-z]+)", raw_symbol)
-    symbol = m.group(1) if m else raw_symbol
-    app.logger.info(f"Looking up contract for symbol root: {symbol}")
-
-    # 2) Call the search endpoint
     resp = requests.post(
         f"{PX_BASE}/api/Contract/search",
-        json={"searchText": symbol, "live": True},
+        json={"searchText": raw_symbol, "live": True},
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}"
@@ -208,22 +202,15 @@ def search_contract(raw_symbol: str) -> str:
     )
     resp.raise_for_status()
     contracts = resp.json().get("contracts", [])
-
-    # 3) Prefer the one marked activeContract, else fallback to first
+    # pick activeContract first, then fallback to first
     for c in contracts:
         if c.get("activeContract"):
-            app.logger.info(f" → matched activeContract ID {c['id']}")
             return c["id"]
-
     if contracts:
-        app.logger.warning(f" → no activeContract flagged, using first ID {contracts[0]['id']}")
         return contracts[0]["id"]
+    raise ValueError(f"No contract found for symbol '{raw_symbol}'")
 
-    raise ValueError(f"No contract found for symbol '{raw_symbol}' (root '{symbol}')")
-
-
-# ─── Webhook & Bracket Logic ──────────────────────────
-
+# ─── Initialization ────────────────────────────────────
 initialized = False
 
 @app.before_request
@@ -233,13 +220,15 @@ def init_once():
         authenticate()
         build_account_map()
         initialized = True
-        app.logger.info(f"Initialized, default account = {DEFAULT_ACCOUNT_NAME}")
+        app.logger.info(f"Bot initialized, default account = {DEFAULT_ACCOUNT_NAME}")
 
-
+# ─── Webhook & Bracket Logic ──────────────────────────
 @app.route("/webhook", methods=["POST"])
 def tv_webhook():
     data = request.get_json()
-    sig  = data.get("signal", "").upper()
+    app.logger.info(f"Incoming payload: {data}")
+
+    sig = data.get("signal", "").upper()
     if sig not in ("BUY", "SELL", "FLAT"):
         return jsonify({"error": "invalid signal"}), 400
 
@@ -250,7 +239,7 @@ def tv_webhook():
     global ACCOUNT_ID
     ACCOUNT_ID = ACCOUNTS[acct]
 
-    # FLAT
+    # FLAT: cancel & close everything
     if sig == "FLAT":
         for o in search_open_orders():
             cancel_order(o["id"])
@@ -258,57 +247,84 @@ def tv_webhook():
             close_position(p["contractId"])
         return jsonify({"status": "ok", "message": "Flattened"}), 200
 
+    # determine contractId (in preference order)
+    if "contractId" in data:
+        cid = int(data["contractId"])
+    elif "contract" in data:
+        raw = data["contract"]
+        cid = CONTRACT_MAP.get(raw)
+        if not cid:
+            app.logger.info(f"Looking up raw contract code: {raw}")
+            ensure_token()
+            resp = requests.post(
+                f"{PX_BASE}/api/Contract/search",
+                json={"searchText": raw, "live": True},
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {token}"
+                }
+            )
+            resp.raise_for_status()
+            contracts = resp.json().get("contracts", [])
+            if not contracts:
+                raise ValueError(f"No contract found for raw code '{raw}'")
+            match = next((c for c in contracts if c.get("activeContract")), contracts[0])
+            cid = match["id"]
+            CONTRACT_MAP[raw] = cid
+    else:
+        cid = search_contract(data.get("symbol"))
+
+    app.logger.info(f"Using contractId={cid}")
+
     # BUY/SELL bracket
-    sym        = data.get("symbol")
     size_total = int(data.get("size", 1))
-    cid        = search_contract(sym)
-    side       = 0 if sig=="BUY" else 1
+    side       = 0 if sig == "BUY" else 1
     exit_side  = 1 - side
 
-    # close opposite
-    pos = [p for p in search_positions() if p["contractId"]==cid]
-    has_opp = any((side==0 and p["type"]==2) or (side==1 and p["type"]==1) for p in pos)
+    # close opposite if exists
+    positions = [p for p in search_positions() if p["contractId"] == cid]
+    has_opp = any((side == 0 and p["type"] == 2) or (side == 1 and p["type"] == 1) for p in positions)
     if has_opp:
         for o in search_open_orders():
-            if o["contractId"]==cid:
+            if o["contractId"] == cid:
                 cancel_order(o["id"])
-        for p in pos:
-            if (side==0 and p["type"]==2) or (side==1 and p["type"]==1):
+        for p in positions:
+            if (side == 0 and p["type"] == 2) or (side == 1 and p["type"] == 1):
                 close_position(cid)
 
     try:
+        # entry
         entry    = place_market(cid, side, size_total)
         order_id = entry["orderId"]
 
-        # compute fill
+        # compute fill price
         since     = datetime.utcnow() - timedelta(minutes=5)
-        trades    = [t for t in search_trades(since) if t["orderId"]==order_id]
+        trades    = [t for t in search_trades(since) if t["orderId"] == order_id]
         tot       = sum(t["size"] for t in trades)
-        fill_pr   = (sum(t["price"]*t["size"] for t in trades)/tot) if tot else None
+        fill_pr   = (sum(t["price"] * t["size"] for t in trades) / tot) if tot else None
         if fill_pr is None:
             raise RuntimeError("no fill price from trades")
 
-        # stop
-        sl = (fill_pr-STOP_LOSS_POINTS) if side==0 else (fill_pr+STOP_LOSS_POINTS)
-        place_stop(cid, exit_side, size_total, sl)
+        # stop-loss
+        sl_price = (fill_pr - STOP_LOSS_POINTS) if side == 0 else (fill_pr + STOP_LOSS_POINTS)
+        place_stop(cid, exit_side, size_total, sl_price)
 
-        # tps
-        n_tp  = len(TP_POINTS)
-        base  = size_total//n_tp
-        rem   = size_total-base*n_tp
-        slices= [base]*n_tp; slices[-1]+=rem
-        for pts,sz in zip(TP_POINTS,slices):
-            tp = (fill_pr+pts) if side==0 else (fill_pr-pts)
-            place_limit(cid, exit_side, sz, tp)
+        # take-profits
+        n_tp   = len(TP_POINTS)
+        base   = size_total // n_tp
+        rem    = size_total - base * n_tp
+        slices = [base] * n_tp
+        slices[-1] += rem
+        for pts, sz in zip(TP_POINTS, slices):
+            tp_price = (fill_pr + pts) if side == 0 else (fill_pr - pts)
+            place_limit(cid, exit_side, sz, tp_price)
 
-        return jsonify({"status":"ok","entry":entry}),200
+        return jsonify({"status": "ok", "entry": entry}), 200
 
     except Exception as e:
         app.logger.error(f"Webhook error: {e}", exc_info=True)
-        return jsonify({"status":"error","message":str(e)}),500
-
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 # ─── Launch ─────────────────────────────────────────────
-if __name__=="__main__":
-    # only used if you `python tradingview_projectx_bot.py`
+if __name__ == "__main__":
     app.run(host="0.0.0.0", port=TV_PORT)
