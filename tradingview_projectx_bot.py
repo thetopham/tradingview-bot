@@ -163,44 +163,33 @@ def run_bracket(acct_id, sym, sig, size):
 
 # ─── Strategy: Pivot ────────────────────────────────────
 def run_pivot(acct_id, sym, sig, size):
-    cid      = get_contract(sym)
-    side     = 0 if sig=="BUY" else 1
-    exit_side= 1-side
+    cid = get_contract(sym)
+    side = 0 if sig == "BUY" else 1
+    exit_side = 1 - side
+    pos = [p for p in search_pos(acct_id) if p["contractId"] == cid]
 
-    pos = [p for p in search_pos(acct_id) if p["contractId"]==cid]
-    net_pos = sum(p["size"] if p["type"]==1 else -p["size"] for p in pos)  # type 1 = long, type 2 = short
+    # Cancel all open stop orders first
+    for o in search_open(acct_id):
+        if o["contractId"] == cid and o["type"] == 4:  # type==4 is stop order
+            cancel(acct_id, o["id"])
 
-    # FLAT => flatten any position
-    if sig=="FLAT":
-        for o in search_open(acct_id): cancel(acct_id, o["id"])
-        for p in pos: close_pos(acct_id, p["contractId"])
-        return jsonify(status="ok",strategy="pivot",message="flattened"),200
+    # Flatten (close) existing position if present
+    net_position = sum(p["size"] if p["type"] == 1 else -p["size"] for p in pos)
+    if net_position != 0:
+        close_pos(acct_id, cid)
 
-    # If position already matches direction, skip
-    if (side == 0 and net_pos > 0) or (side == 1 and net_pos < 0):
-        return jsonify(status="ok",strategy="pivot",message="already in position"),200
+    # Place new market order for requested size in the direction of the signal
+    ent = place_market(acct_id, cid, side, size)
 
-    # Calculate flip size: sum of current position (to flatten) + desired new position
-    flip_size = abs(size + net_pos) if net_pos != 0 else size
-
-    # Place market order in direction of new signal
-    ent = place_market(acct_id, cid, side, flip_size)
-    trades=[t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"]==ent["orderId"]]
+    # Place new stop loss for *new* position only
+    trades = [t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"] == ent["orderId"]]
     tot = sum(t["size"] for t in trades)
-    price = None
-    if tot:
-        price = sum(t["price"]*t["size"] for t in trades) / tot
-    else:
-        price = ent.get("fillPrice")
+    price = (sum(t["price"] * t["size"] for t in trades) / tot) if tot else ent.get("fillPrice")
+    slp = price - STOP_LOSS_POINTS if side == 0 else price + STOP_LOSS_POINTS
+    sl = place_stop(acct_id, cid, exit_side, size, slp)
 
-    if price is None:
-        app.logger.error("Could not determine fill price from trades or entry response")
-        return jsonify(status="error", message="No fill price available"), 500
+    return jsonify(status="ok", strategy="pivot", entry=ent, stop=sl), 200
 
-    slp = price-STOP_LOSS_POINTS if side==0 else price+STOP_LOSS_POINTS
-    sl  = place_stop(acct_id, cid, exit_side, flip_size, slp)
-
-    return jsonify(status="ok",strategy="pivot",entry=ent,stop=sl),200
 
 
 # ─── Webhook Dispatcher ─────────────────────────────────
