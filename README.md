@@ -1,4 +1,4 @@
-````markdown
+
 # TradingView → ProjectX Order Execution Bot
 
 A lightweight Flask service that receives TradingView webhook alerts, executes bracketed orders on ProjectX, and enforces Topstep “get-flat” rules and trading hours.
