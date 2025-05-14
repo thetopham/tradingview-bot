@@ -182,8 +182,22 @@ def search_trades(since: datetime):
     resp.raise_for_status()
     return resp.json().get("trades", [])
 
-def search_contract(symbol: str) -> str:
+import re
+
+def search_contract(raw_symbol: str) -> str:
+    """
+    Normalize a TradingView ticker (e.g. "MES1!") down to its root
+    ("MES"), call POST /api/Contract/search, and pick the active or
+    first contract ID.
+    """
     ensure_token()
+
+    # 1) Extract the alphabetical root (e.g. "MES" from "MES1!")
+    m = re.match(r"([A-Za-z]+)", raw_symbol)
+    symbol = m.group(1) if m else raw_symbol
+    app.logger.info(f"Looking up contract for symbol root: {symbol}")
+
+    # 2) Call the search endpoint
     resp = requests.post(
         f"{PX_BASE}/api/Contract/search",
         json={"searchText": symbol, "live": True},
@@ -193,10 +207,20 @@ def search_contract(symbol: str) -> str:
         }
     )
     resp.raise_for_status()
-    for c in resp.json().get("contracts", []):
+    contracts = resp.json().get("contracts", [])
+
+    # 3) Prefer the one marked activeContract, else fallback to first
+    for c in contracts:
         if c.get("activeContract"):
+            app.logger.info(f" → matched activeContract ID {c['id']}")
             return c["id"]
-    raise ValueError(f"No active contract for '{symbol}'")
+
+    if contracts:
+        app.logger.warning(f" → no activeContract flagged, using first ID {contracts[0]['id']}")
+        return contracts[0]["id"]
+
+    raise ValueError(f"No contract found for symbol '{raw_symbol}' (root '{symbol}')")
+
 
 # ─── Webhook & Bracket Logic ──────────────────────────
 
