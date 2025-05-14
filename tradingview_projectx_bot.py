@@ -16,11 +16,11 @@ PX_BASE   = os.getenv("PROJECTX_BASE_URL")
 USER_NAME = os.getenv("PROJECTX_USERNAME")
 API_KEY   = os.getenv("PROJECTX_API_KEY")
 
-# Accounts will be loaded at startup
-ACCOUNTS = {}            # name -> id
-DEFAULT_ACCOUNT_NAME = None  # can set via .env if desired
+# Accounts will be discovered at runtime
+ACCOUNTS = {}             # name -> id
+DEFAULT_ACCOUNT_NAME = None
 
-# Bracket parameters (in price units)
+# Bracket params
 STOP_LOSS_POINTS = 10.0
 TP_POINTS        = [2.5, 5.0, 10.0]
 
@@ -28,9 +28,9 @@ app = Flask(__name__)
 token = None
 token_expiry = 0
 lock = threading.Lock()
-ACCOUNT_ID = None  # will be set per-request
+ACCOUNT_ID = None  # set per‐request
 
-# ─── Auth & Token Management ───────────────────────────
+# ─── Auth Helpers ──────────────────────────────────────
 def authenticate():
     global token, token_expiry
     resp = requests.post(
@@ -43,14 +43,14 @@ def authenticate():
     if not data.get("success"):
         raise RuntimeError(f"Auth failed: {data}")
     token = data["token"]
-    token_expiry = time.time() + 23 * 3600
+    token_expiry = time.time() + 23*3600
 
 def ensure_token():
     with lock:
         if token is None or time.time() >= token_expiry:
             authenticate()
 
-# ─── Account Discovery ─────────────────────────────────
+# ─── Account Discovery ────────────────────────────────
 def list_accounts(only_active=True):
     ensure_token()
     resp = requests.post(
@@ -65,12 +65,20 @@ def list_accounts(only_active=True):
     return resp.json().get("accounts", [])
 
 def build_account_map():
+    """Populate ACCOUNTS and DEFAULT_ACCOUNT_NAME."""
     global ACCOUNTS, DEFAULT_ACCOUNT_NAME
     accts = list_accounts()
     ACCOUNTS = {a["name"]: a["id"] for a in accts}
-    if DEFAULT_ACCOUNT_NAME is None and ACCOUNTS:
+    if not DEFAULT_ACCOUNT_NAME and ACCOUNTS:
         DEFAULT_ACCOUNT_NAME = next(iter(ACCOUNTS))
     app.logger.info(f"Loaded accounts: {ACCOUNTS}")
+    app.logger.info(f"Default account: {DEFAULT_ACCOUNT_NAME}")
+
+# ─── Initialize once before serving any requests ──────
+@app.before_first_request
+def init_bot():
+    authenticate()
+    build_account_map()
 
 # ─── Order & Position Helpers ─────────────────────────
 def place_order(payload):
@@ -90,7 +98,7 @@ def place_market(cid, side, size):
     return place_order({
         "accountId": ACCOUNT_ID,
         "contractId": cid,
-        "type": 2,      # Market
+        "type": 2,
         "side": side,
         "size": size
     })
@@ -99,7 +107,7 @@ def place_limit(cid, side, size, price):
     return place_order({
         "accountId": ACCOUNT_ID,
         "contractId": cid,
-        "type": 1,      # Limit
+        "type": 1,
         "side": side,
         "size": size,
         "limitPrice": price
@@ -109,7 +117,7 @@ def place_stop(cid, side, size, price):
     return place_order({
         "accountId": ACCOUNT_ID,
         "contractId": cid,
-        "type": 4,      # Stop
+        "type": 4,
         "side": side,
         "size": size,
         "stopPrice": price
@@ -167,15 +175,11 @@ def close_position(cid):
     resp.raise_for_status()
     return resp.json()
 
-# ─── Trade Lookup for Fill Price ───────────────────────
 def search_trades(since: datetime):
     ensure_token()
     resp = requests.post(
         f"{PX_BASE}/api/Trade/search",
-        json={
-            "accountId": ACCOUNT_ID,
-            "startTimestamp": since.isoformat()
-        },
+        json={"accountId": ACCOUNT_ID, "startTimestamp": since.isoformat()},
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}"
@@ -184,7 +188,6 @@ def search_trades(since: datetime):
     resp.raise_for_status()
     return resp.json().get("trades", [])
 
-# ─── Contract Lookup ───────────────────────────────────
 def search_contract(symbol: str) -> str:
     ensure_token()
     resp = requests.post(
@@ -199,7 +202,7 @@ def search_contract(symbol: str) -> str:
     for c in resp.json().get("contracts", []):
         if c.get("activeContract"):
             return c["id"]
-    raise ValueError(f"No active contract for symbol '{symbol}'")
+    raise ValueError(f"No active contract for '{symbol}'")
 
 # ─── Webhook & Bracket Logic ──────────────────────────
 @app.route("/webhook", methods=["POST"])
@@ -209,14 +212,14 @@ def tv_webhook():
     if sig not in ("BUY", "SELL", "FLAT"):
         return jsonify({"error": "invalid signal"}), 400
 
-    # Select account by name (defaults to first loaded)
-    acct_name = data.get("account", DEFAULT_ACCOUNT_NAME)
-    if acct_name not in ACCOUNTS:
-        return jsonify({"error": f"Unknown account '{acct_name}'"}), 400
+    # pick account
+    acct = data.get("account", DEFAULT_ACCOUNT_NAME)
+    if acct not in ACCOUNTS:
+        return jsonify({"error": f"Unknown account '{acct}'"}), 400
     global ACCOUNT_ID
-    ACCOUNT_ID = ACCOUNTS[acct_name]
+    ACCOUNT_ID = ACCOUNTS[acct]
 
-    # Manual flatten
+    # FLAT
     if sig == "FLAT":
         for o in search_open_orders():
             cancel_order(o["id"])
@@ -224,65 +227,57 @@ def tv_webhook():
             close_position(p["contractId"])
         return jsonify({"status": "ok", "message": "Flattened"}), 200
 
-    # BUY or SELL bracket
+    # BUY/SELL bracket
     sym        = data.get("symbol")
     size_total = int(data.get("size", 1))
     cid        = search_contract(sym)
-    side       = 0 if sig == "BUY" else 1
+    side       = 0 if sig=="BUY" else 1
     exit_side  = 1 - side
 
-    # Cancel/close only if opposite position exists
-    positions = [p for p in search_positions() if p["contractId"] == cid]
-    if side == 0:
-        has_opp = any(p["type"] == 2 for p in positions)
-    else:
-        has_opp = any(p["type"] == 1 for p in positions)
+    # close opposite
+    pos = [p for p in search_positions() if p["contractId"]==cid]
+    has_opp = any((side==0 and p["type"]==2) or (side==1 and p["type"]==1) for p in pos)
     if has_opp:
         for o in search_open_orders():
-            if o["contractId"] == cid:
+            if o["contractId"]==cid:
                 cancel_order(o["id"])
-        for p in positions:
-            if (side == 0 and p["type"] == 2) or (side == 1 and p["type"] == 1):
+        for p in pos:
+            if (side==0 and p["type"]==2) or (side==1 and p["type"]==1):
                 close_position(cid)
 
     try:
-        # Market entry
         entry    = place_market(cid, side, size_total)
         order_id = entry["orderId"]
 
-        # Compute fill price via trades
+        # compute fill
         since     = datetime.utcnow() - timedelta(minutes=5)
-        trades    = [t for t in search_trades(since) if t["orderId"] == order_id]
-        total_sz  = sum(t["size"] for t in trades)
-        fill_price = (
-            sum(t["price"] * t["size"] for t in trades) / total_sz
-        ) if total_sz else None
-        if fill_price is None:
-            raise RuntimeError("Could not determine fill price from trades")
+        trades    = [t for t in search_trades(since) if t["orderId"]==order_id]
+        tot       = sum(t["size"] for t in trades)
+        fill_pr   = (sum(t["price"]*t["size"] for t in trades)/tot) if tot else None
+        if fill_pr is None:
+            raise RuntimeError("no fill price from trades")
 
-        # Stop-loss
-        sl_price = (fill_price - STOP_LOSS_POINTS) if side == 0 else (fill_price + STOP_LOSS_POINTS)
-        place_stop(cid, exit_side, size_total, sl_price)
+        # stop
+        sl = (fill_pr-STOP_LOSS_POINTS) if side==0 else (fill_pr+STOP_LOSS_POINTS)
+        place_stop(cid, exit_side, size_total, sl)
 
-        # Take-profit legs
-        n_tp       = len(TP_POINTS)
-        base_slice = size_total // n_tp
-        rem        = size_total - base_slice * n_tp
-        slices     = [base_slice] * n_tp
-        slices[-1] += rem
-        for pts, sz in zip(TP_POINTS, slices):
-            tp_price = (fill_price + pts) if side == 0 else (fill_price - pts)
-            place_limit(cid, exit_side, sz, tp_price)
+        # tps
+        n_tp  = len(TP_POINTS)
+        base  = size_total//n_tp
+        rem   = size_total-base*n_tp
+        slices= [base]*n_tp; slices[-1]+=rem
+        for pts,sz in zip(TP_POINTS,slices):
+            tp = (fill_pr+pts) if side==0 else (fill_pr-pts)
+            place_limit(cid, exit_side, sz, tp)
 
-        return jsonify({"status": "ok", "entry": entry}), 200
+        return jsonify({"status":"ok","entry":entry}),200
 
     except Exception as e:
         app.logger.error(f"Webhook error: {e}", exc_info=True)
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return jsonify({"status":"error","message":str(e)}),500
 
-# ─── Main ───────────────────────────────────────────────
-authenticate()
-build_account_map()
 
-if __name__ == "__main__":
+# ─── Launch ─────────────────────────────────────────────
+if __name__=="__main__":
+    # only used if you `python tradingview_projectx_bot.py`
     app.run(host="0.0.0.0", port=TV_PORT)
