@@ -188,8 +188,7 @@ def search_trades(since: datetime):
 
 def search_contract(raw_symbol: str) -> str:
     """
-    Lookup by arbitrary raw_symbol via POST /api/Contract/search
-    (used as a fallback when no contractId/contract field is provided).
+    Fallback: lookup via POST /api/Contract/search using raw_symbol.
     """
     ensure_token()
     resp = requests.post(
@@ -202,7 +201,6 @@ def search_contract(raw_symbol: str) -> str:
     )
     resp.raise_for_status()
     contracts = resp.json().get("contracts", [])
-    # pick activeContract first, then fallback to first
     for c in contracts:
         if c.get("activeContract"):
             return c["id"]
@@ -247,9 +245,10 @@ def tv_webhook():
             close_position(p["contractId"])
         return jsonify({"status": "ok", "message": "Flattened"}), 200
 
-    # determine contractId (in preference order)
+    # ── Resolve contractId ───────────────────────────────
     if "contractId" in data:
         cid = int(data["contractId"])
+
     elif "contract" in data:
         raw = data["contract"]
         cid = CONTRACT_MAP.get(raw)
@@ -271,12 +270,23 @@ def tv_webhook():
             match = next((c for c in contracts if c.get("activeContract")), contracts[0])
             cid = match["id"]
             CONTRACT_MAP[raw] = cid
+
+    # **New**: if they (mistakenly) sent your CME code in "symbol", catch that too:
+    elif data.get("symbol", "").startswith("CON."):
+        raw = data["symbol"]
+        cid = CONTRACT_MAP.get(raw)
+        if not cid:
+            app.logger.info(f"Looking up raw contract code (via symbol): {raw}")
+            cid = search_contract(raw)
+            CONTRACT_MAP[raw] = cid
+
     else:
+        # legacy fallback: symbol → root lookup
         cid = search_contract(data.get("symbol"))
 
     app.logger.info(f"Using contractId={cid}")
 
-    # BUY/SELL bracket
+    # ── Place bracket ───────────────────────────────────
     size_total = int(data.get("size", 1))
     side       = 0 if sig == "BUY" else 1
     exit_side  = 1 - side
@@ -293,23 +303,23 @@ def tv_webhook():
                 close_position(cid)
 
     try:
-        # entry
+        # 1) Market entry
         entry    = place_market(cid, side, size_total)
         order_id = entry["orderId"]
 
-        # compute fill price
+        # 2) Compute weighted fill price
         since     = datetime.utcnow() - timedelta(minutes=5)
         trades    = [t for t in search_trades(since) if t["orderId"] == order_id]
         tot       = sum(t["size"] for t in trades)
         fill_pr   = (sum(t["price"] * t["size"] for t in trades) / tot) if tot else None
         if fill_pr is None:
-            raise RuntimeError("no fill price from trades")
+            raise RuntimeError("No fill price from trades")
 
-        # stop-loss
+        # 3) Stop-loss
         sl_price = (fill_pr - STOP_LOSS_POINTS) if side == 0 else (fill_pr + STOP_LOSS_POINTS)
         place_stop(cid, exit_side, size_total, sl_price)
 
-        # take-profits
+        # 4) Take-profits
         n_tp   = len(TP_POINTS)
         base   = size_total // n_tp
         rem    = size_total - base * n_tp
