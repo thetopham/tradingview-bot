@@ -74,12 +74,6 @@ def build_account_map():
     app.logger.info(f"Loaded accounts: {ACCOUNTS}")
     app.logger.info(f"Default account: {DEFAULT_ACCOUNT_NAME}")
 
-# ─── Initialize once before serving any requests ──────
-@app.before_first_request
-def init_bot():
-    authenticate()
-    build_account_map()
-
 # ─── Order & Position Helpers ─────────────────────────
 def place_order(payload):
     ensure_token()
