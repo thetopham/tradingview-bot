@@ -205,6 +205,19 @@ def search_contract(symbol: str) -> str:
     raise ValueError(f"No active contract for '{symbol}'")
 
 # ─── Webhook & Bracket Logic ──────────────────────────
+
+initialized = False
+
+@app.before_request
+def init_once():
+    global initialized
+    if not initialized:
+        authenticate()
+        build_account_map()
+        initialized = True
+        app.logger.info(f"Initialized, default account = {DEFAULT_ACCOUNT_NAME}")
+
+
 @app.route("/webhook", methods=["POST"])
 def tv_webhook():
     data = request.get_json()
