@@ -214,7 +214,11 @@ def run_bracket(acct_id, sym, sig, size):
             time.sleep(1)
 
         cancel(acct_id, st1)
-        new2 = place_stop(acct_id, cid, exit_side, c, price)
+        if side == 0:  # BUY
+            slp2 = price - 5
+        else:          # SELL
+            slp2 = price + 5
+        new2 = place_stop(acct_id, cid, exit_side, c, slp2)
         st2 = new2["orderId"]
 
         # Step 3: Wait for TP3 or SL to be hit
