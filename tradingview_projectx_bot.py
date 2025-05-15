@@ -195,7 +195,7 @@ def run_bracket(acct_id, sym, sig, size):
             if not is_open(sl_id):
                 cancel_all_tps()
                 return
-            time.sleep(1)
+            time.sleep(2)
 
         cancel(acct_id, sl_id)
         new1 = place_stop(acct_id, cid, exit_side, b + c, slp)
@@ -211,7 +211,7 @@ def run_bracket(acct_id, sym, sig, size):
             if not is_open(st1):
                 cancel_all_tps()
                 return
-            time.sleep(1)
+            time.sleep(2)
 
         cancel(acct_id, st1)
         if side == 0:  # BUY
@@ -231,7 +231,7 @@ def run_bracket(acct_id, sym, sig, size):
             if not is_open(st2):
                 cancel_all_tps()
                 return
-            time.sleep(1)
+            time.sleep(2)
 
         # All contracts closed at TP3, nothing to clean up, but do it for completeness
         cancel_all_tps()
