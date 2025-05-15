@@ -328,7 +328,7 @@ def run_bracket(acct_id, sym, sig, size):
                 app.logger.info("Watcher: Initial SL filled.")
                 cancel_all_tps()
                 return
-            time.sleep(2)
+            time.sleep(5)
 
         app.logger.info(f"Watcher: Cancelling initial SL orderId={sl_id}")
         cancel(acct_id, sl_id)
@@ -350,7 +350,7 @@ def run_bracket(acct_id, sym, sig, size):
                 app.logger.info("Watcher: SL after TP1 hit. Cleaning up.")
                 cancel_all_tps()
                 return
-            time.sleep(2)
+            time.sleep(5)
 
         app.logger.info(f"Watcher: Cancelling SL after TP1 orderId={st1}")
         cancel(acct_id, st1)
@@ -374,7 +374,7 @@ def run_bracket(acct_id, sym, sig, size):
                 app.logger.info("Watcher: Final SL hit. Cleaning up.")
                 cancel_all_tps()
                 return
-            time.sleep(2)
+            time.sleep(5)
 
         app.logger.info("Watcher: All done, cleaned up any stray orders.")
         cancel_all_tps()
