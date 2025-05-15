@@ -33,7 +33,7 @@ OVERRIDE_CONTRACT_ID = "CON.F.US.MES.M25"
 
 # Central Time & Get-Flat window
 CT = pytz.timezone("America/Chicago")
-GET_FLAT_START = dtime(15,10)
+GET_FLAT_START = dtime(15,7)
 GET_FLAT_END   = dtime(17,0)
 
 app = Flask(__name__)
