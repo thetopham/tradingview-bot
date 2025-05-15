@@ -13,6 +13,7 @@ TV_PORT       = int(os.getenv("TV_PORT", 5000))
 PX_BASE       = os.getenv("PROJECTX_BASE_URL")
 USER_NAME     = os.getenv("PROJECTX_USERNAME")
 API_KEY       = os.getenv("PROJECTX_API_KEY")
+N8N_AI_URL    = "https://n8n.thetopham.com/webhook/5c793395-f218-4a49-a620-51d297f2dbfb"
 
 # Build account map from .env: any var ACCOUNT_<NAME>=<ID>
 ACCOUNTS = {}
@@ -90,6 +91,35 @@ def get_contract(sym):
         if c.get("activeContract"): return c["id"]
     if ctrs: return ctrs[0]["id"]
     raise ValueError(f"No contract '{root}'")
+
+# ─── LLM (AI Vision, via n8n) Filter for Epsilon ──────
+def ai_trade_decision(account, strat, sig, sym, size):
+    payload = {
+        "account": account,
+        "strategy": strat,
+        "signal": sig,
+        "symbol": sym,
+        "size": size
+    }
+    try:
+        resp = requests.post(N8N_AI_URL, json=payload, timeout=60)
+        resp.raise_for_status()
+        data = resp.json()
+        dec = str(data.get('action', '')).upper()
+        reason = data.get('reason', '')
+        chart_url = data.get('chart_url', '')
+        # Log AI's reasoning and chart for review
+        log_ai_decision(account, strat, sig, sym, size, dec, reason, chart_url)
+        # Only approve BUY or SELL (not HOLD, etc)
+        return dec in ("BUY", "SELL"), reason, chart_url
+    except Exception as e:
+        # If AI or n8n is down, default to block for safety
+        log_ai_decision(account, strat, sig, sym, size, "ERROR", str(e), "")
+        return False, f"AI error: {str(e)}", None
+
+def log_ai_decision(account, strat, sig, sym, size, dec, reason, chart_url):
+    with open("ai_trading_log.txt", "a") as f:
+        f.write(f"{datetime.now()} | {account} | {strat} | {sig} | {sym} | size={size} | {dec} | {reason} | {chart_url}\n")
 
 # ─── Strategy: Bracket ─────────────────────────────────
 def run_bracket(acct_id, sym, sig, size):
@@ -224,7 +254,6 @@ def run_pivot(acct_id, sym, sig, size):
 
     return jsonify(status="ok", strategy="pivot", message="position set", trades=trade_log), 200
 
-
 # ─── Webhook Dispatcher ─────────────────────────────────
 @app.route("/webhook",methods=["POST"])
 def tv_webhook():
@@ -249,10 +278,17 @@ def tv_webhook():
     if sig not in ("BUY","SELL","FLAT"):
         return jsonify(error="invalid signal"),400
 
-    # enforce get-flat window for both
     now = datetime.now(CT)
     if in_get_flat(now) and sig!="FLAT":
         sig = "FLAT"
+
+    # AI implementation for epsilon account, using n8n vision workflow
+    if acct == "epsilon":
+        allow, reason, chart_url = ai_trade_decision(acct, strat, sig, sym, size)
+        if not allow:
+            app.logger.info(f"AI BLOCKED TRADE: {sig} {sym} size={size} reason={reason}")
+            return jsonify(status="blocked", reason=reason, chart=chart_url), 200
+        app.logger.info(f"AI APPROVED TRADE: {sig} {sym} size={size} reason={reason}")
 
     if strat=="bracket":
         return run_bracket(acct_id, sym, sig, size)
