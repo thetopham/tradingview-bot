@@ -633,7 +633,7 @@ def tv_webhook():
         return jsonify(error=f"Unknown account '{acct}'"),400
     acct_id = ACCOUNTS[acct]
 
-    if strat not in ("bracket","pivot"):
+    if strat not in ("bracket","pivot","brackmod"):
         app.logger.error(f"Unknown strategy '{strat}'")
         return jsonify(error=f"Unknown strategy '{strat}'"),400
     if sig not in ("BUY","SELL","FLAT"):
