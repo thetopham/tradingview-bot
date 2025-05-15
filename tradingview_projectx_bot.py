@@ -171,23 +171,67 @@ def run_bracket(acct_id, sym, sig, size):
 
     # watcher for TP1→SL adjust, TP2→BE, TP3→cancel
     def watcher():
-        a,b,c = slices
-        # wait tp1
-        while tp_ids[0] in {o["id"] for o in search_open(acct_id)}: time.sleep(5)
-        cancel(acct_id, sl_id)
-        new1=place_stop(acct_id, cid, exit_side, b+c, slp)
-        st1=new1["orderId"]
+    a, b, c = slices
 
-        # wait tp2
-        while tp_ids[1] in {o["id"] for o in search_open(acct_id)}: time.sleep(5)
-        cancel(acct_id, st1)
-        new2=place_stop(acct_id, cid, exit_side, c, price)
-        st2=new2["orderId"]
+    def is_open(order_id):
+        return order_id in {o["id"] for o in search_open(acct_id)}
 
-        # wait tp3, then remove last SL
-        while tp_ids[2] in {o["id"] for o in search_open(acct_id)}: time.sleep(5)
-        cancel(acct_id, st2)
+    def cancel_all_tps():
+        open_orders = search_open(acct_id)
+        for o in open_orders:
+            if o["contractId"] == cid and o["type"] == 1 and o["id"] in tp_ids:  # 1 = LIMIT ORDER
+                cancel(acct_id, o["id"])
 
+    def is_flat():
+        return not any(p for p in search_pos(acct_id) if p["contractId"] == cid)
+
+    # Step 1: Wait for TP1 or SL to be hit
+    while True:
+        if is_flat():
+            cancel_all_tps()
+            return
+        if not is_open(tp_ids[0]):
+            break
+        if not is_open(sl_id):
+            cancel_all_tps()
+            return
+        time.sleep(1)
+
+    cancel(acct_id, sl_id)
+    new1 = place_stop(acct_id, cid, exit_side, b + c, slp)
+    st1 = new1["orderId"]
+
+    # Step 2: Wait for TP2 or SL to be hit
+    while True:
+        if is_flat():
+            cancel_all_tps()
+            return
+        if not is_open(tp_ids[1]):
+            break
+        if not is_open(st1):
+            cancel_all_tps()
+            return
+        time.sleep(1)
+
+    cancel(acct_id, st1)
+    new2 = place_stop(acct_id, cid, exit_side, c, price)
+    st2 = new2["orderId"]
+
+    # Step 3: Wait for TP3 or SL to be hit
+    while True:
+        if is_flat():
+            cancel_all_tps()
+            return
+        if not is_open(tp_ids[2]):
+            break
+        if not is_open(st2):
+            cancel_all_tps()
+            return
+        time.sleep(1)
+
+    # All contracts closed at TP3, nothing to clean up, but do it for completeness
+    cancel_all_tps()
+    
     threading.Thread(target=watcher,daemon=True).start()
     return jsonify(status="ok",strategy="bracket",entry=ent),200
 
