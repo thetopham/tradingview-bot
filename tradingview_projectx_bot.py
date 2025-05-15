@@ -38,23 +38,20 @@ CT = pytz.timezone("America/Chicago")
 GET_FLAT_START = dtime(15,7)
 GET_FLAT_END   = dtime(17,0)
 
-logging.basicConfig(level=logging.INFO)
 print("MODULE LOADED")
 app = Flask(__name__)
-handler = logging.StreamHandler(sys.stdout)
-handler.setLevel(logging.INFO)
-app.logger.addHandler(handler)
-app.logger.propagate = True
+
+# Ensure Flask logging is integrated with Gunicorn if available
+gunicorn_logger = logging.getLogger('gunicorn.error')
+if gunicorn_logger.handlers:
+    app.logger.handlers = gunicorn_logger.handlers
+    app.logger.setLevel(gunicorn_logger.level)
+else:
+    app.logger.setLevel(logging.INFO)
+
 _token = None
 _token_expiry = 0
 lock = threading.Lock()
-
-
-gunicorn_logger = logging.getLogger('gunicorn.error')
-if gunicorn_logger.handlers:
-    for handler in gunicorn_logger.handlers:
-        app.logger.addHandler(handler)
-    app.logger.setLevel(gunicorn_logger.level)
 
 
 def in_get_flat(now=None):
