@@ -445,7 +445,7 @@ def run_brackmod(acct_id, sym, sig, size):
     app.logger.info(f"Entry fill price: {price}")
 
     # initial SL
-    STOP_LOSS_POINTS = 10.0
+    STOP_LOSS_POINTS = 5.75
     slp = price - STOP_LOSS_POINTS if side==0 else price + STOP_LOSS_POINTS
     sl  = place_stop(acct_id, cid, exit_side, size, slp)
     sl_id = sl["orderId"]
