@@ -382,6 +382,165 @@ def run_bracket(acct_id, sym, sig, size):
     threading.Thread(target=watcher,daemon=True).start()
     return jsonify(status="ok",strategy="bracket",entry=ent),200
 
+def run_brackmod(acct_id, sym, sig, size):
+    app.logger.info(f"Running brackmod strategy: acct_id={acct_id}, sym={sym}, sig={sig}, size={size}")
+    cid      = get_contract(sym)
+    side     = 0 if sig=="BUY" else 1
+    exit_side= 1-side
+
+    pos = [p for p in search_pos(acct_id) if p["contractId"]==cid]
+    app.logger.info(f"Open positions for this contract: {pos}")
+
+    # skip same side
+    if any((side==0 and p["type"]==1) or (side==1 and p["type"]==2) for p in pos):
+        app.logger.info("Skipping signal, already in same-side position.")
+        return jsonify(status="ok",strategy="brackmod",message="skip same"),200
+
+    # flatten opposite (SAFE FLIP)
+    if any((side==0 and p["type"]==2) or (side==1 and p["type"]==1) for p in pos):
+        app.logger.info("Flattening opposite position(s)...")
+        open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
+        for o in open_orders:
+            app.logger.info(f"Cancelling open order: {o}")
+            try:
+                cancel(acct_id, o["id"])
+            except Exception as e:
+                app.logger.error(f"Error cancelling order {o['id']}: {e}")
+        for p in pos:
+            app.logger.info(f"Closing open position: {p}")
+            try:
+                close_pos(acct_id, p["contractId"])
+            except Exception as e:
+                app.logger.error(f"Error closing position {p['contractId']}: {e}")
+        max_wait = 30
+        waited = 0
+        while True:
+            open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
+            positions   = [p for p in search_pos(acct_id) if p["contractId"] == cid]
+            if not open_orders and not positions:
+                app.logger.info("All old orders/positions cleared. Proceeding to open new bracket.")
+                break
+            if waited >= max_wait:
+                app.logger.warning(f"Timeout waiting for old orders/positions to clear after {max_wait}s! Proceeding anyway.")
+                break
+            app.logger.info(f"Waiting for cleanup... ({len(open_orders)} orders, {len(positions)} positions remain)")
+            time.sleep(1)
+            waited += 1
+
+    # market entry
+    ent = place_market(acct_id, cid, side, size)
+    oid = ent["orderId"]
+    app.logger.info(f"Placed market order, orderId={oid}")
+
+    trades = [t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"]==oid]
+    tot = sum(t["size"] for t in trades)
+    price = None
+    if tot:
+        price = sum(t["price"]*t["size"] for t in trades)/tot
+    else:
+        price = ent.get("fillPrice")
+    if price is None:
+        app.logger.error("Could not determine fill price from trades or entry response")
+        return jsonify(status="error", message="No fill price available"), 500
+    app.logger.info(f"Entry fill price: {price}")
+
+    # initial SL
+    STOP_LOSS_POINTS = 10.0
+    slp = price - STOP_LOSS_POINTS if side==0 else price + STOP_LOSS_POINTS
+    sl  = place_stop(acct_id, cid, exit_side, size, slp)
+    sl_id = sl["orderId"]
+    app.logger.info(f"Placed initial stop loss: price={slp}, orderId={sl_id}")
+
+    # TP: 2 at TP1, 1 at TP2
+    TP_POINTS = [2.5, 5.0]
+    slices = [2, 1]
+    tp_ids=[]
+    for pts, amt in zip(TP_POINTS, slices):
+        px = price + pts if side == 0 else price - pts
+        r = place_limit(acct_id, cid, exit_side, amt, px)
+        tp_ids.append(r["orderId"])
+        app.logger.info(f"Placed TP leg: target={px}, size={amt}, orderId={r['orderId']}")
+
+    # watcher for TP1→SL adjust, TP2→cancel
+    def watcher():
+        a, b = slices
+        app.logger.info(f"Watcher_ab started for orderId={oid}. Slices: {slices}")
+
+        def is_open(order_id):
+            try:
+                res = order_id in {o["id"] for o in search_open(acct_id)}
+                app.logger.debug(f"is_open({order_id}) -> {res}")
+                return res
+            except Exception as e:
+                app.logger.error(f"[watcher_ab] API error in is_open: {e}")
+                time.sleep(5)
+                return False
+
+        def cancel_all_tps():
+            try:
+                open_orders = search_open(acct_id)
+                for o in open_orders:
+                    if o["contractId"] == cid and o["type"] == 1 and o["id"] in tp_ids:
+                        app.logger.info(f"Watcher_ab cancelling TP orderId={o['id']}")
+                        cancel(acct_id, o["id"])
+            except Exception as e:
+                app.logger.error(f"[watcher_ab] API error in cancel_all_tps: {e}")
+                time.sleep(5)
+
+        def is_flat():
+            try:
+                val = not any(p for p in search_pos(acct_id) if p["contractId"] == cid)
+                app.logger.debug(f"is_flat() -> {val}")
+                return val
+            except Exception as e:
+                app.logger.error(f"[watcher_ab] API error in is_flat: {e}")
+                time.sleep(5)
+                return False
+
+        # Step 1: Wait for TP1 or SL to be hit
+        app.logger.info("Watcher_ab: waiting for TP1 or SL")
+        while True:
+            if is_flat():
+                app.logger.info("Watcher_ab: Position flat before TP1. Cleaning up.")
+                cancel_all_tps()
+                return
+            if not is_open(tp_ids[0]):
+                app.logger.info("Watcher_ab: TP1 filled.")
+                break
+            if not is_open(sl_id):
+                app.logger.info("Watcher_ab: Initial SL filled.")
+                cancel_all_tps()
+                return
+            time.sleep(5)
+
+        app.logger.info(f"Watcher_ab: Cancelling initial SL orderId={sl_id}")
+        cancel(acct_id, sl_id)
+        new1 = place_stop(acct_id, cid, exit_side, b, slp)
+        st1 = new1["orderId"]
+        app.logger.info(f"Watcher_ab: Re-placed SL for {b} contracts at {slp}, orderId={st1}")
+
+        # Step 2: Wait for TP2 or SL to be hit
+        app.logger.info("Watcher_ab: waiting for TP2 or SL")
+        while True:
+            if is_flat():
+                app.logger.info("Watcher_ab: Position flat before TP2. Cleaning up.")
+                cancel_all_tps()
+                return
+            if not is_open(tp_ids[1]):
+                app.logger.info("Watcher_ab: TP2 filled. Done.")
+                break
+            if not is_open(st1):
+                app.logger.info("Watcher_ab: SL after TP1 hit. Cleaning up.")
+                cancel_all_tps()
+                return
+            time.sleep(5)
+
+        app.logger.info("Watcher_ab: All done, cleaned up any stray orders.")
+        cancel_all_tps()
+
+    threading.Thread(target=watcher,daemon=True).start()
+    return jsonify(status="ok",strategy="brackmod",entry=ent),200
+
 
 # ─── Strategy: Pivot ────────────────────────────────────
 def run_pivot(acct_id, sym, sig, size):
@@ -496,6 +655,8 @@ def tv_webhook():
 
     if strat=="bracket":
         return run_bracket(acct_id, sym, sig, size)
+    elif strat == "brackmod":
+        return run_brackmod(acct_id, sym, sig, size)
     else:
         return run_pivot(acct_id, sym, sig, size)
 
