@@ -170,7 +170,7 @@ def run_bracket(acct_id, sym, sig, size):
         tp_ids.append(r["orderId"])
 
     # watcher for TP1→SL adjust, TP2→BE, TP3→cancel
-    def watcher():
+   def watcher():
     a, b, c = slices
 
     def is_open(order_id):
@@ -231,6 +231,7 @@ def run_bracket(acct_id, sym, sig, size):
 
     # All contracts closed at TP3, nothing to clean up, but do it for completeness
     cancel_all_tps()
+
     
     threading.Thread(target=watcher,daemon=True).start()
     return jsonify(status="ok",strategy="bracket",entry=ent),200
