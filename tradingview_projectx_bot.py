@@ -48,10 +48,9 @@ lock = threading.Lock()
 
 gunicorn_logger = logging.getLogger('gunicorn.error')
 if gunicorn_logger.handlers:
-    app.logger.handlers = gunicorn_logger.handlers
+    for handler in gunicorn_logger.handlers:
+        app.logger.addHandler(handler)
     app.logger.setLevel(gunicorn_logger.level)
-else:
-    app.logger.setLevel(logging.INFO)
 
 
 def in_get_flat(now=None):
