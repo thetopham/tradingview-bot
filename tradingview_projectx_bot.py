@@ -6,6 +6,7 @@ from flask import Flask, request, jsonify, g
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, time as dtime
 import pytz
+import logging
 
 # ─── Load config ───────────────────────────────────────
 load_dotenv()
@@ -36,12 +37,15 @@ CT = pytz.timezone("America/Chicago")
 GET_FLAT_START = dtime(15,7)
 GET_FLAT_END   = dtime(17,0)
 
+logging.basicConfig(level=logging.INFO)
+print("MODULE LOADED")
 app = Flask(__name__)
+app.logger.propagate = True
 _token = None
 _token_expiry = 0
 lock = threading.Lock()
 
-import logging
+
 gunicorn_logger = logging.getLogger('gunicorn.error')
 if gunicorn_logger.handlers:
     app.logger.handlers = gunicorn_logger.handlers
@@ -449,6 +453,7 @@ def run_pivot(acct_id, sym, sig, size):
 # ─── Webhook Dispatcher ─────────────────────────────────
 @app.route("/webhook",methods=["POST"])
 def tv_webhook():
+    print("WEBHOOK FIRED")
     app.logger.info("Received webhook POST.")
     data = request.get_json()
     # Secret check
