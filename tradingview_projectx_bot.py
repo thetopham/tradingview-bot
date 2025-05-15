@@ -169,21 +169,35 @@ def run_bracket(acct_id, sym, sig, size):
         r=place_limit(acct_id, cid, exit_side, amt, px)
         tp_ids.append(r["orderId"])
 
-    # watcher for TP1→SL adjust, TP2→BE, TP3→cancel
+    # watcher for TP1→SL adjust, TP2→move SL to -5, TP3→cancel
     def watcher():
         a, b, c = slices
 
         def is_open(order_id):
-            return order_id in {o["id"] for o in search_open(acct_id)}
+            try:
+                return order_id in {o["id"] for o in search_open(acct_id)}
+            except Exception as e:
+                print(f"[watcher] API error in is_open: {e}")
+                time.sleep(5)
+                return False
 
         def cancel_all_tps():
-            open_orders = search_open(acct_id)
-            for o in open_orders:
-                if o["contractId"] == cid and o["type"] == 1 and o["id"] in tp_ids:  # 1 = LIMIT ORDER
-                    cancel(acct_id, o["id"])
+            try:
+                open_orders = search_open(acct_id)
+                for o in open_orders:
+                    if o["contractId"] == cid and o["type"] == 1 and o["id"] in tp_ids:  # 1 = LIMIT ORDER
+                        cancel(acct_id, o["id"])
+            except Exception as e:
+                print(f"[watcher] API error in cancel_all_tps: {e}")
+                time.sleep(5)
 
         def is_flat():
-            return not any(p for p in search_pos(acct_id) if p["contractId"] == cid)
+            try:
+                return not any(p for p in search_pos(acct_id) if p["contractId"] == cid)
+            except Exception as e:
+                print(f"[watcher] API error in is_flat: {e}")
+                time.sleep(5)
+                return False
 
         # Step 1: Wait for TP1 or SL to be hit
         while True:
@@ -214,6 +228,7 @@ def run_bracket(acct_id, sym, sig, size):
             time.sleep(2)
 
         cancel(acct_id, st1)
+        # Move SL to entry -5 (for BUY) or entry +5 (for SELL)
         if side == 0:  # BUY
             slp2 = price - 5
         else:          # SELL
