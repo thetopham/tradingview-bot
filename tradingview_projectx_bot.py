@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from datetime import datetime, timedelta, time as dtime
 import pytz
 import logging
+import sys
 
 # ─── Load config ───────────────────────────────────────
 load_dotenv()
@@ -40,6 +41,9 @@ GET_FLAT_END   = dtime(17,0)
 logging.basicConfig(level=logging.INFO)
 print("MODULE LOADED")
 app = Flask(__name__)
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.INFO)
+app.logger.addHandler(handler)
 app.logger.propagate = True
 _token = None
 _token_expiry = 0
