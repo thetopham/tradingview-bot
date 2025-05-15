@@ -196,15 +196,39 @@ def run_bracket(acct_id, sym, sig, size):
         app.logger.info("Skipping signal, already in same-side position.")
         return jsonify(status="ok",strategy="bracket",message="skip same"),200
 
-    # flatten opposite
+    # flatten opposite (SAFE FLIP)
     if any((side==0 and p["type"]==2) or (side==1 and p["type"]==1) for p in pos):
         app.logger.info("Flattening opposite position(s)...")
-        for o in search_open(acct_id): 
+        # Cancel ALL open orders for this contract (TP, SL, entry, etc)
+        open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
+        for o in open_orders:
             app.logger.info(f"Cancelling open order: {o}")
-            cancel(acct_id, o["id"])
-        for p in pos: 
+            try:
+                cancel(acct_id, o["id"])
+            except Exception as e:
+                app.logger.error(f"Error cancelling order {o['id']}: {e}")
+        # Close ALL positions for this contract
+        for p in pos:
             app.logger.info(f"Closing open position: {p}")
-            close_pos(acct_id, p["contractId"])
+            try:
+                close_pos(acct_id, p["contractId"])
+            except Exception as e:
+                app.logger.error(f"Error closing position {p['contractId']}: {e}")
+        # Wait for cleanup (all orders/positions gone for this contract)
+        max_wait = 30
+        waited = 0
+        while True:
+            open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
+            positions   = [p for p in search_pos(acct_id) if p["contractId"] == cid]
+            if not open_orders and not positions:
+                app.logger.info("All old orders/positions cleared. Proceeding to open new bracket.")
+                break
+            if waited >= max_wait:
+                app.logger.warning(f"Timeout waiting for old orders/positions to clear after {max_wait}s! Proceeding anyway.")
+                break
+            app.logger.info(f"Waiting for cleanup... ({len(open_orders)} orders, {len(positions)} positions remain)")
+            time.sleep(1)
+            waited += 1
 
     # market entry
     ent = place_market(acct_id, cid, side, size)
@@ -344,6 +368,7 @@ def run_bracket(acct_id, sym, sig, size):
 
     threading.Thread(target=watcher,daemon=True).start()
     return jsonify(status="ok",strategy="bracket",entry=ent),200
+
 
 # ─── Strategy: Pivot ────────────────────────────────────
 def run_pivot(acct_id, sym, sig, size):
