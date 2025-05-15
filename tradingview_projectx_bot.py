@@ -41,6 +41,15 @@ _token = None
 _token_expiry = 0
 lock = threading.Lock()
 
+import logging
+gunicorn_logger = logging.getLogger('gunicorn.error')
+if gunicorn_logger.handlers:
+    app.logger.handlers = gunicorn_logger.handlers
+    app.logger.setLevel(gunicorn_logger.level)
+else:
+    app.logger.setLevel(logging.INFO)
+
+
 def in_get_flat(now=None):
     if now is None: now = datetime.now(CT)
     t = now.timetz() if hasattr(now, "timetz") else now
