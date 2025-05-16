@@ -199,6 +199,18 @@ def flatten_contract(acct_id, cid, timeout=7):
         return False
     return True
 
+def cancel_all_stops(acct_id, cid):
+    try:
+        open_orders = search_open(acct_id)
+        for o in open_orders:
+            if o["contractId"] == cid and o["type"] == 4:  # 4 = STOP ORDER
+                app.logger.info(f"Watcher cancelling STOP orderId={o['id']}")
+                cancel(acct_id, o["id"])
+    except Exception as e:
+        app.logger.error(f"[watcher_ab] API error in cancel_all_stops: {e}")
+        time.sleep(5)
+
+
 
 # ─── Contract Lookup ───────────────────────────────────
 def get_contract(sym):
@@ -306,7 +318,7 @@ def run_bracket(acct_id, sym, sig, size):
         tp_ids.append(r["orderId"])
         app.logger.info(f"Placed TP leg: target={px}, size={amt}, orderId={r['orderId']}")
 
-    # watcher for TP1→SL adjust, TP2→move SL to -5, TP3→cancel
+          # watcher for TP1→SL adjust, TP2→move SL to -5, TP3→cancel
     def watcher():
         a, b, c = slices
         app.logger.info(f"Watcher started for orderId={oid}. Slices: {slices}")
@@ -348,6 +360,7 @@ def run_bracket(acct_id, sym, sig, size):
             if is_flat():
                 app.logger.info("Watcher: Position flat before TP1. Cleaning up.")
                 cancel_all_tps()
+                cancel_all_stops(acct_id, cid)
                 return
             if not is_open(tp_ids[0]):
                 app.logger.info("Watcher: TP1 filled.")
@@ -355,6 +368,7 @@ def run_bracket(acct_id, sym, sig, size):
             if not is_open(sl_id):
                 app.logger.info("Watcher: Initial SL filled.")
                 cancel_all_tps()
+                cancel_all_stops(acct_id, cid)
                 return
             time.sleep(5)
 
@@ -370,6 +384,7 @@ def run_bracket(acct_id, sym, sig, size):
             if is_flat():
                 app.logger.info("Watcher: Position flat before TP2. Cleaning up.")
                 cancel_all_tps()
+                cancel_all_stops(acct_id, cid)
                 return
             if not is_open(tp_ids[1]):
                 app.logger.info("Watcher: TP2 filled.")
@@ -377,6 +392,7 @@ def run_bracket(acct_id, sym, sig, size):
             if not is_open(st1):
                 app.logger.info("Watcher: SL after TP1 hit. Cleaning up.")
                 cancel_all_tps()
+                cancel_all_stops(acct_id, cid)
                 return
             time.sleep(5)
 
@@ -394,6 +410,7 @@ def run_bracket(acct_id, sym, sig, size):
             if is_flat():
                 app.logger.info("Watcher: Position flat at end. Cleaning up.")
                 cancel_all_tps()
+                cancel_all_stops(acct_id, cid)
                 return
             if not is_open(tp_ids[2]):
                 app.logger.info("Watcher: TP3 filled. Done.")
@@ -401,11 +418,15 @@ def run_bracket(acct_id, sym, sig, size):
             if not is_open(st2):
                 app.logger.info("Watcher: Final SL hit. Cleaning up.")
                 cancel_all_tps()
+                cancel_all_stops(acct_id, cid)
                 return
             time.sleep(5)
 
         app.logger.info("Watcher: All done, cleaned up any stray orders.")
         cancel_all_tps()
+        cancel_all_stops(acct_id, cid)
+
+ 
 
     threading.Thread(target=watcher,daemon=True).start()
     return jsonify(status="ok",strategy="bracket",entry=ent),200
@@ -467,6 +488,7 @@ def run_brackmod(acct_id, sym, sig, size):
         app.logger.info(f"Placed TP leg: target={px}, size={amt}, orderId={r['orderId']}")
 
     # watcher for TP1→SL adjust, TP2→cancel
+        # watcher for TP1→SL adjust, TP2→cancel
     def watcher():
         a, b = slices
         app.logger.info(f"Watcher_ab started for orderId={oid}. Slices: {slices}")
@@ -508,6 +530,7 @@ def run_brackmod(acct_id, sym, sig, size):
             if is_flat():
                 app.logger.info("Watcher_ab: Position flat before TP1. Cleaning up.")
                 cancel_all_tps()
+                cancel_all_stops(acct_id, cid)
                 return
             if not is_open(tp_ids[0]):
                 app.logger.info("Watcher_ab: TP1 filled.")
@@ -515,6 +538,7 @@ def run_brackmod(acct_id, sym, sig, size):
             if not is_open(sl_id):
                 app.logger.info("Watcher_ab: Initial SL filled.")
                 cancel_all_tps()
+                cancel_all_stops(acct_id, cid)
                 return
             time.sleep(5)
 
@@ -530,6 +554,7 @@ def run_brackmod(acct_id, sym, sig, size):
             if is_flat():
                 app.logger.info("Watcher_ab: Position flat before TP2. Cleaning up.")
                 cancel_all_tps()
+                cancel_all_stops(acct_id, cid)
                 return
             if not is_open(tp_ids[1]):
                 app.logger.info("Watcher_ab: TP2 filled. Done.")
@@ -537,11 +562,14 @@ def run_brackmod(acct_id, sym, sig, size):
             if not is_open(st1):
                 app.logger.info("Watcher_ab: SL after TP1 hit. Cleaning up.")
                 cancel_all_tps()
+                cancel_all_stops(acct_id, cid)
                 return
             time.sleep(5)
 
         app.logger.info("Watcher_ab: All done, cleaned up any stray orders.")
         cancel_all_tps()
+        cancel_all_stops(acct_id, cid)
+
 
     threading.Thread(target=watcher,daemon=True).start()
     return jsonify(status="ok",strategy="brackmod",entry=ent),200
