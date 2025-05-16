@@ -146,6 +146,60 @@ def search_trades(acct_id, s):
     app.logger.info(f"Found {len(trades)} trades.")
     return trades
 
+def flatten_contract(acct_id, cid, timeout=7):
+    """
+    Cancels all open orders (all types) and closes all open positions for a contract.
+    Waits up to `timeout` seconds for everything to be flat.
+    Returns True if successful, False otherwise.
+    """
+    app.logger.info(f"Flattening contract {cid} for acct_id={acct_id}")
+
+    # Step 1: Cancel all open orders (any type)
+    for _ in range(3):  # retry cancels up to 3 times
+        open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
+        if not open_orders:
+            break
+        for o in open_orders:
+            try:
+                app.logger.info(f"Flatten: Cancelling open order: {o}")
+                cancel(acct_id, o["id"])
+            except Exception as e:
+                app.logger.error(f"Flatten: Error cancelling order {o['id']}: {e}")
+        time.sleep(0.5)
+
+    # Step 2: Close all positions
+    for _ in range(3):  # retry close up to 3 times
+        positions = [p for p in search_pos(acct_id) if p["contractId"] == cid]
+        if not positions:
+            break
+        for p in positions:
+            try:
+                app.logger.info(f"Flatten: Closing open position: {p}")
+                close_pos(acct_id, cid)
+            except Exception as e:
+                app.logger.error(f"Flatten: Error closing position {cid}: {e}")
+        time.sleep(0.5)
+
+    # Step 3: Wait until both orders and positions are gone (max timeout seconds)
+    waited = 0
+    while waited < timeout:
+        open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
+        positions = [p for p in search_pos(acct_id) if p["contractId"] == cid]
+        if not open_orders and not positions:
+            app.logger.info("Flatten: All orders/positions cleared.")
+            return True
+        app.logger.info(f"Flatten: Waiting for cleanup... ({len(open_orders)} orders, {len(positions)} positions remain)")
+        time.sleep(1)
+        waited += 1
+
+    open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
+    positions = [p for p in search_pos(acct_id) if p["contractId"] == cid]
+    if open_orders or positions:
+        app.logger.error(f"Flatten: Still {len(open_orders)} orders, {len(positions)} positions after {timeout}s! Aborting entry.")
+        return False
+    return True
+
+
 # ─── Contract Lookup ───────────────────────────────────
 def get_contract(sym):
     if OVERRIDE_CONTRACT_ID:
@@ -211,37 +265,11 @@ def run_bracket(acct_id, sym, sig, size):
 
     # flatten opposite (SAFE FLIP)
     if any((side==0 and p["type"]==2) or (side==1 and p["type"]==1) for p in pos):
-        app.logger.info("Flattening opposite position(s)...")
-        # Cancel ALL open orders for this contract (TP, SL, entry, etc)
-        open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
-        for o in open_orders:
-            app.logger.info(f"Cancelling open order: {o}")
-            try:
-                cancel(acct_id, o["id"])
-            except Exception as e:
-                app.logger.error(f"Error cancelling order {o['id']}: {e}")
-        # Close ALL positions for this contract
-        for p in pos:
-            app.logger.info(f"Closing open position: {p}")
-            try:
-                close_pos(acct_id, p["contractId"])
-            except Exception as e:
-                app.logger.error(f"Error closing position {p['contractId']}: {e}")
-        # Wait for cleanup (all orders/positions gone for this contract)
-        max_wait = 30
-        waited = 0
-        while True:
-            open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
-            positions   = [p for p in search_pos(acct_id) if p["contractId"] == cid]
-            if not open_orders and not positions:
-                app.logger.info("All old orders/positions cleared. Proceeding to open new bracket.")
-                break
-            if waited >= max_wait:
-                app.logger.warning(f"Timeout waiting for old orders/positions to clear after {max_wait}s! Proceeding anyway.")
-                break
-            app.logger.info(f"Waiting for cleanup... ({len(open_orders)} orders, {len(positions)} positions remain)")
-            time.sleep(1)
-            waited += 1
+        app.logger.info("Flattening opposite position(s) and all orders...")
+        success = flatten_contract(acct_id, cid, timeout=7)
+        if not success:
+            return jsonify(status="error", message="Could not flatten contract—old orders/positions remain."), 500
+
 
     # market entry
     ent = place_market(acct_id, cid, side, size)
@@ -398,34 +426,11 @@ def run_brackmod(acct_id, sym, sig, size):
 
     # flatten opposite (SAFE FLIP)
     if any((side==0 and p["type"]==2) or (side==1 and p["type"]==1) for p in pos):
-        app.logger.info("Flattening opposite position(s)...")
-        open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
-        for o in open_orders:
-            app.logger.info(f"Cancelling open order: {o}")
-            try:
-                cancel(acct_id, o["id"])
-            except Exception as e:
-                app.logger.error(f"Error cancelling order {o['id']}: {e}")
-        for p in pos:
-            app.logger.info(f"Closing open position: {p}")
-            try:
-                close_pos(acct_id, p["contractId"])
-            except Exception as e:
-                app.logger.error(f"Error closing position {p['contractId']}: {e}")
-        max_wait = 30
-        waited = 0
-        while True:
-            open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
-            positions   = [p for p in search_pos(acct_id) if p["contractId"] == cid]
-            if not open_orders and not positions:
-                app.logger.info("All old orders/positions cleared. Proceeding to open new bracket.")
-                break
-            if waited >= max_wait:
-                app.logger.warning(f"Timeout waiting for old orders/positions to clear after {max_wait}s! Proceeding anyway.")
-                break
-            app.logger.info(f"Waiting for cleanup... ({len(open_orders)} orders, {len(positions)} positions remain)")
-            time.sleep(1)
-            waited += 1
+        app.logger.info("Flattening opposite position(s) and all orders...")
+        success = flatten_contract(acct_id, cid, timeout=7)
+        if not success:
+            return jsonify(status="error", message="Could not flatten contract—old orders/positions remain."), 500
+
 
     # market entry
     ent = place_market(acct_id, cid, side, size)
