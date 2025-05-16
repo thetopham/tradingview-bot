@@ -289,17 +289,26 @@ def run_bracket(acct_id, sym, sig, size):
     app.logger.info(f"Placed market order, orderId={oid}")
 
     # fill price
-    trades = [t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"]==oid]
-    tot = sum(t["size"] for t in trades)
+    # Retry up to 10 times with 1 second between attempts
     price = None
-    if tot:
-        price = sum(t["price"]*t["size"] for t in trades)/tot
-    else:
+    for i in range(10):
+        trades = [t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"]==oid]
+        tot = sum(t["size"] for t in trades)
+        if tot:
+            price = sum(t["price"]*t["size"] for t in trades)/tot
+            break
         price = ent.get("fillPrice")
+        if price is not None:
+            break
+        app.logger.warning(f"Fill price not available (attempt {i+1}/10), retrying in 1s...")
+        time.sleep(1)
+
     if price is None:
-        app.logger.error("Could not determine fill price from trades or entry response")
+        app.logger.error("Could not determine fill price from trades or entry response after 10 retries")
         return jsonify(status="error", message="No fill price available"), 500
+
     app.logger.info(f"Entry fill price: {price}")
+
 
     # initial SL
     slp = price - STOP_LOSS_POINTS if side==0 else price + STOP_LOSS_POINTS
@@ -458,17 +467,27 @@ def run_brackmod(acct_id, sym, sig, size):
     oid = ent["orderId"]
     app.logger.info(f"Placed market order, orderId={oid}")
 
-    trades = [t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"]==oid]
-    tot = sum(t["size"] for t in trades)
+    # fill price
+    # Retry up to 10 times with 1 second between attempts
     price = None
-    if tot:
-        price = sum(t["price"]*t["size"] for t in trades)/tot
-    else:
+    for i in range(10):
+        trades = [t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"]==oid]
+        tot = sum(t["size"] for t in trades)
+        if tot:
+            price = sum(t["price"]*t["size"] for t in trades)/tot
+            break
         price = ent.get("fillPrice")
+        if price is not None:
+            break
+        app.logger.warning(f"Fill price not available (attempt {i+1}/10), retrying in 1s...")
+        time.sleep(1)
+
     if price is None:
-        app.logger.error("Could not determine fill price from trades or entry response")
+        app.logger.error("Could not determine fill price from trades or entry response after 10 retries")
         return jsonify(status="error", message="No fill price available"), 500
+
     app.logger.info(f"Entry fill price: {price}")
+
 
     # initial SL
     STOP_LOSS_POINTS = 5.75
