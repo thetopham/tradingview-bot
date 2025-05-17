@@ -216,18 +216,7 @@ def cancel_all_stops(acct_id, cid):
 def get_contract(sym):
     if OVERRIDE_CONTRACT_ID:
         app.logger.info(f"Using override contract id: {OVERRIDE_CONTRACT_ID}")
-        return OVERRIDE_CONTRACT_ID
-    root = re.match(r"^([A-Za-z]+)", sym).group(1)
-    ctrs = post("/api/Contract/search",{"searchText":root,"live":True}).get("contracts",[])
-    for c in ctrs:
-        if c.get("activeContract"): 
-            app.logger.info(f"Found active contract: {c['id']}")
-            return c["id"]
-    if ctrs: 
-        app.logger.info(f"Using first found contract: {ctrs[0]['id']}")
-        return ctrs[0]["id"]
-    app.logger.error(f"No contract '{root}' found")
-    raise ValueError(f"No contract '{root}'")
+        return OVERRIDE_CONTRACT_ID    
 
 # ─── LLM (AI Vision, via n8n) Filter for Epsilon ──────
 def ai_trade_decision(account, strat, sig, sym, size):
