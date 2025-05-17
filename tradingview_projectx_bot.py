@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 # tradingview_projectx_bot.py
 
-import os, time, threading, requests, re
-from flask import Flask, request, jsonify, g
+import os
+import time
+import threading
+import requests
+from requests.adapters import HTTPAdapter
+from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, time as dtime
 import pytz
 import logging
-import sys
 
 # ─── Load config ───────────────────────────────────────
 load_dotenv()
@@ -15,13 +18,12 @@ TV_PORT       = int(os.getenv("TV_PORT", 5000))
 PX_BASE       = os.getenv("PROJECTX_BASE_URL")
 USER_NAME     = os.getenv("PROJECTX_USERNAME")
 API_KEY       = os.getenv("PROJECTX_API_KEY")
+WEBHOOK_SECRET= os.getenv("WEBHOOK_SECRET")
 N8N_AI_URL    = "https://n8n.thetopham.com/webhook/5c793395-f218-4a49-a620-51d297f2dbfb"
 
 # Build account map from .env: any var ACCOUNT_<NAME>=<ID>
-ACCOUNTS = {}
-for k,v in os.environ.items():
-    if k.startswith("ACCOUNT_"):
-        ACCOUNTS[k[len("ACCOUNT_"):].lower()] = int(v)
+ACCOUNTS = {k[len("ACCOUNT_"):].lower(): int(v)
+    for k, v in os.environ.items() if k.startswith("ACCOUNT_")}
 DEFAULT_ACCOUNT = next(iter(ACCOUNTS), None)
 if not ACCOUNTS:
     raise RuntimeError("No accounts loaded from .env. Add ACCOUNT_<NAME>=<ID>.")
@@ -35,13 +37,17 @@ OVERRIDE_CONTRACT_ID = "CON.F.US.MES.M25"
 
 # Central Time & Get-Flat window
 CT = pytz.timezone("America/Chicago")
-GET_FLAT_START = dtime(15,7)
-GET_FLAT_END   = dtime(17,0)
+GET_FLAT_START = dtime(15, 7)
+GET_FLAT_END   = dtime(17, 0)
+
+# ─── HTTP session with keep-alive & retries ────────────
+session = requests.Session()
+adapter = HTTPAdapter(pool_maxsize=10, max_retries=3)
+session.mount("https://", adapter)
 
 print("MODULE LOADED")
 app = Flask(__name__)
 
-# Ensure Flask logging is integrated with Gunicorn if available
 gunicorn_logger = logging.getLogger('gunicorn.error')
 if gunicorn_logger.handlers:
     app.logger.handlers = gunicorn_logger.handlers
@@ -51,11 +57,10 @@ else:
 
 _token = None
 _token_expiry = 0
-lock = threading.Lock()
-
+auth_lock = threading.Lock()
 
 def in_get_flat(now=None):
-    if now is None: now = datetime.now(CT)
+    now = now or datetime.now(CT)
     t = now.timetz() if hasattr(now, "timetz") else now
     return GET_FLAT_START <= t <= GET_FLAT_END
 
@@ -63,160 +68,153 @@ def in_get_flat(now=None):
 def authenticate():
     global _token, _token_expiry
     app.logger.info("Authenticating to Topstep API...")
-    resp = requests.post(f"{PX_BASE}/api/Auth/loginKey",
-        json={"userName":USER_NAME,"apiKey":API_KEY},
-        headers={"Content-Type":"application/json"})
+    resp = session.post(
+        f"{PX_BASE}/api/Auth/loginKey",
+        json={"userName": USER_NAME, "apiKey": API_KEY},
+        headers={"Content-Type": "application/json"},
+        timeout=(3.05, 10)
+    )
     resp.raise_for_status()
     data = resp.json()
     if not data.get("success"):
         app.logger.error("Auth failed: %s", data)
         raise RuntimeError("Auth failed")
     _token = data["token"]
-    _token_expiry = time.time() + 23*3600
+    _token_expiry = time.time() + 23 * 3600
     app.logger.info("Authentication successful; token expires in ~23h.")
 
 def ensure_token():
-    with lock:
+    with auth_lock:
         if _token is None or time.time() >= _token_expiry:
             authenticate()
 
 def post(path, payload):
     ensure_token()
-    full_url = f"{PX_BASE}{path}"
-    try:
-        app.logger.info(f"POST {full_url} payload={payload}")
-        resp = requests.post(full_url,
-            json=payload,
-            headers={"Content-Type":"application/json","Authorization":f"Bearer {_token}"})
-        if resp.status_code == 429:
-            app.logger.warning(f"Rate limit: {resp.status_code} {resp.text}")
-        resp.raise_for_status()
-        app.logger.info(f"Response: {resp.status_code} {resp.text[:200]}")
-        return resp.json()
-    except Exception as e:
-        app.logger.error(f"HTTP error at {path} payload={payload}: {e}")
-        raise
+    url = f"{PX_BASE}{path}"
+    app.logger.info("POST %s payload=%s", url, payload)
+    resp = session.post(
+        url,
+        json=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {_token}"
+        },
+        timeout=(3.05, 10)
+    )
+    if resp.status_code == 429:
+        app.logger.warning("Rate limit hit: %s %s", resp.status_code, resp.text)
+    resp.raise_for_status()
+    data = resp.json()
+    app.logger.debug("Response JSON: %s", data)
+    return data
 
 # ─── Order/Pos/Trade Helpers ──────────────────────────
 def place_market(acct_id, cid, side, size):
-    app.logger.info(f"Placing market order: acct_id={acct_id}, cid={cid}, side={side}, size={size}")
-    resp = post("/api/Order/place", {"accountId":acct_id,"contractId":cid,"type":2,"side":side,"size":size})
-    app.logger.info(f"Market order response: {resp}")
-    return resp
+    app.logger.info("Placing market order acct=%s cid=%s side=%s size=%s",
+                    acct_id, cid, side, size)
+    return post("/api/Order/place",
+                {"accountId": acct_id, "contractId": cid,
+                 "type": 2, "side": side, "size": size})
 
 def place_limit(acct_id, cid, side, size, px):
-    app.logger.info(f"Placing limit order: acct_id={acct_id}, cid={cid}, side={side}, size={size}, px={px}")
-    resp = post("/api/Order/place", {"accountId":acct_id,"contractId":cid,"type":1,"side":side,"size":size,"limitPrice":px})
-    app.logger.info(f"Limit order response: {resp}")
-    return resp
+    app.logger.info("Placing limit order acct=%s cid=%s size=%s px=%s",
+                    acct_id, cid, size, px)
+    return post("/api/Order/place",
+                {"accountId": acct_id, "contractId": cid,
+                 "type": 1, "side": side, "size": size, "limitPrice": px})
 
 def place_stop(acct_id, cid, side, size, px):
-    app.logger.info(f"Placing stop order: acct_id={acct_id}, cid={cid}, side={side}, size={size}, px={px}")
-    resp = post("/api/Order/place", {"accountId":acct_id,"contractId":cid,"type":4,"side":side,"size":size,"stopPrice":px})
-    app.logger.info(f"Stop order response: {resp}")
-    return resp
+    app.logger.info("Placing stop order acct=%s cid=%s size=%s px=%s",
+                    acct_id, cid, size, px)
+    return post("/api/Order/place",
+                {"accountId": acct_id, "contractId": cid,
+                 "type": 4, "side": side, "size": size, "stopPrice": px})
 
 def search_open(acct_id):
-    app.logger.info(f"Searching open orders for acct_id={acct_id}")
-    orders = post("/api/Order/searchOpen", {"accountId":acct_id}).get("orders",[])
-    app.logger.info(f"Found {len(orders)} open orders.")
+    orders = post("/api/Order/searchOpen",
+                  {"accountId": acct_id}).get("orders", [])
+    app.logger.debug("Open orders for %s: %s", acct_id, orders)
     return orders
 
-def cancel(acct_id, o):
-    app.logger.info(f"Cancelling order: acct_id={acct_id}, orderId={o}")
-    resp = post("/api/Order/cancel", {"accountId":acct_id,"orderId":o})
-    app.logger.info(f"Cancel order response: {resp}")
+def cancel(acct_id, order_id):
+    resp = post("/api/Order/cancel",
+                {"accountId": acct_id, "orderId": order_id})
+    if not resp.get("success", True):
+        app.logger.warning("Cancel reported failure: %s", resp)
     return resp
 
 def search_pos(acct_id):
-    app.logger.info(f"Searching open positions for acct_id={acct_id}")
-    positions = post("/api/Position/searchOpen",{"accountId":acct_id}).get("positions",[])
-    app.logger.info(f"Found {len(positions)} open positions.")
-    return positions
+    pos = post("/api/Position/searchOpen",
+               {"accountId": acct_id}).get("positions", [])
+    app.logger.debug("Open positions for %s: %s", acct_id, pos)
+    return pos
 
-def close_pos(acct_id, c):
-    app.logger.info(f"Closing position: acct_id={acct_id}, contractId={c}")
-    resp = post("/api/Position/closeContract",{"accountId":acct_id,"contractId":c})
-    app.logger.info(f"Close position response: {resp}")
+def close_pos(acct_id, cid):
+    resp = post("/api/Position/closeContract",
+                {"accountId": acct_id, "contractId": cid})
+    if not resp.get("success", True):
+        app.logger.warning("Close position reported failure: %s", resp)
     return resp
 
-def search_trades(acct_id, s):
-    app.logger.info(f"Searching trades for acct_id={acct_id}, since={s}")
-    trades = post("/api/Trade/search", {"accountId":acct_id,"startTimestamp":s.isoformat()}).get("trades",[])
-    app.logger.info(f"Found {len(trades)} trades.")
+def search_trades(acct_id, since):
+    trades = post("/api/Trade/search",
+                  {"accountId": acct_id, "startTimestamp": since.isoformat()}).get("trades", [])
     return trades
 
-def flatten_contract(acct_id, cid, timeout=7):
-    """
-    Cancels all open orders (all types) and closes all open positions for a contract.
-    Waits up to `timeout` seconds for everything to be flat.
-    Returns True if successful, False otherwise.
-    """
-    app.logger.info(f"Flattening contract {cid} for acct_id={acct_id}")
+# ─── Robust flatten ────────────────────────────────────
+def flatten_contract(acct_id, cid, timeout=10):
+    app.logger.info("Flattening contract %s for acct %s", cid, acct_id)
+    end = time.time() + timeout
 
-    # Step 1: Cancel all open orders (any type)
-    for _ in range(3):  # retry cancels up to 3 times
+    # Cancel all orders
+    while time.time() < end:
         open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
         if not open_orders:
             break
         for o in open_orders:
             try:
-                app.logger.info(f"Flatten: Cancelling open order: {o}")
                 cancel(acct_id, o["id"])
             except Exception as e:
-                app.logger.error(f"Flatten: Error cancelling order {o['id']}: {e}")
-        time.sleep(0.5)
+                app.logger.error("Error cancelling %s: %s", o["id"], e)
+        time.sleep(1)
 
-    # Step 2: Close all positions
-    for _ in range(3):  # retry close up to 3 times
+    # Close all positions
+    while time.time() < end:
         positions = [p for p in search_pos(acct_id) if p["contractId"] == cid]
         if not positions:
             break
-        for p in positions:
+        for _ in positions:
             try:
-                app.logger.info(f"Flatten: Closing open position: {p}")
                 close_pos(acct_id, cid)
             except Exception as e:
-                app.logger.error(f"Flatten: Error closing position {cid}: {e}")
-        time.sleep(0.5)
-
-    # Step 3: Wait until both orders and positions are gone (max timeout seconds)
-    waited = 0
-    while waited < timeout:
-        open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
-        positions = [p for p in search_pos(acct_id) if p["contractId"] == cid]
-        if not open_orders and not positions:
-            app.logger.info("Flatten: All orders/positions cleared.")
-            return True
-        app.logger.info(f"Flatten: Waiting for cleanup... ({len(open_orders)} orders, {len(positions)} positions remain)")
+                app.logger.error("Error closing position %s: %s", cid, e)
         time.sleep(1)
-        waited += 1
 
-    open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
-    positions = [p for p in search_pos(acct_id) if p["contractId"] == cid]
-    if open_orders or positions:
-        app.logger.error(f"Flatten: Still {len(open_orders)} orders, {len(positions)} positions after {timeout}s! Aborting entry.")
-        return False
-    return True
+    # Final polling
+    while time.time() < end:
+        rem_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
+        rem_pos    = [p for p in search_pos(acct_id) if p["contractId"] == cid]
+        if not rem_orders and not rem_pos:
+            app.logger.info("Flatten complete for %s", cid)
+            return True
+        app.logger.info("Waiting for flatten: %d orders, %d positions remain",
+                        len(rem_orders), len(rem_pos))
+        time.sleep(1)
+
+    app.logger.error("Flatten timeout: %s still has %d orders, %d positions",
+                     cid, len(rem_orders), len(rem_pos))
+    return False
 
 def cancel_all_stops(acct_id, cid):
-    try:
-        open_orders = search_open(acct_id)
-        for o in open_orders:
-            if o["contractId"] == cid and o["type"] == 4:  # 4 = STOP ORDER
-                app.logger.info(f"Watcher cancelling STOP orderId={o['id']}")
-                cancel(acct_id, o["id"])
-    except Exception as e:
-        app.logger.error(f"[watcher_ab] API error in cancel_all_stops: {e}")
-        time.sleep(5)
-
-
+    for o in search_open(acct_id):
+        if o["contractId"] == cid and o["type"] == 4:
+            cancel(acct_id, o["id"])
 
 # ─── Contract Lookup ───────────────────────────────────
 def get_contract(sym):
     if OVERRIDE_CONTRACT_ID:
-        app.logger.info(f"Using override contract id: {OVERRIDE_CONTRACT_ID}")
-        return OVERRIDE_CONTRACT_ID    
+        return OVERRIDE_CONTRACT_ID
+    return None
 
 # ─── LLM (AI Vision, via n8n) Filter for Epsilon ──────
 def ai_trade_decision(account, strat, sig, sym, size):
@@ -228,59 +226,38 @@ def ai_trade_decision(account, strat, sig, sym, size):
         "size": size
     }
     try:
-        app.logger.info(f"Calling n8n AI for epsilon filter: {payload}")
-        resp = requests.post(N8N_AI_URL, json=payload, timeout=60)
+        resp = session.post(N8N_AI_URL, json=payload, timeout=60)
         resp.raise_for_status()
         data = resp.json()
         dec = str(data.get('action', '')).upper()
-        reason = data.get('reason', '')
-        chart_url = data.get('chart_url', '')
-        # Log AI's reasoning and chart for review
-        log_ai_decision(account, strat, sig, sym, size, dec, reason, chart_url)
-        app.logger.info(f"AI response: {data}")
-        # Only approve BUY or SELL (not HOLD, etc)
-        return dec in ("BUY", "SELL"), reason, chart_url
+        return dec in ("BUY", "SELL"), data.get('reason', ''), data.get('chart_url', '')
     except Exception as e:
-        log_ai_decision(account, strat, sig, sym, size, "ERROR", str(e), "")
-        app.logger.error(f"AI error for epsilon: {e}")
         return False, f"AI error: {str(e)}", None
 
-def log_ai_decision(account, strat, sig, sym, size, dec, reason, chart_url):
-    with open("ai_trading_log.txt", "a") as f:
-        f.write(f"{datetime.now()} | {account} | {strat} | {sig} | {sym} | size={size} | {dec} | {reason} | {chart_url}\n")
-
-# ─── Strategy: Bracket ─────────────────────────────────
+# ─── Bracket Strategy ─────────────────────────────────
 def run_bracket(acct_id, sym, sig, size):
-    app.logger.info(f"Running bracket strategy: acct_id={acct_id}, sym={sym}, sig={sig}, size={size}")
     cid      = get_contract(sym)
     side     = 0 if sig=="BUY" else 1
     exit_side= 1-side
-
     pos = [p for p in search_pos(acct_id) if p["contractId"]==cid]
-    app.logger.info(f"Open positions for this contract: {pos}")
 
     # skip same side
     if any((side==0 and p["type"]==1) or (side==1 and p["type"]==2) for p in pos):
-        app.logger.info("Skipping signal, already in same-side position.")
         return jsonify(status="ok",strategy="bracket",message="skip same"),200
 
     # flatten opposite (SAFE FLIP)
     if any((side==0 and p["type"]==2) or (side==1 and p["type"]==1) for p in pos):
-        app.logger.info("Flattening opposite position(s) and all orders...")
-        success = flatten_contract(acct_id, cid, timeout=7)
+        success = flatten_contract(acct_id, cid, timeout=10)
         if not success:
             return jsonify(status="error", message="Could not flatten contract—old orders/positions remain."), 500
-
 
     # market entry
     ent = place_market(acct_id, cid, side, size)
     oid = ent["orderId"]
-    app.logger.info(f"Placed market order, orderId={oid}")
 
     # fill price
-    # Retry up to 10 times with 1 second between attempts
     price = None
-    for i in range(10):
+    for _ in range(12):
         trades = [t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"]==oid]
         tot = sum(t["size"] for t in trades)
         if tot:
@@ -289,21 +266,15 @@ def run_bracket(acct_id, sym, sig, size):
         price = ent.get("fillPrice")
         if price is not None:
             break
-        app.logger.warning(f"Fill price not available (attempt {i+1}/10), retrying in 1s...")
         time.sleep(1)
 
     if price is None:
-        app.logger.error("Could not determine fill price from trades or entry response after 10 retries")
         return jsonify(status="error", message="No fill price available"), 500
-
-    app.logger.info(f"Entry fill price: {price}")
-
 
     # initial SL
     slp = price - STOP_LOSS_POINTS if side==0 else price + STOP_LOSS_POINTS
     sl  = place_stop(acct_id, cid, exit_side, size, slp)
     sl_id = sl["orderId"]
-    app.logger.info(f"Placed initial stop loss: price={slp}, orderId={sl_id}")
 
     # TP legs
     tp_ids=[]
@@ -314,152 +285,67 @@ def run_bracket(acct_id, sym, sig, size):
         px= price+pts if side==0 else price-pts
         r=place_limit(acct_id, cid, exit_side, amt, px)
         tp_ids.append(r["orderId"])
-        app.logger.info(f"Placed TP leg: target={px}, size={amt}, orderId={r['orderId']}")
 
-          # watcher for TP1→SL adjust, TP2→move SL to -5, TP3→cancel
+    # Watcher
     def watcher():
         a, b, c = slices
-        app.logger.info(f"Watcher started for orderId={oid}. Slices: {slices}")
-
         def is_open(order_id):
-            try:
-                res = order_id in {o["id"] for o in search_open(acct_id)}
-                app.logger.debug(f"is_open({order_id}) -> {res}")
-                return res
-            except Exception as e:
-                app.logger.error(f"[watcher] API error in is_open: {e}")
-                time.sleep(5)
-                return False
-
+            return order_id in {o["id"] for o in search_open(acct_id)}
         def cancel_all_tps():
-            try:
-                open_orders = search_open(acct_id)
-                for o in open_orders:
-                    if o["contractId"] == cid and o["type"] == 1 and o["id"] in tp_ids:  # 1 = LIMIT ORDER
-                        app.logger.info(f"Watcher cancelling TP orderId={o['id']}")
-                        cancel(acct_id, o["id"])
-            except Exception as e:
-                app.logger.error(f"[watcher] API error in cancel_all_tps: {e}")
-                time.sleep(5)
-
+            for o in search_open(acct_id):
+                if o["contractId"] == cid and o["type"] == 1 and o["id"] in tp_ids:
+                    cancel(acct_id, o["id"])
         def is_flat():
-            try:
-                val = not any(p for p in search_pos(acct_id) if p["contractId"] == cid)
-                app.logger.debug(f"is_flat() -> {val}")
-                return val
-            except Exception as e:
-                app.logger.error(f"[watcher] API error in is_flat: {e}")
-                time.sleep(5)
-                return False
-
-        # Step 1: Wait for TP1 or SL to be hit
-        app.logger.info("Watcher: waiting for TP1 or SL")
+            return not any(p for p in search_pos(acct_id) if p["contractId"] == cid)
+        # Wait for TP1 or SL
         while True:
             if is_flat():
-                app.logger.info("Watcher: Position flat before TP1. Cleaning up.")
-                cancel_all_tps()
-                cancel_all_stops(acct_id, cid)
-                return
-            if not is_open(tp_ids[0]):
-                app.logger.info("Watcher: TP1 filled.")
-                break
-            if not is_open(sl_id):
-                app.logger.info("Watcher: Initial SL filled.")
-                cancel_all_tps()
-                cancel_all_stops(acct_id, cid)
-                return
-            time.sleep(5)
-
-        app.logger.info(f"Watcher: Cancelling initial SL orderId={sl_id}")
+                cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+            if not is_open(tp_ids[0]): break
+            if not is_open(sl_id): cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+            time.sleep(4)
         cancel(acct_id, sl_id)
         new1 = place_stop(acct_id, cid, exit_side, b + c, slp)
         st1 = new1["orderId"]
-        app.logger.info(f"Watcher: Re-placed SL for {b+c} contracts at {slp}, orderId={st1}")
-
-        # Step 2: Wait for TP2 or SL to be hit
-        app.logger.info("Watcher: waiting for TP2 or SL")
+        # Wait for TP2 or SL
         while True:
             if is_flat():
-                app.logger.info("Watcher: Position flat before TP2. Cleaning up.")
-                cancel_all_tps()
-                cancel_all_stops(acct_id, cid)
-                return
-            if not is_open(tp_ids[1]):
-                app.logger.info("Watcher: TP2 filled.")
-                break
-            if not is_open(st1):
-                app.logger.info("Watcher: SL after TP1 hit. Cleaning up.")
-                cancel_all_tps()
-                cancel_all_stops(acct_id, cid)
-                return
-            time.sleep(5)
-
-        app.logger.info(f"Watcher: Cancelling SL after TP1 orderId={st1}")
+                cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+            if not is_open(tp_ids[1]): break
+            if not is_open(st1): cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+            time.sleep(4)
         cancel(acct_id, st1)
-        # Move SL to entry -5 (for BUY) or entry +5 (for SELL)
         slp2 = price - 5 if side == 0 else price + 5
         new2 = place_stop(acct_id, cid, exit_side, c, slp2)
         st2 = new2["orderId"]
-        app.logger.info(f"Watcher: Placed BE SL for {c} contracts at {slp2}, orderId={st2}")
-
-        # Step 3: Wait for TP3 or SL to be hit
-        app.logger.info("Watcher: waiting for TP3 or SL")
+        # Wait for TP3 or SL
         while True:
             if is_flat():
-                app.logger.info("Watcher: Position flat at end. Cleaning up.")
-                cancel_all_tps()
-                cancel_all_stops(acct_id, cid)
-                return
-            if not is_open(tp_ids[2]):
-                app.logger.info("Watcher: TP3 filled. Done.")
-                break
-            if not is_open(st2):
-                app.logger.info("Watcher: Final SL hit. Cleaning up.")
-                cancel_all_tps()
-                cancel_all_stops(acct_id, cid)
-                return
-            time.sleep(5)
-
-        app.logger.info("Watcher: All done, cleaned up any stray orders.")
-        cancel_all_tps()
-        cancel_all_stops(acct_id, cid)
-
- 
-
+                cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+            if not is_open(tp_ids[2]): break
+            if not is_open(st2): cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+            time.sleep(4)
+        cancel_all_tps(); cancel_all_stops(acct_id, cid)
     threading.Thread(target=watcher,daemon=True).start()
     return jsonify(status="ok",strategy="bracket",entry=ent),200
 
+# ─── Brackmod Strategy (shorter SL/TP logic) ───────────
 def run_brackmod(acct_id, sym, sig, size):
-    app.logger.info(f"Running brackmod strategy: acct_id={acct_id}, sym={sym}, sig={sig}, size={size}")
     cid      = get_contract(sym)
     side     = 0 if sig=="BUY" else 1
     exit_side= 1-side
-
     pos = [p for p in search_pos(acct_id) if p["contractId"]==cid]
-    app.logger.info(f"Open positions for this contract: {pos}")
-
-    # skip same side
     if any((side==0 and p["type"]==1) or (side==1 and p["type"]==2) for p in pos):
-        app.logger.info("Skipping signal, already in same-side position.")
         return jsonify(status="ok",strategy="brackmod",message="skip same"),200
-
-    # flatten opposite (SAFE FLIP)
     if any((side==0 and p["type"]==2) or (side==1 and p["type"]==1) for p in pos):
-        app.logger.info("Flattening opposite position(s) and all orders...")
-        success = flatten_contract(acct_id, cid, timeout=7)
+        success = flatten_contract(acct_id, cid, timeout=10)
         if not success:
             return jsonify(status="error", message="Could not flatten contract—old orders/positions remain."), 500
-
-
-    # market entry
     ent = place_market(acct_id, cid, side, size)
     oid = ent["orderId"]
-    app.logger.info(f"Placed market order, orderId={oid}")
-
     # fill price
-    # Retry up to 10 times with 1 second between attempts
     price = None
-    for i in range(10):
+    for _ in range(12):
         trades = [t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"]==oid]
         tot = sum(t["size"] for t in trades)
         if tot:
@@ -468,24 +354,13 @@ def run_brackmod(acct_id, sym, sig, size):
         price = ent.get("fillPrice")
         if price is not None:
             break
-        app.logger.warning(f"Fill price not available (attempt {i+1}/10), retrying in 1s...")
         time.sleep(1)
-
     if price is None:
-        app.logger.error("Could not determine fill price from trades or entry response after 10 retries")
         return jsonify(status="error", message="No fill price available"), 500
-
-    app.logger.info(f"Entry fill price: {price}")
-
-
-    # initial SL
     STOP_LOSS_POINTS = 5.75
     slp = price - STOP_LOSS_POINTS if side==0 else price + STOP_LOSS_POINTS
     sl  = place_stop(acct_id, cid, exit_side, size, slp)
     sl_id = sl["orderId"]
-    app.logger.info(f"Placed initial stop loss: price={slp}, orderId={sl_id}")
-
-    # TP: 2 at TP1, 1 at TP2
     TP_POINTS = [2.5, 5.0]
     slices = [2, 1]
     tp_ids=[]
@@ -493,214 +368,105 @@ def run_brackmod(acct_id, sym, sig, size):
         px = price + pts if side == 0 else price - pts
         r = place_limit(acct_id, cid, exit_side, amt, px)
         tp_ids.append(r["orderId"])
-        app.logger.info(f"Placed TP leg: target={px}, size={amt}, orderId={r['orderId']}")
-
-    # watcher for TP1→SL adjust, TP2→cancel
-        # watcher for TP1→SL adjust, TP2→cancel
     def watcher():
         a, b = slices
-        app.logger.info(f"Watcher_ab started for orderId={oid}. Slices: {slices}")
-
         def is_open(order_id):
-            try:
-                res = order_id in {o["id"] for o in search_open(acct_id)}
-                app.logger.debug(f"is_open({order_id}) -> {res}")
-                return res
-            except Exception as e:
-                app.logger.error(f"[watcher_ab] API error in is_open: {e}")
-                time.sleep(5)
-                return False
-
+            return order_id in {o["id"] for o in search_open(acct_id)}
         def cancel_all_tps():
-            try:
-                open_orders = search_open(acct_id)
-                for o in open_orders:
-                    if o["contractId"] == cid and o["type"] == 1 and o["id"] in tp_ids:
-                        app.logger.info(f"Watcher_ab cancelling TP orderId={o['id']}")
-                        cancel(acct_id, o["id"])
-            except Exception as e:
-                app.logger.error(f"[watcher_ab] API error in cancel_all_tps: {e}")
-                time.sleep(5)
-
+            for o in search_open(acct_id):
+                if o["contractId"] == cid and o["type"] == 1 and o["id"] in tp_ids:
+                    cancel(acct_id, o["id"])
         def is_flat():
-            try:
-                val = not any(p for p in search_pos(acct_id) if p["contractId"] == cid)
-                app.logger.debug(f"is_flat() -> {val}")
-                return val
-            except Exception as e:
-                app.logger.error(f"[watcher_ab] API error in is_flat: {e}")
-                time.sleep(5)
-                return False
-
-        # Step 1: Wait for TP1 or SL to be hit
-        app.logger.info("Watcher_ab: waiting for TP1 or SL")
+            return not any(p for p in search_pos(acct_id) if p["contractId"] == cid)
         while True:
             if is_flat():
-                app.logger.info("Watcher_ab: Position flat before TP1. Cleaning up.")
-                cancel_all_tps()
-                cancel_all_stops(acct_id, cid)
-                return
-            if not is_open(tp_ids[0]):
-                app.logger.info("Watcher_ab: TP1 filled.")
-                break
-            if not is_open(sl_id):
-                app.logger.info("Watcher_ab: Initial SL filled.")
-                cancel_all_tps()
-                cancel_all_stops(acct_id, cid)
-                return
-            time.sleep(5)
-
-        app.logger.info(f"Watcher_ab: Cancelling initial SL orderId={sl_id}")
+                cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+            if not is_open(tp_ids[0]): break
+            if not is_open(sl_id): cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+            time.sleep(4)
         cancel(acct_id, sl_id)
         new1 = place_stop(acct_id, cid, exit_side, b, slp)
         st1 = new1["orderId"]
-        app.logger.info(f"Watcher_ab: Re-placed SL for {b} contracts at {slp}, orderId={st1}")
-
-        # Step 2: Wait for TP2 or SL to be hit
-        app.logger.info("Watcher_ab: waiting for TP2 or SL")
         while True:
             if is_flat():
-                app.logger.info("Watcher_ab: Position flat before TP2. Cleaning up.")
-                cancel_all_tps()
-                cancel_all_stops(acct_id, cid)
-                return
-            if not is_open(tp_ids[1]):
-                app.logger.info("Watcher_ab: TP2 filled. Done.")
-                break
-            if not is_open(st1):
-                app.logger.info("Watcher_ab: SL after TP1 hit. Cleaning up.")
-                cancel_all_tps()
-                cancel_all_stops(acct_id, cid)
-                return
-            time.sleep(5)
-
-        app.logger.info("Watcher_ab: All done, cleaned up any stray orders.")
-        cancel_all_tps()
-        cancel_all_stops(acct_id, cid)
-
-
+                cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+            if not is_open(tp_ids[1]): break
+            if not is_open(st1): cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+            time.sleep(4)
+        cancel_all_tps(); cancel_all_stops(acct_id, cid)
     threading.Thread(target=watcher,daemon=True).start()
     return jsonify(status="ok",strategy="brackmod",entry=ent),200
 
-
-# ─── Strategy: Pivot ────────────────────────────────────
+# ─── Pivot Strategy ────────────────────────────────────
 def run_pivot(acct_id, sym, sig, size):
-    app.logger.info(f"Running pivot strategy: acct_id={acct_id}, sym={sym}, sig={sig}, size={size}")
     cid = get_contract(sym)
     side = 0 if sig == "BUY" else 1
     exit_side = 1 - side
-
-    # Find current net position for this contract
     pos = [p for p in search_pos(acct_id) if p["contractId"] == cid]
-    net_pos = 0
-    for p in pos:
-        if p["type"] == 1:   # LONG
-            net_pos += p["size"]
-        elif p["type"] == 2: # SHORT
-            net_pos -= p["size"]
-    app.logger.info(f"Net position for contract {cid}: {net_pos}")
-
-    # Target net position (+size for long, -size for short, 0 for flat)
+    net_pos = sum(p["size"] if p["type"] == 1 else -p["size"] for p in pos)
     target = size if sig == "BUY" else -size
-
-    # If already at target, skip
     if net_pos == target:
-        app.logger.info("Already at target net position; skipping pivot trade.")
         return jsonify(status="ok", strategy="pivot", message="already at target position"), 200
-
-    # Step 1: Cancel all stops for this contract
     for o in search_open(acct_id):
-        if o["contractId"] == cid and o["type"] == 4:  # Stop order
-            app.logger.info(f"Cancelling stop order: {o}")
+        if o["contractId"] == cid and o["type"] == 4:
             cancel(acct_id, o["id"])
-
-    # Step 2: If holding the opposite, flatten and then open reverse
     trade_log = []
     if net_pos * target < 0:
-        app.logger.info("Flattening opposite side, then opening new position.")
-        flatten_side = 1 if net_pos > 0 else 0  # If net long, close with SELL
-        trade_log.append(place_market(acct_id, cid, flatten_side, abs(net_pos)))
-        trade_log.append(place_market(acct_id, cid, side, size))
-    # If flat, just open new
-    elif net_pos == 0:
-        app.logger.info("Flat; opening new position.")
-        trade_log.append(place_market(acct_id, cid, side, size))
-    # If partial, adjust
-    elif abs(net_pos) != abs(target):
-        app.logger.info("Adjusting partial position; flatten and re-open.")
         flatten_side = 1 if net_pos > 0 else 0
         trade_log.append(place_market(acct_id, cid, flatten_side, abs(net_pos)))
         trade_log.append(place_market(acct_id, cid, side, size))
-
-    # Step 3: Place new stop for the current position
-    # Find the latest entry trade price
+    elif net_pos == 0:
+        trade_log.append(place_market(acct_id, cid, side, size))
+    elif abs(net_pos) != abs(target):
+        flatten_side = 1 if net_pos > 0 else 0
+        trade_log.append(place_market(acct_id, cid, flatten_side, abs(net_pos)))
+        trade_log.append(place_market(acct_id, cid, side, size))
     trades = [t for t in search_trades(acct_id, datetime.utcnow() - timedelta(minutes=5))
               if t["contractId"] == cid]
-    if trades:
-        entry_price = trades[-1]["price"]
-    else:
-        entry_price = None
-
+    entry_price = trades[-1]["price"] if trades else None
     if entry_price is not None:
         stop_price = entry_price - STOP_LOSS_POINTS if side == 0 else entry_price + STOP_LOSS_POINTS
-        app.logger.info(f"Placing stop for pivot trade: price={stop_price}")
         place_stop(acct_id, cid, exit_side, size, stop_price)
-    else:
-        app.logger.warning("No entry price available to place stop.")
-
     return jsonify(status="ok", strategy="pivot", message="position set", trades=trade_log), 200
 
 # ─── Webhook Dispatcher ─────────────────────────────────
-@app.route("/webhook",methods=["POST"])
+@app.route("/webhook", methods=["POST"])
 def tv_webhook():
-    print("WEBHOOK FIRED")
-    app.logger.info("Received webhook POST.")
     data = request.get_json()
-    # Secret check
-    if data.get("secret") != os.getenv("WEBHOOK_SECRET"):
-        app.logger.warning("Unauthorized webhook attempt")
+    if data.get("secret") != WEBHOOK_SECRET:
         return jsonify(error="unauthorized"), 403
-    strat = data.get("strategy","bracket").lower()
-    acct  = data.get("account", DEFAULT_ACCOUNT)
-    if acct: acct = acct.lower()
-    sig   = data.get("signal","").upper()
-    sym   = data.get("symbol","")
-    size  = int(data.get("size",1))
-
-    app.logger.info(f"Webhook data: strat={strat}, acct={acct}, sig={sig}, sym={sym}, size={size}")
-
+    strat = data.get("strategy", "bracket").lower()
+    acct  = (data.get("account") or DEFAULT_ACCOUNT).lower()
+    sig   = data.get("signal", "").upper()
+    sym   = data.get("symbol", "")
+    size  = int(data.get("size", 1))
     if acct not in ACCOUNTS:
-        app.logger.error(f"Unknown account '{acct}'")
-        return jsonify(error=f"Unknown account '{acct}'"),400
+        return jsonify(error=f"Unknown account '{acct}'"), 400
     acct_id = ACCOUNTS[acct]
-
-    if strat not in ("bracket","pivot","brackmod"):
-        app.logger.error(f"Unknown strategy '{strat}'")
-        return jsonify(error=f"Unknown strategy '{strat}'"),400
-    if sig not in ("BUY","SELL","FLAT"):
-        app.logger.error(f"Invalid signal '{sig}'")
-        return jsonify(error="invalid signal"),400
-
+    cid = get_contract(sym)
+    # Explicit FLAT: flatten and return
+    if sig == "FLAT":
+        ok = flatten_contract(acct_id, cid, timeout=10)
+        status = "ok" if ok else "error"
+        code = 200 if ok else 500
+        return jsonify(status=status, strategy=strat, message="flattened"), code
     now = datetime.now(CT)
-    if in_get_flat(now) and sig!="FLAT":
-        app.logger.info("In get-flat window; changing signal to FLAT.")
-        sig = "FLAT"
-
-    # AI implementation for epsilon account, using n8n vision workflow
+    if in_get_flat(now):
+        return jsonify(status="ok", strategy=strat, message="in get-flat window, no trades"), 200
+    # AI check for epsilon account
     if acct == "epsilon":
         allow, reason, chart_url = ai_trade_decision(acct, strat, sig, sym, size)
         if not allow:
-            app.logger.info(f"AI BLOCKED TRADE: {sig} {sym} size={size} reason={reason}")
             return jsonify(status="blocked", reason=reason, chart=chart_url), 200
-        app.logger.info(f"AI APPROVED TRADE: {sig} {sym} size={size} reason={reason}")
-
-    if strat=="bracket":
+    if strat == "bracket":
         return run_bracket(acct_id, sym, sig, size)
     elif strat == "brackmod":
         return run_brackmod(acct_id, sym, sig, size)
-    else:
+    elif strat == "pivot":
         return run_pivot(acct_id, sym, sig, size)
+    else:
+        return jsonify(error=f"Unknown strategy '{strat}'"), 400
 
-if __name__=="__main__":
+if __name__ == "__main__":
     app.logger.info("Starting tradingview_projectx_bot server.")
-    app.run(host="0.0.0.0",port=TV_PORT)
+    app.run(host="0.0.0.0", port=TV_PORT)
