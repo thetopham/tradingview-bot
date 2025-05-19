@@ -33,6 +33,9 @@ if 'ai_decision_id' not in df_dec.columns or 'ai_decision_id' not in df_res.colu
     print("ERROR: 'ai_decision_id' not found in both DataFrames. Please check your Supabase tables.")
     exit(1)
 
+df_dec['ai_decision_id'] = df_dec['ai_decision_id'].astype(str)
+df_res['ai_decision_id'] = df_res['ai_decision_id'].astype(str)
+
 # Merge on ai_decision_id
 joined = df_dec.merge(df_res, on='ai_decision_id', suffixes=('_decision', '_result'))
 
