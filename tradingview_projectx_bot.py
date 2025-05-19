@@ -12,16 +12,14 @@ from datetime import datetime, timedelta, time as dtime
 import pytz
 import logging
 
-# --- LOGGING SETUP (add this block right after imports) ---
+# --- LOGGING SETUP ---
 log_file = '/tmp/tradingview_projectx_bot.log'  # or anywhere you prefer
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler(log_file),
-        logging.StreamHandler()
-    ]
-)
+
+# Set up file handler
+file_handler = logging.FileHandler(log_file)
+file_handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+file_handler.setFormatter(formatter)
 
 # ─── Load config ───────────────────────────────────────
 load_dotenv()
@@ -64,12 +62,16 @@ session.mount("https://", adapter)
 print("MODULE LOADED")
 app = Flask(__name__)
 
-gunicorn_logger = logging.getLogger('gunicorn.error')
-if gunicorn_logger.handlers:
-    app.logger.handlers = gunicorn_logger.handlers
-    app.logger.setLevel(gunicorn_logger.level)
-else:
-    app.logger.setLevel(logging.INFO)
+# Attach file handler to Flask's app.logger (for Gunicorn/Flask logs)
+if not any(isinstance(h, logging.FileHandler) and h.baseFilename == log_file for h in app.logger.handlers):
+    app.logger.addHandler(file_handler)
+app.logger.setLevel(logging.INFO)
+
+# Optionally: Attach file handler to the root logger (for logging.info(...) etc)
+logging.getLogger().addHandler(file_handler)
+
+# --- Log that logging is working ---
+app.logger.info("==== LOGGING SYSTEM READY ====")
 
 _token = None
 _token_expiry = 0
