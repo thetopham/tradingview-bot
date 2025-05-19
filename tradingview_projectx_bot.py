@@ -239,6 +239,17 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url):
             "error": True
         }
 
+def check_for_phantom_orders(acct_id, cid):
+    positions = [p for p in search_pos(acct_id) if p["contractId"] == cid]
+    if not positions:
+        return  # No open position; nothing to check
+
+    open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
+    has_protective = any(o["type"] in (1, 4) and o["status"] == 1 for o in open_orders)
+    if not has_protective:
+        logging.warning(f"Phantom order detected! Positions: {positions}, Orders: {open_orders}")
+        flatten_contract(acct_id, cid, timeout=10)
+
 
 
 # ─── Trade PnL Logging Helper ───────────────────────────────
@@ -381,6 +392,7 @@ def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
             }
         )
     threading.Thread(target=watcher,daemon=True).start()
+    check_for_phantom_orders(acct_id, cid)
     return jsonify(status="ok",strategy="bracket",entry=ent),200
 
 # ─── Brackmod Strategy (shorter SL/TP logic, with logging) ───────────
@@ -464,6 +476,7 @@ def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
             }
         )
     threading.Thread(target=watcher,daemon=True).start()
+    check_for_phantom_orders(acct_id, cid)
     return jsonify(status="ok",strategy="brackmod",entry=ent),200
 
 # ─── Pivot Strategy (with logging) ────────────────────────────────────
@@ -588,6 +601,18 @@ def tv_webhook():
     else:
         return jsonify(error=f"Unknown strategy '{strat}'"), 400
 
+def phantom_order_sweeper():
+    while True:
+        for acct_name, acct_id in ACCOUNTS.items():
+            cid = OVERRIDE_CONTRACT_ID
+            try:
+                check_for_phantom_orders(acct_id, cid)
+            except Exception as e:
+                logging.error(f"Error in phantom sweeper for {acct_name}: {e}")
+        time.sleep(30)  # Sweep every 30s
+
+# Start sweeper thread
+threading.Thread(target=phantom_order_sweeper, daemon=True).start()
 
 
 if __name__ == "__main__":
