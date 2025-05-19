@@ -12,6 +12,17 @@ from datetime import datetime, timedelta, time as dtime
 import pytz
 import logging
 
+# --- LOGGING SETUP (add this block right after imports) ---
+log_file = '/tmp/tradingview_projectx_bot.log'  # or anywhere you prefer
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(log_file),
+        logging.StreamHandler()
+    ]
+)
+
 # ─── Load config ───────────────────────────────────────
 load_dotenv()
 TV_PORT         = int(os.getenv("TV_PORT", 5000))
@@ -578,5 +589,5 @@ def tv_webhook():
 
 
 if __name__ == "__main__":
-    app.logger.info("Starting tradingview_projectx_bot server.")
+    app.logger.info("Starting  server.")
     app.run(host="0.0.0.0", port=TV_PORT)
