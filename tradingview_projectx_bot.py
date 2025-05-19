@@ -14,12 +14,14 @@ import logging
 
 # ─── Load config ───────────────────────────────────────
 load_dotenv()
-TV_PORT       = int(os.getenv("TV_PORT", 5000))
-PX_BASE       = os.getenv("PROJECTX_BASE_URL")
-USER_NAME     = os.getenv("PROJECTX_USERNAME")
-API_KEY       = os.getenv("PROJECTX_API_KEY")
-WEBHOOK_SECRET= os.getenv("WEBHOOK_SECRET")
-N8N_AI_URL    = "https://n8n.thetopham.com/webhook/5c793395-f218-4a49-a620-51d297f2dbfb"
+TV_PORT         = int(os.getenv("TV_PORT", 5000))
+PX_BASE         = os.getenv("PROJECTX_BASE_URL")
+USER_NAME       = os.getenv("PROJECTX_USERNAME")
+API_KEY         = os.getenv("PROJECTX_API_KEY")
+WEBHOOK_SECRET  = os.getenv("WEBHOOK_SECRET")
+N8N_AI_URL      = "https://n8n.thetopham.com/webhook/5c793395-f218-4a49-a620-51d297f2dbfb"
+SUPABASE_URL    = os.getenv("SUPABASE_URL")   # e.g. https://xxxx.supabase.co/rest/v1
+SUPABASE_KEY    = os.getenv("SUPABASE_KEY")   # your Supabase API key
 
 # Build account map from .env: any var ACCOUNT_<NAME>=<ID>
 ACCOUNTS = {k[len("ACCOUNT_"):].lower(): int(v)
@@ -28,19 +30,14 @@ DEFAULT_ACCOUNT = next(iter(ACCOUNTS), None)
 if not ACCOUNTS:
     raise RuntimeError("No accounts loaded from .env. Add ACCOUNT_<NAME>=<ID>.")
 
-# Bracket params
 STOP_LOSS_POINTS = 10.0
 TP_POINTS        = [2.5, 5.0, 10.0]
-
-# Hard-coded MES override
 OVERRIDE_CONTRACT_ID = "CON.F.US.MES.M25"
 
-# Central Time & Get-Flat window
 CT = pytz.timezone("America/Chicago")
 GET_FLAT_START = dtime(15, 7)
 GET_FLAT_END   = dtime(17, 0)
 
-# ─── HTTP session with keep-alive & retries ────────────
 session = requests.Session()
 adapter = HTTPAdapter(pool_maxsize=10, max_retries=3)
 session.mount("https://", adapter)
@@ -64,7 +61,6 @@ def in_get_flat(now=None):
     t = now.timetz() if hasattr(now, "timetz") else now
     return GET_FLAT_START <= t <= GET_FLAT_END
 
-# ─── Auth & HTTP ───────────────────────────────────────
 def authenticate():
     global _token, _token_expiry
     app.logger.info("Authenticating to Topstep API...")
@@ -108,65 +104,56 @@ def post(path, payload):
     app.logger.debug("Response JSON: %s", data)
     return data
 
-# ─── Order/Pos/Trade Helpers ──────────────────────────
 def place_market(acct_id, cid, side, size):
-    app.logger.info("Placing market order acct=%s cid=%s side=%s size=%s",
-                    acct_id, cid, side, size)
-    return post("/api/Order/place",
-                {"accountId": acct_id, "contractId": cid,
-                 "type": 2, "side": side, "size": size})
+    app.logger.info("Placing market order acct=%s cid=%s side=%s size=%s", acct_id, cid, side, size)
+    return post("/api/Order/place", {
+        "accountId": acct_id, "contractId": cid,
+        "type": 2, "side": side, "size": size
+    })
 
 def place_limit(acct_id, cid, side, size, px):
-    app.logger.info("Placing limit order acct=%s cid=%s size=%s px=%s",
-                    acct_id, cid, size, px)
-    return post("/api/Order/place",
-                {"accountId": acct_id, "contractId": cid,
-                 "type": 1, "side": side, "size": size, "limitPrice": px})
+    app.logger.info("Placing limit order acct=%s cid=%s size=%s px=%s", acct_id, cid, size, px)
+    return post("/api/Order/place", {
+        "accountId": acct_id, "contractId": cid,
+        "type": 1, "side": side, "size": size, "limitPrice": px
+    })
 
 def place_stop(acct_id, cid, side, size, px):
-    app.logger.info("Placing stop order acct=%s cid=%s size=%s px=%s",
-                    acct_id, cid, size, px)
-    return post("/api/Order/place",
-                {"accountId": acct_id, "contractId": cid,
-                 "type": 4, "side": side, "size": size, "stopPrice": px})
+    app.logger.info("Placing stop order acct=%s cid=%s size=%s px=%s", acct_id, cid, size, px)
+    return post("/api/Order/place", {
+        "accountId": acct_id, "contractId": cid,
+        "type": 4, "side": side, "size": size, "stopPrice": px
+    })
 
 def search_open(acct_id):
-    orders = post("/api/Order/searchOpen",
-                  {"accountId": acct_id}).get("orders", [])
+    orders = post("/api/Order/searchOpen", {"accountId": acct_id}).get("orders", [])
     app.logger.debug("Open orders for %s: %s", acct_id, orders)
     return orders
 
 def cancel(acct_id, order_id):
-    resp = post("/api/Order/cancel",
-                {"accountId": acct_id, "orderId": order_id})
+    resp = post("/api/Order/cancel", {"accountId": acct_id, "orderId": order_id})
     if not resp.get("success", True):
         app.logger.warning("Cancel reported failure: %s", resp)
     return resp
 
 def search_pos(acct_id):
-    pos = post("/api/Position/searchOpen",
-               {"accountId": acct_id}).get("positions", [])
+    pos = post("/api/Position/searchOpen", {"accountId": acct_id}).get("positions", [])
     app.logger.debug("Open positions for %s: %s", acct_id, pos)
     return pos
 
 def close_pos(acct_id, cid):
-    resp = post("/api/Position/closeContract",
-                {"accountId": acct_id, "contractId": cid})
+    resp = post("/api/Position/closeContract", {"accountId": acct_id, "contractId": cid})
     if not resp.get("success", True):
         app.logger.warning("Close position reported failure: %s", resp)
     return resp
 
 def search_trades(acct_id, since):
-    trades = post("/api/Trade/search",
-                  {"accountId": acct_id, "startTimestamp": since.isoformat()}).get("trades", [])
+    trades = post("/api/Trade/search", {"accountId": acct_id, "startTimestamp": since.isoformat()}).get("trades", [])
     return trades
 
-# ─── Robust flatten ────────────────────────────────────
 def flatten_contract(acct_id, cid, timeout=10):
     app.logger.info("Flattening contract %s for acct %s", cid, acct_id)
     end = time.time() + timeout
-
-    # Cancel all orders
     while time.time() < end:
         open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
         if not open_orders:
@@ -177,8 +164,6 @@ def flatten_contract(acct_id, cid, timeout=10):
             except Exception as e:
                 app.logger.error("Error cancelling %s: %s", o["id"], e)
         time.sleep(1)
-
-    # Close all positions
     while time.time() < end:
         positions = [p for p in search_pos(acct_id) if p["contractId"] == cid]
         if not positions:
@@ -189,20 +174,15 @@ def flatten_contract(acct_id, cid, timeout=10):
             except Exception as e:
                 app.logger.error("Error closing position %s: %s", cid, e)
         time.sleep(1)
-
-    # Final polling
     while time.time() < end:
         rem_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
         rem_pos    = [p for p in search_pos(acct_id) if p["contractId"] == cid]
         if not rem_orders and not rem_pos:
             app.logger.info("Flatten complete for %s", cid)
             return True
-        app.logger.info("Waiting for flatten: %d orders, %d positions remain",
-                        len(rem_orders), len(rem_pos))
+        app.logger.info("Waiting for flatten: %d orders, %d positions remain", len(rem_orders), len(rem_pos))
         time.sleep(1)
-
-    app.logger.error("Flatten timeout: %s still has %d orders, %d positions",
-                     cid, len(rem_orders), len(rem_pos))
+    app.logger.error("Flatten timeout: %s still has %d orders, %d positions", cid, len(rem_orders), len(rem_pos))
     return False
 
 def cancel_all_stops(acct_id, cid):
@@ -210,13 +190,11 @@ def cancel_all_stops(acct_id, cid):
         if o["contractId"] == cid and o["type"] == 4:
             cancel(acct_id, o["id"])
 
-# ─── Contract Lookup ───────────────────────────────────
 def get_contract(sym):
     if OVERRIDE_CONTRACT_ID:
         return OVERRIDE_CONTRACT_ID
     return None
 
-# ─── LLM (AI Vision, via n8n) Filter for Epsilon ──────
 def ai_trade_decision(account, strat, sig, sym, size):
     payload = {
         "account": account,
@@ -233,6 +211,46 @@ def ai_trade_decision(account, strat, sig, sym, size):
         return dec in ("BUY", "SELL"), data.get('reason', ''), data.get('chart_url', '')
     except Exception as e:
         return False, f"AI error: {str(e)}", None
+
+# ─── Trade PnL Logging Helper ───────────────────────────────
+
+def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta=None):
+    """
+    Fetches trades since entry_time from TopstepX API, sums profitAndLoss,
+    and logs all info to Supabase.
+    """
+    meta = meta or {}
+    # Fetch all trades for this contract since entry_time
+    resp = post("/api/Trade/search", {
+        "accountId": acct_id,
+        "startTimestamp": entry_time.isoformat()
+    })
+    trades = resp.get("trades", [])
+
+    total_pnl = sum(
+        t["profitAndLoss"] or 0
+        for t in trades
+        if t.get("contractId") == cid and not t.get("voided", False)
+    )
+    exit_time = datetime.utcnow()
+    payload = {
+        "ai_decision_id": ai_decision_id,
+        "entry_time": entry_time.isoformat(),
+        "exit_time": exit_time.isoformat(),
+        "duration_sec": int((exit_time - entry_time).total_seconds()),
+        "total_pnl": total_pnl,
+        "raw_trades": trades,
+        **meta
+    }
+    url = f"{SUPABASE_URL}/trade_results"
+    headers = {
+        "apikey":       SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type":  "application/json",
+        "Prefer":        "return=minimal"
+    }
+    r = session.post(url, json=payload, headers=headers, timeout=(3.05, 10))
+    r.raise_for_status()
 
 # ─── Bracket Strategy ─────────────────────────────────
 def run_bracket(acct_id, sym, sig, size):
@@ -326,6 +344,21 @@ def run_bracket(acct_id, sym, sig, size):
             if not is_open(st2): cancel_all_tps(); cancel_all_stops(acct_id, cid); return
             time.sleep(4)
         cancel_all_tps(); cancel_all_stops(acct_id, cid)
+        
+        log_trade_results_to_supabase(
+            acct_id=acct_id,
+            cid=cid,
+            entry_time=entry_time,
+            ai_decision_id=ai_decision_id,  # If using, else pass None
+            meta={
+                "symbol": sym,
+                "account": acct_id,
+                "strategy": "bracket",
+                "signal": sig,
+                "size": size,
+                "alert": alert,  
+            }
+        )
     threading.Thread(target=watcher,daemon=True).start()
     return jsonify(status="ok",strategy="bracket",entry=ent),200
 
@@ -394,6 +427,22 @@ def run_brackmod(acct_id, sym, sig, size):
             if not is_open(st1): cancel_all_tps(); cancel_all_stops(acct_id, cid); return
             time.sleep(4)
         cancel_all_tps(); cancel_all_stops(acct_id, cid)
+
+        log_trade_results_to_supabase(
+            acct_id=acct_id,
+            cid=cid,
+            entry_time=entry_time,
+            ai_decision_id=ai_decision_id,  # If using, else pass None
+            meta={
+                "symbol": sym,
+                "account": acct_id,
+                "strategy": "brackmod",
+                "signal": sig,
+                "size": size,
+                "alert": alert,
+            }
+        )   
+        
     threading.Thread(target=watcher,daemon=True).start()
     return jsonify(status="ok",strategy="brackmod",entry=ent),200
 
@@ -427,6 +476,21 @@ def run_pivot(acct_id, sym, sig, size):
     if entry_price is not None:
         stop_price = entry_price - STOP_LOSS_POINTS if side == 0 else entry_price + STOP_LOSS_POINTS
         place_stop(acct_id, cid, exit_side, size, stop_price)
+
+    log_trade_results_to_supabase(
+            acct_id=acct_id,
+            cid=cid,
+            entry_time=entry_time,
+            ai_decision_id=ai_decision_id,  # If using, else pass None
+            meta={
+                "symbol": sym,
+                "account": acct_id,
+                "strategy": "pivot",
+                "signal": sig,
+                "size": size,
+                "alert": alert,
+            }
+        )   
     return jsonify(status="ok", strategy="pivot", message="position set", trades=trade_log), 200
 
 # ─── Webhook Dispatcher ─────────────────────────────────
@@ -456,7 +520,7 @@ def tv_webhook():
         return jsonify(status="ok", strategy=strat, message="in get-flat window, no trades"), 200
     # AI check for epsilon account
     if acct == "epsilon":
-        allow, reason, chart_url = ai_trade_decision(acct, strat, sig, sym, size)
+        allow, reason, chart_url = ai_trade_decision(acct, strat, sig, sym, size, alert)
         if not allow:
             return jsonify(status="blocked", reason=reason, chart=chart_url), 200
     if strat == "bracket":
