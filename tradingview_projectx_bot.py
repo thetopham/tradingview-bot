@@ -12,10 +12,7 @@ from datetime import datetime, timedelta, time as dtime
 import pytz
 import logging
 
-# --- LOGGING SETUP ---
 log_file = '/tmp/tradingview_projectx_bot.log'  # or anywhere you prefer
-
-# Set up file handler
 file_handler = logging.FileHandler(log_file)
 file_handler.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
@@ -62,15 +59,17 @@ session.mount("https://", adapter)
 print("MODULE LOADED")
 app = Flask(__name__)
 
-# Attach file handler to Flask's app.logger (for Gunicorn/Flask logs)
+# Attach handler to app.logger
 if not any(isinstance(h, logging.FileHandler) and h.baseFilename == log_file for h in app.logger.handlers):
     app.logger.addHandler(file_handler)
 app.logger.setLevel(logging.INFO)
+app.logger.propagate = False  # Prevent duplicate logs if root logger also used
 
-# Optionally: Attach file handler to the root logger (for logging.info(...) etc)
-logging.getLogger().addHandler(file_handler)
+# Attach handler to root logger for global logging.info(...) calls
+if not any(isinstance(h, logging.FileHandler) and h.baseFilename == log_file for h in logging.getLogger().handlers):
+    logging.getLogger().addHandler(file_handler)
+logging.getLogger().setLevel(logging.INFO)
 
-# --- Log that logging is working ---
 app.logger.info("==== LOGGING SYSTEM READY ====")
 
 _token = None
