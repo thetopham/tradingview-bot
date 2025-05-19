@@ -11,9 +11,12 @@ from dotenv import load_dotenv
 from datetime import datetime, timedelta, time as dtime
 import pytz
 import logging
+from logging.handlers import RotatingFileHandler
 
-log_file = '/tmp/tradingview_projectx_bot.log'  # or anywhere you prefer
-file_handler = logging.FileHandler(log_file)
+log_file = '/tmp/tradingview_projectx_bot.log'
+file_handler = RotatingFileHandler(
+    log_file, maxBytes=10*1024*1024, backupCount=5
+)
 file_handler.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
 file_handler.setFormatter(formatter)
@@ -59,14 +62,12 @@ session.mount("https://", adapter)
 print("MODULE LOADED")
 app = Flask(__name__)
 
-# Attach handler to app.logger
-if not any(isinstance(h, logging.FileHandler) and h.baseFilename == log_file for h in app.logger.handlers):
+if not any(isinstance(h, logging.Handler) and getattr(h, 'baseFilename', None) == log_file for h in app.logger.handlers):
     app.logger.addHandler(file_handler)
 app.logger.setLevel(logging.INFO)
-app.logger.propagate = False  # Prevent duplicate logs if root logger also used
+app.logger.propagate = False
 
-# Attach handler to root logger for global logging.info(...) calls
-if not any(isinstance(h, logging.FileHandler) and h.baseFilename == log_file for h in logging.getLogger().handlers):
+if not any(isinstance(h, logging.Handler) and getattr(h, 'baseFilename', None) == log_file for h in logging.getLogger().handlers):
     logging.getLogger().addHandler(file_handler)
 logging.getLogger().setLevel(logging.INFO)
 
