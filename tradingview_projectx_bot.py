@@ -550,22 +550,22 @@ def tv_webhook():
     if in_get_flat(now):
         return jsonify(status="ok", strategy=strat, message="in get-flat window, no trades"), 200
 
-    # AI check for overseer accounts
-if acct in AI_ENDPOINTS:
-    ai_url = AI_ENDPOINTS[acct]
-    ai_decision = ai_trade_decision(acct, strat, sig, sym, size, alert, ai_url)
-    # If AI says HOLD or error, block trade
-    if ai_decision.get("signal", "").upper() not in ("BUY", "SELL"):
-        return jsonify(status="blocked", reason=ai_decision.get("reason", "No reason"), ai_decision=ai_decision), 200
-    # Overwrite with AI's preferred strategy, symbol, etc.
-    strat = ai_decision.get("strategy", strat)
-    sig = ai_decision.get("signal", sig)
-    sym = ai_decision.get("symbol", sym)
-    size = ai_decision.get("size", size)
-    alert = ai_decision.get("alert", alert)
-    ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
+    # ----- Multi AI overseer logic -----
+    if acct in AI_ENDPOINTS:
+        ai_url = AI_ENDPOINTS[acct]
+        ai_decision = ai_trade_decision(acct, strat, sig, sym, size, alert, ai_url)
+        # If AI says HOLD or error, block trade
+        if ai_decision.get("signal", "").upper() not in ("BUY", "SELL"):
+            return jsonify(status="blocked", reason=ai_decision.get("reason", "No reason"), ai_decision=ai_decision), 200
+        # Overwrite with AI's preferred strategy, symbol, etc.
+        strat = ai_decision.get("strategy", strat)
+        sig = ai_decision.get("signal", sig)
+        sym = ai_decision.get("symbol", sym)
+        size = ai_decision.get("size", size)
+        alert = ai_decision.get("alert", alert)
+        ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
 
-
+    # ----- Continue for all accounts -----
     if strat == "bracket":
         return run_bracket(acct_id, sym, sig, size, alert, ai_decision_id)
     elif strat == "brackmod":
@@ -574,6 +574,7 @@ if acct in AI_ENDPOINTS:
         return run_pivot(acct_id, sym, sig, size, alert, ai_decision_id)
     else:
         return jsonify(error=f"Unknown strategy '{strat}'"), 400
+
 
 
 if __name__ == "__main__":
