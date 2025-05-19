@@ -17,6 +17,22 @@ results = supabase.table('trade_results').select("*").execute().data
 df_dec = pd.DataFrame(decisions)
 df_res = pd.DataFrame(results)
 
+print("ai_trading_log columns:", df_dec.columns.tolist())
+print("trade_results columns:", df_res.columns.tolist())
+
+# If ai_decision_id is missing but another similar key exists, rename it
+for df, name in [(df_dec, "ai_trading_log"), (df_res, "trade_results")]:
+    if 'ai_decision_id' not in df.columns:
+        # Try some common alternatives, add your own if needed
+        alt_keys = [col for col in df.columns if col.lower() in {'aidecisionid', 'ai_decisionid', 'decision_id', 'id'}]
+        if alt_keys:
+            print(f"Renaming {alt_keys[0]} to ai_decision_id in {name}")
+            df.rename(columns={alt_keys[0]: 'ai_decision_id'}, inplace=True)
+
+if 'ai_decision_id' not in df_dec.columns or 'ai_decision_id' not in df_res.columns:
+    print("ERROR: 'ai_decision_id' not found in both DataFrames. Please check your Supabase tables.")
+    exit(1)
+
 # Merge on ai_decision_id
 joined = df_dec.merge(df_res, on='ai_decision_id', suffixes=('_decision', '_result'))
 
@@ -25,15 +41,22 @@ joined.to_csv('joined_performance.csv', index=False)
 
 # Print some basic stats:
 print("Number of joined trades:", len(joined))
+if len(joined) == 0:
+    print("No joined trades found. Check your data and 'ai_decision_id' linkage.")
+    exit(0)
+
 print("Total PnL:", joined['total_pnl'].sum())
 print("Average PnL:", joined['total_pnl'].mean())
 print("Win rate:", (joined['total_pnl'] > 0).mean())
 
 # Group by strategy or account:
-print("\nPNL by strategy:")
-print(joined.groupby('strategy_decision')['total_pnl'].sum())
+if 'strategy_decision' in joined.columns:
+    print("\nPNL by strategy:")
+    print(joined.groupby('strategy_decision')['total_pnl'].sum())
+if 'signal_decision' in joined.columns:
+    print("\nTrades by signal (BUY/SELL):")
+    print(joined['signal_decision'].value_counts())
 
-print("\nTrades by signal (BUY/SELL):")
-print(joined['signal_decision'].value_counts())
-
-# Add more analysis as needed...
+# More analysis ideas:
+# print(joined.groupby('account_decision')['total_pnl'].sum())
+# print(joined.groupby('symbol_decision')['total_pnl'].sum())
