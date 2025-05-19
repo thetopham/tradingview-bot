@@ -20,6 +20,7 @@ USER_NAME       = os.getenv("PROJECTX_USERNAME")
 API_KEY         = os.getenv("PROJECTX_API_KEY")
 WEBHOOK_SECRET  = os.getenv("WEBHOOK_SECRET")
 N8N_AI_URL      = "https://n8n.thetopham.com/webhook/5c793395-f218-4a49-a620-51d297f2dbfb"
+N8N_AI_URL2      = "https://n8n.thetopham.com/webhook/fast"
 SUPABASE_URL    = os.getenv("SUPABASE_URL")   # e.g. https://xxxx.supabase.co/rest/v1
 SUPABASE_KEY    = os.getenv("SUPABASE_KEY")   # your Supabase API key
 
