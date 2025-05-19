@@ -395,6 +395,7 @@ def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
             entry_time=entry_time,
             ai_decision_id=ai_decision_id,
             meta={
+                "order_id": oid,
                 "symbol": sym,
                 "account": acct_id,
                 "strategy": "bracket",
@@ -479,6 +480,7 @@ def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
             entry_time=entry_time,
             ai_decision_id=ai_decision_id,
             meta={
+                "order_id": oid,
                 "symbol": sym,
                 "account": acct_id,
                 "strategy": "brackmod",
@@ -491,7 +493,7 @@ def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
     check_for_phantom_orders(acct_id, cid)
     return jsonify(status="ok",strategy="brackmod",entry=ent),200
 
-# ─── Pivot Strategy (with logging) ────────────────────────────────────
+# ─── Pivot Strategy (sl, no tp, waits until next opposing signal) ───────────
 def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
     cid = get_contract(sym)
     side = 0 if sig == "BUY" else 1
@@ -501,6 +503,8 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
     target = size if sig == "BUY" else -size
     entry_time = datetime.utcnow()
     trade_log = []
+    oid = None  # Track the entry order id for logging
+
     if net_pos == target:
         # No trade, but still log for completeness (optional)
         log_trade_results_to_supabase(
@@ -509,6 +513,7 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
             entry_time=entry_time,
             ai_decision_id=ai_decision_id,
             meta={
+                "order_id": oid,
                 "symbol": sym,
                 "account": acct_id,
                 "strategy": "pivot",
@@ -519,19 +524,31 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
             }
         )
         return jsonify(status="ok", strategy="pivot", message="already at target position"), 200
+
+    # Cancel any existing stops
     for o in search_open(acct_id):
         if o["contractId"] == cid and o["type"] == 4:
             cancel(acct_id, o["id"])
+
+    # If position is reversed, flatten then enter new
     if net_pos * target < 0:
         flatten_side = 1 if net_pos > 0 else 0
         trade_log.append(place_market(acct_id, cid, flatten_side, abs(net_pos)))
-        trade_log.append(place_market(acct_id, cid, side, size))
+        ent = place_market(acct_id, cid, side, size)
+        trade_log.append(ent)
+        oid = ent.get("orderId")
     elif net_pos == 0:
-        trade_log.append(place_market(acct_id, cid, side, size))
+        ent = place_market(acct_id, cid, side, size)
+        trade_log.append(ent)
+        oid = ent.get("orderId")
     elif abs(net_pos) != abs(target):
         flatten_side = 1 if net_pos > 0 else 0
         trade_log.append(place_market(acct_id, cid, flatten_side, abs(net_pos)))
-        trade_log.append(place_market(acct_id, cid, side, size))
+        ent = place_market(acct_id, cid, side, size)
+        trade_log.append(ent)
+        oid = ent.get("orderId")
+
+    # Place stop loss only (no TP)
     trades = [t for t in search_trades(acct_id, datetime.utcnow() - timedelta(minutes=5))
               if t["contractId"] == cid]
     entry_price = trades[-1]["price"] if trades else None
@@ -546,6 +563,7 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
         entry_time=entry_time,
         ai_decision_id=ai_decision_id,
         meta={
+            "order_id": oid,
             "symbol": sym,
             "account": acct_id,
             "strategy": "pivot",
@@ -556,6 +574,7 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
         }
     )
     return jsonify(status="ok", strategy="pivot", message="position set", trades=trade_log), 200
+
 
 
 @app.route("/webhook", methods=["POST"])
