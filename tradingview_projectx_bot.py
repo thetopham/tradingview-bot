@@ -195,13 +195,14 @@ def get_contract(sym):
         return OVERRIDE_CONTRACT_ID
     return None
 
-def ai_trade_decision(account, strat, sig, sym, size):
+def ai_trade_decision(account, strat, sig, sym, size, alert):
     payload = {
         "account": account,
         "strategy": strat,
         "signal": sig,
         "symbol": sym,
-        "size": size
+        "size": size,
+        "alert": alert
     }
     try:
         resp = session.post(N8N_AI_URL, json=payload, timeout=60)
@@ -253,27 +254,24 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
     r.raise_for_status()
 
 # ─── Bracket Strategy ─────────────────────────────────
-def run_bracket(acct_id, sym, sig, size):
+def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
     cid      = get_contract(sym)
     side     = 0 if sig=="BUY" else 1
     exit_side= 1-side
     pos = [p for p in search_pos(acct_id) if p["contractId"]==cid]
 
-    # skip same side
     if any((side==0 and p["type"]==1) or (side==1 and p["type"]==2) for p in pos):
         return jsonify(status="ok",strategy="bracket",message="skip same"),200
 
-    # flatten opposite (SAFE FLIP)
     if any((side==0 and p["type"]==2) or (side==1 and p["type"]==1) for p in pos):
         success = flatten_contract(acct_id, cid, timeout=10)
         if not success:
             return jsonify(status="error", message="Could not flatten contract—old orders/positions remain."), 500
 
-    # market entry
     ent = place_market(acct_id, cid, side, size)
     oid = ent["orderId"]
+    entry_time = datetime.utcnow()
 
-    # fill price
     price = None
     for _ in range(12):
         trades = [t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"]==oid]
@@ -289,12 +287,10 @@ def run_bracket(acct_id, sym, sig, size):
     if price is None:
         return jsonify(status="error", message="No fill price available"), 500
 
-    # initial SL
     slp = price - STOP_LOSS_POINTS if side==0 else price + STOP_LOSS_POINTS
     sl  = place_stop(acct_id, cid, exit_side, size, slp)
     sl_id = sl["orderId"]
 
-    # TP legs
     tp_ids=[]
     n=len(TP_POINTS)
     base=size//n; rem=size-base*n
@@ -304,9 +300,7 @@ def run_bracket(acct_id, sym, sig, size):
         r=place_limit(acct_id, cid, exit_side, amt, px)
         tp_ids.append(r["orderId"])
 
-    # Watcher
     def watcher():
-        a, b, c = slices
         def is_open(order_id):
             return order_id in {o["id"] for o in search_open(acct_id)}
         def cancel_all_tps():
@@ -315,55 +309,53 @@ def run_bracket(acct_id, sym, sig, size):
                     cancel(acct_id, o["id"])
         def is_flat():
             return not any(p for p in search_pos(acct_id) if p["contractId"] == cid)
-        # Wait for TP1 or SL
         while True:
             if is_flat():
-                cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+                cancel_all_tps(); cancel_all_stops(acct_id, cid); break
             if not is_open(tp_ids[0]): break
-            if not is_open(sl_id): cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+            if not is_open(sl_id): cancel_all_tps(); cancel_all_stops(acct_id, cid); break
             time.sleep(4)
         cancel(acct_id, sl_id)
-        new1 = place_stop(acct_id, cid, exit_side, b + c, slp)
+        new1 = place_stop(acct_id, cid, exit_side, slices[1]+slices[2], slp)
         st1 = new1["orderId"]
-        # Wait for TP2 or SL
         while True:
             if is_flat():
-                cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+                cancel_all_tps(); cancel_all_stops(acct_id, cid); break
             if not is_open(tp_ids[1]): break
-            if not is_open(st1): cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+            if not is_open(st1): cancel_all_tps(); cancel_all_stops(acct_id, cid); break
             time.sleep(4)
         cancel(acct_id, st1)
         slp2 = price - 5 if side == 0 else price + 5
-        new2 = place_stop(acct_id, cid, exit_side, c, slp2)
+        new2 = place_stop(acct_id, cid, exit_side, slices[2], slp2)
         st2 = new2["orderId"]
-        # Wait for TP3 or SL
         while True:
             if is_flat():
-                cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+                cancel_all_tps(); cancel_all_stops(acct_id, cid); break
             if not is_open(tp_ids[2]): break
-            if not is_open(st2): cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+            if not is_open(st2): cancel_all_tps(); cancel_all_stops(acct_id, cid); break
             time.sleep(4)
         cancel_all_tps(); cancel_all_stops(acct_id, cid)
-        
+
+        # --- LOGGING ---
         log_trade_results_to_supabase(
             acct_id=acct_id,
             cid=cid,
             entry_time=entry_time,
-            ai_decision_id=ai_decision_id,  # If using, else pass None
+            ai_decision_id=ai_decision_id,
             meta={
                 "symbol": sym,
                 "account": acct_id,
                 "strategy": "bracket",
                 "signal": sig,
                 "size": size,
-                "alert": alert,  
+                "alert": alert,
             }
         )
     threading.Thread(target=watcher,daemon=True).start()
     return jsonify(status="ok",strategy="bracket",entry=ent),200
 
-# ─── Brackmod Strategy (shorter SL/TP logic) ───────────
-def run_brackmod(acct_id, sym, sig, size):
+# ─── Brackmod Strategy (shorter SL/TP logic, with logging) ───────────
+def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
     cid      = get_contract(sym)
     side     = 0 if sig=="BUY" else 1
     exit_side= 1-side
@@ -376,7 +368,7 @@ def run_brackmod(acct_id, sym, sig, size):
             return jsonify(status="error", message="Could not flatten contract—old orders/positions remain."), 500
     ent = place_market(acct_id, cid, side, size)
     oid = ent["orderId"]
-    # fill price
+    entry_time = datetime.utcnow()
     price = None
     for _ in range(12):
         trades = [t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"]==oid]
@@ -402,7 +394,6 @@ def run_brackmod(acct_id, sym, sig, size):
         r = place_limit(acct_id, cid, exit_side, amt, px)
         tp_ids.append(r["orderId"])
     def watcher():
-        a, b = slices
         def is_open(order_id):
             return order_id in {o["id"] for o in search_open(acct_id)}
         def cancel_all_tps():
@@ -413,26 +404,27 @@ def run_brackmod(acct_id, sym, sig, size):
             return not any(p for p in search_pos(acct_id) if p["contractId"] == cid)
         while True:
             if is_flat():
-                cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+                cancel_all_tps(); cancel_all_stops(acct_id, cid); break
             if not is_open(tp_ids[0]): break
-            if not is_open(sl_id): cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+            if not is_open(sl_id): cancel_all_tps(); cancel_all_stops(acct_id, cid); break
             time.sleep(4)
         cancel(acct_id, sl_id)
-        new1 = place_stop(acct_id, cid, exit_side, b, slp)
+        new1 = place_stop(acct_id, cid, exit_side, slices[1], slp)
         st1 = new1["orderId"]
         while True:
             if is_flat():
-                cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+                cancel_all_tps(); cancel_all_stops(acct_id, cid); break
             if not is_open(tp_ids[1]): break
-            if not is_open(st1): cancel_all_tps(); cancel_all_stops(acct_id, cid); return
+            if not is_open(st1): cancel_all_tps(); cancel_all_stops(acct_id, cid); break
             time.sleep(4)
         cancel_all_tps(); cancel_all_stops(acct_id, cid)
 
+        # --- LOGGING ---
         log_trade_results_to_supabase(
             acct_id=acct_id,
             cid=cid,
             entry_time=entry_time,
-            ai_decision_id=ai_decision_id,  # If using, else pass None
+            ai_decision_id=ai_decision_id,
             meta={
                 "symbol": sym,
                 "account": acct_id,
@@ -441,25 +433,41 @@ def run_brackmod(acct_id, sym, sig, size):
                 "size": size,
                 "alert": alert,
             }
-        )   
-        
+        )
     threading.Thread(target=watcher,daemon=True).start()
     return jsonify(status="ok",strategy="brackmod",entry=ent),200
 
-# ─── Pivot Strategy ────────────────────────────────────
-def run_pivot(acct_id, sym, sig, size):
+# ─── Pivot Strategy (with logging) ────────────────────────────────────
+def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
     cid = get_contract(sym)
     side = 0 if sig == "BUY" else 1
     exit_side = 1 - side
     pos = [p for p in search_pos(acct_id) if p["contractId"] == cid]
     net_pos = sum(p["size"] if p["type"] == 1 else -p["size"] for p in pos)
     target = size if sig == "BUY" else -size
+    entry_time = datetime.utcnow()
+    trade_log = []
     if net_pos == target:
+        # No trade, but still log for completeness (optional)
+        log_trade_results_to_supabase(
+            acct_id=acct_id,
+            cid=cid,
+            entry_time=entry_time,
+            ai_decision_id=ai_decision_id,
+            meta={
+                "symbol": sym,
+                "account": acct_id,
+                "strategy": "pivot",
+                "signal": sig,
+                "size": size,
+                "alert": alert,
+                "message": "already at target position"
+            }
+        )
         return jsonify(status="ok", strategy="pivot", message="already at target position"), 200
     for o in search_open(acct_id):
         if o["contractId"] == cid and o["type"] == 4:
             cancel(acct_id, o["id"])
-    trade_log = []
     if net_pos * target < 0:
         flatten_side = 1 if net_pos > 0 else 0
         trade_log.append(place_market(acct_id, cid, flatten_side, abs(net_pos)))
@@ -477,21 +485,24 @@ def run_pivot(acct_id, sym, sig, size):
         stop_price = entry_price - STOP_LOSS_POINTS if side == 0 else entry_price + STOP_LOSS_POINTS
         place_stop(acct_id, cid, exit_side, size, stop_price)
 
+    # --- LOGGING ---
     log_trade_results_to_supabase(
-            acct_id=acct_id,
-            cid=cid,
-            entry_time=entry_time,
-            ai_decision_id=ai_decision_id,  # If using, else pass None
-            meta={
-                "symbol": sym,
-                "account": acct_id,
-                "strategy": "pivot",
-                "signal": sig,
-                "size": size,
-                "alert": alert,
-            }
-        )   
+        acct_id=acct_id,
+        cid=cid,
+        entry_time=entry_time,
+        ai_decision_id=ai_decision_id,
+        meta={
+            "symbol": sym,
+            "account": acct_id,
+            "strategy": "pivot",
+            "signal": sig,
+            "size": size,
+            "alert": alert,
+            "trades": trade_log
+        }
+    )
     return jsonify(status="ok", strategy="pivot", message="position set", trades=trade_log), 200
+
 
 # ─── Webhook Dispatcher ─────────────────────────────────
 @app.route("/webhook", methods=["POST"])
@@ -505,11 +516,11 @@ def tv_webhook():
     sym   = data.get("symbol", "")
     size  = int(data.get("size", 1))
     alert = data.get("alert", "")
+    ai_decision_id = data.get("ai_decision_id", None)
     if acct not in ACCOUNTS:
         return jsonify(error=f"Unknown account '{acct}'"), 400
     acct_id = ACCOUNTS[acct]
     cid = get_contract(sym)
-    # Explicit FLAT: flatten and return
     if sig == "FLAT":
         ok = flatten_contract(acct_id, cid, timeout=10)
         status = "ok" if ok else "error"
@@ -524,11 +535,11 @@ def tv_webhook():
         if not allow:
             return jsonify(status="blocked", reason=reason, chart=chart_url), 200
     if strat == "bracket":
-        return run_bracket(acct_id, sym, sig, size)
+        return run_bracket(acct_id, sym, sig, size, alert, ai_decision_id)
     elif strat == "brackmod":
-        return run_brackmod(acct_id, sym, sig, size)
+        return run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id)
     elif strat == "pivot":
-        return run_pivot(acct_id, sym, sig, size)
+        return run_pivot(acct_id, sym, sig, size, alert, ai_decision_id)
     else:
         return jsonify(error=f"Unknown strategy '{strat}'"), 400
 
