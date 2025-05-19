@@ -207,11 +207,18 @@ def ai_trade_decision(account, strat, sig, sym, size, alert):
     try:
         resp = session.post(N8N_AI_URL, json=payload, timeout=60)
         resp.raise_for_status()
-        data = resp.json()
-        dec = str(data.get('action', '')).upper()
-        return dec in ("BUY", "SELL"), data.get('reason', ''), data.get('chart_url', '')
+        data = resp.json()  # This is your full AI decision object
+        return data  # Just return the AI output dict!
     except Exception as e:
-        return False, f"AI error: {str(e)}", None
+        # Return a fallback "block trade" object
+        return {
+            "strategy": strat,
+            "signal": "HOLD",
+            "account": account,
+            "reason": f"AI error: {str(e)}",
+            "error": True
+        }
+
 
 # ─── Trade PnL Logging Helper ───────────────────────────────
 
@@ -504,12 +511,12 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
     return jsonify(status="ok", strategy="pivot", message="position set", trades=trade_log), 200
 
 
-# ─── Webhook Dispatcher ─────────────────────────────────
 @app.route("/webhook", methods=["POST"])
 def tv_webhook():
     data = request.get_json()
     if data.get("secret") != WEBHOOK_SECRET:
         return jsonify(error="unauthorized"), 403
+
     strat = data.get("strategy", "bracket").lower()
     acct  = (data.get("account") or DEFAULT_ACCOUNT).lower()
     sig   = data.get("signal", "").upper()
@@ -517,23 +524,37 @@ def tv_webhook():
     size  = int(data.get("size", 1))
     alert = data.get("alert", "")
     ai_decision_id = data.get("ai_decision_id", None)
+
     if acct not in ACCOUNTS:
         return jsonify(error=f"Unknown account '{acct}'"), 400
+
     acct_id = ACCOUNTS[acct]
     cid = get_contract(sym)
+
     if sig == "FLAT":
         ok = flatten_contract(acct_id, cid, timeout=10)
         status = "ok" if ok else "error"
         code = 200 if ok else 500
         return jsonify(status=status, strategy=strat, message="flattened"), code
+
     now = datetime.now(CT)
     if in_get_flat(now):
         return jsonify(status="ok", strategy=strat, message="in get-flat window, no trades"), 200
+
     # AI check for epsilon account
     if acct == "epsilon":
-        allow, reason, chart_url = ai_trade_decision(acct, strat, sig, sym, size, alert)
-        if not allow:
-            return jsonify(status="blocked", reason=reason, chart=chart_url), 200
+        ai_decision = ai_trade_decision(acct, strat, sig, sym, size, alert)
+        # If AI says HOLD or error, block trade
+        if ai_decision.get("signal", "").upper() not in ("BUY", "SELL"):
+            return jsonify(status="blocked", reason=ai_decision.get("reason", "No reason"), ai_decision=ai_decision), 200
+        # Overwrite with AI's preferred strategy, symbol, etc.
+        strat = ai_decision.get("strategy", strat)
+        sig = ai_decision.get("signal", sig)
+        sym = ai_decision.get("symbol", sym)
+        size = ai_decision.get("size", size)
+        alert = ai_decision.get("alert", alert)
+        ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
+
     if strat == "bracket":
         return run_bracket(acct_id, sym, sig, size, alert, ai_decision_id)
     elif strat == "brackmod":
@@ -542,6 +563,7 @@ def tv_webhook():
         return run_pivot(acct_id, sym, sig, size, alert, ai_decision_id)
     else:
         return jsonify(error=f"Unknown strategy '{strat}'"), 400
+
 
 if __name__ == "__main__":
     app.logger.info("Starting tradingview_projectx_bot server.")
