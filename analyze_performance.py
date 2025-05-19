@@ -23,7 +23,6 @@ print("trade_results columns:", df_res.columns.tolist())
 # If ai_decision_id is missing but another similar key exists, rename it
 for df, name in [(df_dec, "ai_trading_log"), (df_res, "trade_results")]:
     if 'ai_decision_id' not in df.columns:
-        # Try some common alternatives, add your own if needed
         alt_keys = [col for col in df.columns if col.lower() in {'aidecisionid', 'ai_decisionid', 'decision_id', 'id'}]
         if alt_keys:
             print(f"Renaming {alt_keys[0]} to ai_decision_id in {name}")
@@ -52,14 +51,30 @@ print("Total PnL:", joined['total_pnl'].sum())
 print("Average PnL:", joined['total_pnl'].mean())
 print("Win rate:", (joined['total_pnl'] > 0).mean())
 
-# Group by strategy or account:
-if 'strategy_decision' in joined.columns:
-    print("\nPNL by strategy:")
-    print(joined.groupby('strategy_decision')['total_pnl'].sum())
-if 'signal_decision' in joined.columns:
-    print("\nTrades by signal (BUY/SELL):")
-    print(joined['signal_decision'].value_counts())
+# Group by account (AI strategy), and print stats for each account
+if 'account_decision' in joined.columns:
+    accounts = joined['account_decision'].unique()
+    print("\nAccounts found:", accounts)
+    for acct in accounts:
+        print(f"\n=== Performance for account '{acct}' ===")
+        acct_df = joined[joined['account_decision'] == acct]
+        print("  Number of trades:", len(acct_df))
+        print("  Total PnL:", acct_df['total_pnl'].sum())
+        print("  Average PnL:", acct_df['total_pnl'].mean())
+        print("  Win rate:", (acct_df['total_pnl'] > 0).mean())
+        if 'strategy_decision' in acct_df.columns:
+            print("  PnL by strategy:")
+            print(acct_df.groupby('strategy_decision')['total_pnl'].sum())
+        if 'signal_decision' in acct_df.columns:
+            print("  Trades by signal (BUY/SELL):")
+            print(acct_df['signal_decision'].value_counts())
 
-# More analysis ideas:
-# print(joined.groupby('account_decision')['total_pnl'].sum())
-# print(joined.groupby('symbol_decision')['total_pnl'].sum())
+# Optionally: show global PnL by account and strategy
+if 'account_decision' in joined.columns and 'strategy_decision' in joined.columns:
+    print("\n=== Global PnL by Account and Strategy ===")
+    print(joined.groupby(['account_decision', 'strategy_decision'])['total_pnl'].sum())
+
+# If you want, also save per-account CSVs for further review
+    for acct in accounts:
+        acct_df = joined[joined['account_decision'] == acct]
+        acct_df.to_csv(f'performance_{acct}.csv', index=False)
