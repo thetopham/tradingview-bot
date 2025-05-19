@@ -287,13 +287,21 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
     exit_time = datetime.utcnow()
     payload = {
         "ai_decision_id": ai_decision_id,
+        "order_id": meta.get("order_id"),
+        "symbol": meta.get("symbol"),
+        "account": meta.get("account"),
+        "strategy": meta.get("strategy"),
+        "signal": meta.get("signal"),
         "entry_time": entry_time.isoformat(),
         "exit_time": exit_time.isoformat(),
         "duration_sec": int((exit_time - entry_time).total_seconds()),
+        "size": meta.get("size"),
         "total_pnl": total_pnl,
-        "raw_trades": trades,
-        **meta
-    }
+        "alert": meta.get("alert"),
+        "raw_trades": trades,  # JSON
+        "comment": meta.get("comment", ""), # Feedback, can be filled by n8n/agent later
+}
+
     url = f"{SUPABASE_URL}/rest/v1/trade_results"
 
     headers = {
