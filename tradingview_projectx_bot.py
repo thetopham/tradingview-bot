@@ -250,7 +250,8 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         "raw_trades": trades,
         **meta
     }
-    url = f"{SUPABASE_URL}/trade_results"
+    url = f"{SUPABASE_URL}/rest/v1/trade_results"
+
     headers = {
         "apikey":       SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
