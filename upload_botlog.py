@@ -2,7 +2,8 @@ from supabase import create_client
 import datetime
 import glob
 import os
-import dotenv import load_dotenv
+from dotenv import load_dotenv
+
 
 load_dotenv()
 
