@@ -440,6 +440,7 @@ def tv_webhook():
     sig   = data.get("signal", "").upper()
     sym   = data.get("symbol", "")
     size  = int(data.get("size", 1))
+    alert = data.get("alert", "")
     if acct not in ACCOUNTS:
         return jsonify(error=f"Unknown account '{acct}'"), 400
     acct_id = ACCOUNTS[acct]
