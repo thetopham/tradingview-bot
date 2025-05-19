@@ -31,6 +31,13 @@ DEFAULT_ACCOUNT = next(iter(ACCOUNTS), None)
 if not ACCOUNTS:
     raise RuntimeError("No accounts loaded from .env. Add ACCOUNT_<NAME>=<ID>.")
 
+AI_ENDPOINTS = {
+    "epsilon": N8N_AI_URL,
+    "beta": N8N_AI_URL2,
+    # add more as needed
+}
+
+
 STOP_LOSS_POINTS = 10.0
 TP_POINTS        = [2.5, 5.0, 10.0]
 OVERRIDE_CONTRACT_ID = "CON.F.US.MES.M25"
@@ -196,7 +203,7 @@ def get_contract(sym):
         return OVERRIDE_CONTRACT_ID
     return None
 
-def ai_trade_decision(account, strat, sig, sym, size, alert):
+def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url):
     payload = {
         "account": account,
         "strategy": strat,
@@ -206,12 +213,11 @@ def ai_trade_decision(account, strat, sig, sym, size, alert):
         "alert": alert
     }
     try:
-        resp = session.post(N8N_AI_URL, json=payload, timeout=60)
+        resp = session.post(ai_url, json=payload, timeout=60)
         resp.raise_for_status()
-        data = resp.json()  # This is your full AI decision object
-        return data  # Just return the AI output dict!
+        data = resp.json()
+        return data
     except Exception as e:
-        # Return a fallback "block trade" object
         return {
             "strategy": strat,
             "signal": "HOLD",
@@ -219,6 +225,7 @@ def ai_trade_decision(account, strat, sig, sym, size, alert):
             "reason": f"AI error: {str(e)}",
             "error": True
         }
+
 
 
 # ─── Trade PnL Logging Helper ───────────────────────────────
@@ -543,19 +550,21 @@ def tv_webhook():
     if in_get_flat(now):
         return jsonify(status="ok", strategy=strat, message="in get-flat window, no trades"), 200
 
-    # AI check for epsilon account
-    if acct == "epsilon":
-        ai_decision = ai_trade_decision(acct, strat, sig, sym, size, alert)
-        # If AI says HOLD or error, block trade
-        if ai_decision.get("signal", "").upper() not in ("BUY", "SELL"):
-            return jsonify(status="blocked", reason=ai_decision.get("reason", "No reason"), ai_decision=ai_decision), 200
-        # Overwrite with AI's preferred strategy, symbol, etc.
-        strat = ai_decision.get("strategy", strat)
-        sig = ai_decision.get("signal", sig)
-        sym = ai_decision.get("symbol", sym)
-        size = ai_decision.get("size", size)
-        alert = ai_decision.get("alert", alert)
-        ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
+    # AI check for overseer accounts
+if acct in AI_ENDPOINTS:
+    ai_url = AI_ENDPOINTS[acct]
+    ai_decision = ai_trade_decision(acct, strat, sig, sym, size, alert, ai_url)
+    # If AI says HOLD or error, block trade
+    if ai_decision.get("signal", "").upper() not in ("BUY", "SELL"):
+        return jsonify(status="blocked", reason=ai_decision.get("reason", "No reason"), ai_decision=ai_decision), 200
+    # Overwrite with AI's preferred strategy, symbol, etc.
+    strat = ai_decision.get("strategy", strat)
+    sig = ai_decision.get("signal", sig)
+    sym = ai_decision.get("symbol", sym)
+    size = ai_decision.get("size", size)
+    alert = ai_decision.get("alert", alert)
+    ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
+
 
     if strat == "bracket":
         return run_bracket(acct_id, sym, sig, size, alert, ai_decision_id)
