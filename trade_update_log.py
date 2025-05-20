@@ -6,12 +6,9 @@ from dotenv import load_dotenv
 from supabase import create_client
 
 load_dotenv()
-# --- TopstepX Config ---
 PX_BASE         = os.getenv("PROJECTX_BASE_URL")
 USER_NAME       = os.getenv("PROJECTX_USERNAME")
 API_KEY         = os.getenv("PROJECTX_API_KEY")
-
-# --- Supabase Config ---
 SUPABASE_URL    = os.getenv("SUPABASE_URL")
 SUPABASE_KEY    = os.getenv("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -19,7 +16,6 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 ACCOUNTS = {k[len("ACCOUNT_"):].lower(): int(v)
     for k, v in os.environ.items() if k.startswith("ACCOUNT_")}
 
-# --- Authenticate to TopstepX ---
 def get_token():
     r = requests.post(
         f"{PX_BASE}/api/Auth/loginKey",
@@ -37,7 +33,6 @@ session.headers.update({
     "Authorization": f"Bearer {token}",
 })
 
-# --- Get all trade_results from Supabase in last X days ---
 def get_logged_trade_ids(days=2):
     cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=days)).isoformat()
     rows = supabase.table('trade_results').select("order_id,entry_time").gte('entry_time', cutoff).execute()
@@ -47,7 +42,6 @@ def get_logged_trade_ids(days=2):
             seen.add(str(r['order_id']))
     return seen
 
-# --- Get all Topstep trades for an account in last X days ---
 def get_recent_trades(acct_id, days=2):
     since = (datetime.datetime.utcnow() - datetime.timedelta(days=days)).replace(tzinfo=pytz.UTC)
     resp = session.post(
@@ -58,11 +52,41 @@ def get_recent_trades(acct_id, days=2):
     resp.raise_for_status()
     return resp.json().get('trades', [])
 
-# --- Main: Find and upload missing trades ---
+def get_ai_trading_log(days=2):
+    cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=days)).isoformat()
+    rows = supabase.table('ai_trading_log').select("*").gte('timestamp', cutoff).execute()
+    return rows.data
+
+def find_best_ai_log_match(trade, ai_logs):
+    # Match by order_id first if present
+    tid = str(trade.get('orderId') or "")
+    for log in ai_logs:
+        if str(log.get('order_id', "")) == tid:
+            return log
+    # Otherwise, match by entry_time and symbol (fuzzy, within 2 minutes)
+    entry_time = trade.get('entryTimestamp')
+    symbol = trade.get('contractId')
+    trade_time = None
+    try:
+        trade_time = datetime.datetime.fromisoformat(entry_time.replace('Z', '+00:00'))
+    except Exception:
+        return None
+    for log in ai_logs:
+        log_time = None
+        try:
+            log_time = datetime.datetime.fromisoformat(log.get('timestamp').replace('Z', '+00:00'))
+        except Exception:
+            continue
+        if log.get('symbol') == symbol and abs((trade_time - log_time).total_seconds()) < 120:
+            return log
+    return None
+
 def main():
     days = 2
     logged = get_logged_trade_ids(days=days)
+    ai_logs = get_ai_trading_log(days=days)
     print(f"Loaded {len(logged)} logged trades from Supabase.")
+    print(f"Loaded {len(ai_logs)} ai_trading_log records.")
 
     for acct_name, acct_id in ACCOUNTS.items():
         print(f"\nChecking account: {acct_name} ({acct_id})")
@@ -70,32 +94,32 @@ def main():
         for trade in trades:
             order_id = str(trade.get('orderId') or "")
             contract_id = trade.get('contractId')
-            # Only for MES for now
             if contract_id != "CON.F.US.MES.M25":
                 continue
             if order_id in logged:
-                continue  # Already logged
-            # Only log completed (not open, not voided)
+                continue
             if trade.get('voided', False):
                 continue
-            # Build payload for Supabase upload (mirror your normal trade_results schema)
+
+            ai_log = find_best_ai_log_match(trade, ai_logs)
+            # Merge fields
             payload = {
-                "ai_decision_id": None,   # Unknown if not in your ai log
+                "ai_decision_id": ai_log.get("id") if ai_log else None,
                 "order_id": order_id,
                 "symbol": contract_id,
                 "account": acct_id,
-                "strategy": None,
-                "signal": None,
+                "strategy": ai_log.get("strategy") if ai_log else None,
+                "signal": ai_log.get("signal") if ai_log else None,
                 "entry_time": trade.get('entryTimestamp'),
                 "exit_time": trade.get('exitTimestamp'),
                 "duration_sec": trade.get('durationSec'),
                 "size": trade.get('size'),
                 "total_pnl": trade.get('profitAndLoss'),
-                "alert": None,
+                "alert": ai_log.get("alert") if ai_log else None,
                 "raw_trades": [trade],
-                "comment": "Catchup script: backfilled from TopstepX",
+                "comment": f"Catchup script: backfilled from TopstepX; AI log merged: {bool(ai_log)}",
             }
-            print(f"Uploading missing trade: {order_id}, pnl={trade.get('profitAndLoss')}, entry={trade.get('entryTimestamp')}")
+            print(f"Uploading missing trade: {order_id}, pnl={trade.get('profitAndLoss')}, entry={trade.get('entryTimestamp')}, ai_log={'YES' if ai_log else 'NO'}")
             try:
                 supabase.table('trade_results').insert(payload).execute()
                 print("...Uploaded.")
