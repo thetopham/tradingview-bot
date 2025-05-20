@@ -1,0 +1,425 @@
+{
+  "name": "30m",
+  "nodes": [
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "694cc668-54e1-4b18-94e7-51a381764295",
+              "name": "response",
+              "value": "={ {{ $json.chart_url }} }",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "includeBinary": true
+        }
+      },
+      "id": "baf99582-5cf5-4167-820a-d1afb96c2427",
+      "name": "Set 'response' value",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1160,
+        60
+      ],
+      "typeVersion": 3.3
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.chart-img.com/v2/tradingview/layout-chart/storage/1LucwVmQ",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "tradingview-session-id",
+              "value": "3mj0z4rbt80q53ph30p82i1pu9k91vh7"
+            },
+            {
+              "name": "tradingview-session-id-sign",
+              "value": "v3:hv1B6jvs2MSGaLCIPXxIsuPkoR73HOmY2ajBU7KNvBE="
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "format",
+              "value": "jpeg"
+            },
+            {
+              "name": "interval",
+              "value": "30m"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "72706694-5c3a-4625-a507-0bb81dc64294",
+      "name": "Tradingview Chart",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        600,
+        200
+      ],
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ZleHrixI7F5TA8Yb",
+          "name": "chart-img"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Start here: Step-by Step Youtube Tutorial :star:\n\n[![Technical Analyst AI Agent using LLM Vision](https://img.youtube.com/vi/yjBHheCB6Ek/sddefault.jpg)](https://youtu.be/yjBHheCB6Ek)\n",
+        "height": 550,
+        "width": 507,
+        "color": 7
+      },
+      "id": "340bdf01-e805-49b4-80f6-b005e0bff94c",
+      "name": "Sticky Note5",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -640,
+        40
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.chart_url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        200
+      ],
+      "id": "27a2891c-bc30-4013-8f30-d79977dab96f",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "5m",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "id": "67b62b25-e3ed-4c81-bc32-5d49ea52d46b",
+      "name": "Webhook",
+      "webhookId": "5c793395-f218-4a49-a620-51d297f2dbfb"
+    },
+    {
+      "parameters": {
+        "respondWith": "binary",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.2,
+      "position": [
+        1400,
+        60
+      ],
+      "id": "95672d3f-30b2-47da-91c2-61d0a914f7f2",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        20,
+        400
+      ],
+      "id": "d6807833-784d-4fa8-ab30-a179e8cdc457",
+      "name": "When clicking ‘Test workflow’"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "0d1f6a39-58eb-4814-83dd-88e695a51548",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "charts",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "symbol",
+              "condition": "eq",
+              "keyValue": "MES"
+            },
+            {
+              "keyName": "timeframe",
+              "condition": "eq",
+              "keyValue": "30m"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "chart_url",
+              "fieldValue": "={{ $json.url }}"
+            },
+            {
+              "fieldId": "updated_at",
+              "fieldValue": "={{ $now }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        780,
+        200
+      ],
+      "id": "69feda29-37d6-46cd-9fc9-2b06b5524230",
+      "name": "Supabase",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "charts",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "timeframe",
+              "keyValue": "30m"
+            },
+            {
+              "keyName": "symbol",
+              "keyValue": "MES"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        240,
+        80
+      ],
+      "id": "5bd148c0-b499-41d6-bd81-ffab951aef5c",
+      "name": "Supabase1",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "04a3fd08-7396-47d6-830d-da9165fa0bc0",
+              "leftValue": "={{ (new Date().getTime() - new Date($json[\"updated_at\"]).getTime()) / 60000 }}",
+              "rightValue": 10,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        380,
+        80
+      ],
+      "id": "86d01d56-c558-4231-b19c-96d5d54c8e70",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.chart_url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        840,
+        -40
+      ],
+      "id": "bae44254-1089-4ed9-a4e9-7d1ba055ea1a",
+      "name": "HTTP Request1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Tradingview Chart": {
+      "main": [
+        [
+          {
+            "node": "Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Set 'response' value",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Supabase1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set 'response' value": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Test workflow’": {
+      "main": [
+        [
+          {
+            "node": "Supabase1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Supabase1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase1": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tradingview Chart",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Set 'response' value",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "f48535d8-2cea-4847-b528-44f9944a9dd0",
+  "meta": {
+    "instanceId": "9783a33f8d5600da0ff08d35d1dc9051c104e0a37fceb74a2ffe1557dcda02bc"
+  },
+  "id": "KWlHcm2igwb0181Y",
+  "tags": []
+}
