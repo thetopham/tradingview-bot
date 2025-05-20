@@ -264,15 +264,12 @@ def check_for_phantom_orders(acct_id, cid):
 
 
 
-# ─── Trade PnL Logging Helper ───────────────────────────────
-
 def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta=None):
     """
     Fetches trades since entry_time from TopstepX API, sums profitAndLoss,
     and logs all info to Supabase.
     """
     meta = meta or {}
-    # Fetch all trades for this contract since entry_time
     resp = post("/api/Trade/search", {
         "accountId": acct_id,
         "startTimestamp": entry_time.isoformat()
@@ -298,20 +295,28 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         "size": meta.get("size"),
         "total_pnl": total_pnl,
         "alert": meta.get("alert"),
-        "raw_trades": trades,  # JSON
-        "comment": meta.get("comment", ""), # Feedback, can be filled by n8n/agent later
-}
+        "raw_trades": trades,
+        "comment": meta.get("comment", ""),
+    }
 
     url = f"{SUPABASE_URL}/rest/v1/trade_results"
-
     headers = {
         "apikey":       SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
         "Content-Type":  "application/json",
         "Prefer":        "return=minimal"
     }
-    r = session.post(url, json=payload, headers=headers, timeout=(3.05, 10))
-    r.raise_for_status()
+
+    try:
+        logging.info(f"Uploading to Supabase: {url}")
+        logging.info(f"Payload: {json.dumps(payload)[:1000]}")  # Truncate if needed
+        r = session.post(url, json=payload, headers=headers, timeout=(3.05, 10))
+        logging.info(f"Supabase status: {r.status_code}, {r.text}")
+        r.raise_for_status()
+    except Exception as e:
+        logging.error(f"Supabase upload failed: {e}")
+        logging.error(f"Payload that failed: {json.dumps(payload)[:1000]}")
+
 
 # ─── Bracket Strategy ─────────────────────────────────
 def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
