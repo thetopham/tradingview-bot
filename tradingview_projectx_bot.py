@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from datetime import datetime, timedelta, time as dtime
 import pytz
 import logging
+import json
 from logging.handlers import RotatingFileHandler
 
 log_file = '/tmp/tradingview_projectx_bot.log'
@@ -108,7 +109,8 @@ def ensure_token():
 def post(path, payload):
     ensure_token()
     url = f"{PX_BASE}{path}"
-    app.logger.info("POST %s payload=%s", url, payload)
+    # DEBUG level, not INFO
+    app.logger.debug("POST %s payload=%s", url, payload)
     resp = session.post(
         url,
         json=payload,
@@ -120,10 +122,13 @@ def post(path, payload):
     )
     if resp.status_code == 429:
         app.logger.warning("Rate limit hit: %s %s", resp.status_code, resp.text)
+    if resp.status_code >= 400:
+        app.logger.error("Error on POST %s: %s", url, resp.text)
     resp.raise_for_status()
     data = resp.json()
     app.logger.debug("Response JSON: %s", data)
     return data
+
 
 def place_market(acct_id, cid, side, size):
     app.logger.info("Placing market order acct=%s cid=%s side=%s size=%s", acct_id, cid, side, size)
