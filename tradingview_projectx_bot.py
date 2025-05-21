@@ -330,8 +330,6 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         except Exception as e2:
             logging.error(f"Failed to write trade result to local log: {e2}")
 
-
-
 def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
     cid = get_contract(sym)
     side = 0 if sig == "BUY" else 1
@@ -340,6 +338,7 @@ def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
 
     if any((side == 0 and p["type"] == 1) or (side == 1 and p["type"] == 2) for p in pos):
         return jsonify(status="ok", strategy="bracket", message="skip same"), 200
+
     if any((side == 0 and p["type"] == 2) or (side == 1 and p["type"] == 1) for p in pos):
         success = flatten_contract(acct_id, cid, timeout=10)
         if not success:
@@ -379,7 +378,7 @@ def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
         r = place_limit(acct_id, cid, exit_side, amt, px)
         tp_ids.append(r["orderId"])
 
-    # DRY: Save meta for SignalR event-driven logging
+    # --- Save trade meta for SignalR logging ---
     track_trade(
         acct_id=acct_id,
         cid=cid,
@@ -393,15 +392,14 @@ def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
         account=acct_id,
         symbol=sym,
         sl_id=sl_id,
-        tp_ids=tp_ids
+        tp_ids=tp_ids,
+        trades=None
     )
 
     check_for_phantom_orders(acct_id, cid)
     return jsonify(status="ok", strategy="bracket", entry=ent), 200
 
 def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
-    from signalr_listener import track_trade
-
     cid = get_contract(sym)
     side = 0 if sig == "BUY" else 1
     exit_side = 1 - side
@@ -456,16 +454,14 @@ def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
         account=acct_id,
         symbol=sym,
         sl_id=sl_id,
-        tp_ids=tp_ids
+        tp_ids=tp_ids,
+        trades=None
     )
 
-    # No watcher thread needed
     check_for_phantom_orders(acct_id, cid)
     return jsonify(status="ok", strategy="brackmod", entry=ent), 200
 
 def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
-    from signalr_listener import track_trade
-
     cid = get_contract(sym)
     side = 0 if sig == "BUY" else 1
     exit_side = 1 - side
@@ -477,7 +473,6 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
     oid = None
 
     if net_pos == target:
-        # No trade, but still log for completeness (optional)
         log_trade_results_to_supabase(
             acct_id=acct_id,
             cid=cid,
@@ -496,12 +491,10 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
         )
         return jsonify(status="ok", strategy="pivot", message="already at target position"), 200
 
-    # Cancel any existing stops
     for o in search_open(acct_id):
         if o["contractId"] == cid and o["type"] == 4:
             cancel(acct_id, o["id"])
 
-    # If position is reversed, flatten then enter new
     if net_pos * target < 0:
         flatten_side = 1 if net_pos > 0 else 0
         trade_log.append(place_market(acct_id, cid, flatten_side, abs(net_pos)))
@@ -519,8 +512,8 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
         trade_log.append(ent)
         oid = ent.get("orderId")
 
-    # Place stop loss only (no TP)
-    trades = [t for t in search_trades(acct_id, datetime.now(CT) - timedelta(minutes=5)) if t["contractId"] == cid]
+    trades = [t for t in search_trades(acct_id, datetime.now(CT) - timedelta(minutes=5))
+              if t["contractId"] == cid]
     entry_price = trades[-1]["price"] if trades else None
     if entry_price is not None:
         stop_price = entry_price - STOP_LOSS_POINTS if side == 0 else entry_price + STOP_LOSS_POINTS
@@ -529,7 +522,6 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
     else:
         sl_id = None
 
-    # --- Track trade meta for event-driven logging ---
     track_trade(
         acct_id=acct_id,
         cid=cid,
@@ -546,9 +538,9 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
         trades=trade_log
     )
 
-    # No watcher thread needed
     check_for_phantom_orders(acct_id, cid)
     return jsonify(status="ok", strategy="pivot", message="position set", trades=trade_log), 200
+
 
 
 
