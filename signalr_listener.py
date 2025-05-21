@@ -14,6 +14,22 @@ orders_state = {}      # {account_id: {order_id: order_data}}
 positions_state = {}   # {account_id: {contract_id: position_data}}
 trade_meta = {}        # {(account_id, contract_id): {entry_time, ai_decision_id, ...}}
 
+def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, order_id, alert, account, symbol, sl_id=None, tp_ids=None, trades=None):
+    trade_meta[(acct_id, cid)] = {
+        "entry_time": entry_time,
+        "ai_decision_id": ai_decision_id,
+        "strategy": strategy,
+        "signal": sig,
+        "size": size,
+        "order_id": order_id,
+        "sl_id": sl_id,
+        "tp_ids": tp_ids,
+        "alert": alert,
+        "account": account,
+        "symbol": symbol,
+        "trades": trades,
+    }
+
 class SignalRTradingListener(threading.Thread):
     def __init__(self, accounts, authenticate_func, token_getter, token_expiry_getter, auth_lock, event_handlers=None):
         super().__init__(daemon=True)
