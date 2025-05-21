@@ -507,6 +507,7 @@
         460
       ],
       "id": "933c1e6f-0248-4095-b5e3-b17edc679b97",
+      "retryOnFail": true,
       "credentials": {
         "googleCloudStorageOAuth2Api": {
           "id": "kT6LnTnLCRqZwDOj",
@@ -688,7 +689,7 @@
           "fieldValues": [
             {
               "fieldId": "urls",
-              "fieldValue": "={{ $json.urls }}\n"
+              "fieldValue": "={{ JSON.stringify($json.urls) }}\n"
             }
           ]
         }
@@ -701,6 +702,7 @@
       ],
       "id": "291bd60d-94b0-4218-9482-12f34185d6ff",
       "name": "Supabase1",
+      "retryOnFail": true,
       "credentials": {
         "supabaseApi": {
           "id": "id8sHbOkjIgqTd0J",
@@ -1028,7 +1030,7 @@
     "callerPolicy": "workflowsFromSameOwner",
     "executionOrder": "v1"
   },
-  "versionId": "c014747c-077e-4e79-b1e3-739d2991c1cc",
+  "versionId": "4d7dba2c-d4f7-4aff-9e12-77252427f42d",
   "meta": {
     "templateId": "2569",
     "templateCredsSetupCompleted": true,
