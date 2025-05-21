@@ -401,7 +401,7 @@
             {
               "id": "7d733105-b0e5-4590-ba13-b908adce16f5",
               "name": "ai_decision_id",
-              "value": "={{ $json.id }}",
+              "value": "={{ $json.ai_decision_id }}",
               "type": "number"
             }
           ]
