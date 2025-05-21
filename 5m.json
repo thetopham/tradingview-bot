@@ -153,13 +153,14 @@
     },
     {
       "parameters": {
-        "respondWith": "binary",
+        "respondWith": "json",
+        "responseBody": "={{ $json.text }}",
         "options": {}
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.2,
       "position": [
-        2040,
+        2560,
         20
       ],
       "id": "105e4410-177b-476e-af02-c9250f6b49d7",
@@ -294,10 +295,57 @@
       "name": "Set 'response' value",
       "type": "n8n-nodes-base.set",
       "position": [
-        1800,
+        1920,
         20
       ],
       "typeVersion": 3.3
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an expert day trading analyst for the Micro E-mini S&P 500 (MES).\n\nAnalyze the attached chart image for the {{ $('If').item.json.timeframe }} timeframe.\n\n**Your tasks:**\n1. Identify the short-term trade signal: BUY, SELL, or HOLD.\n2. Identify the trend: up, down, or sideways.\n3. Give a concise reason referencing only visible chart features (candles, price action, or any charted indicators shown).\n\n**Indicators you may see:**\n- ATR Crayon Candles: Green = bullish, Red = bearish\n- FSVZO\n- Phobos momentum\n- Fisher: Red H/R = hidden or regular bearish divergence; Green H/R = hidden or regular bullish divergence\n\n**Instructions:**\n- Use only information from the chart image.\n- Respond with **valid JSON only** (no extra text or formatting or '''json):\n\n{\n  \"timeframe\": \"{{ $('If').item.json.timeframe }}\",\n  \"signal\": \"BUY|SELL|HOLD\",\n  \"entrylimit\": <float>,\n  \"tp1\": <float>,\n  \"tp2\": <float>,\n  \"tp3\": <float>,\n  \"sl\": <float>,\n  \"trend\": \"up|down|sideways\",\n  \"reason\": \"<concise chart-based rationale>\",\n  \"url\": \"{{ $('If').item.json.chart_url }}\"\n}\n",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "messageType": "imageBinary"
+            }
+          ]
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [
+        2160,
+        20
+      ],
+      "id": "cfcb1665-9010-486e-b74a-785e731be392",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "chatgpt-4o-latest",
+          "mode": "list",
+          "cachedResultName": "chatgpt-4o-latest"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        2180,
+        240
+      ],
+      "id": "1dc69739-b906-43e7-8c4d-ef37d620ac0a",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "hOvrgCZvpztkucKb",
+          "name": "OpenAi account"
+        }
+      }
     }
   ],
   "pinData": {},
@@ -412,6 +460,28 @@
       "main": [
         [
           {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
             "node": "Respond to Webhook",
             "type": "main",
             "index": 0
@@ -425,7 +495,7 @@
     "executionOrder": "v1",
     "callerPolicy": "workflowsFromSameOwner"
   },
-  "versionId": "96545671-318b-479e-a6a6-b283f49ac5d9",
+  "versionId": "8e64c431-f3a9-4574-bae3-9ba8265d30a3",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "9783a33f8d5600da0ff08d35d1dc9051c104e0a37fceb74a2ffe1557dcda02bc"
