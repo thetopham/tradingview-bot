@@ -287,7 +287,7 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         return
     total_pnl = sum(t.get("profitAndLoss", 0) for t in relevant_trades)
     trade_ids = [t.get("id") for t in relevant_trades]
-    exit_time = datetime.utcnow()
+    exit_time = datetime.now(CT)
     payload = {
         "ai_decision_id": ai_decision_id,
         "order_id": meta.get("order_id"),
@@ -346,11 +346,11 @@ def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
 
     ent = place_market(acct_id, cid, side, size)
     oid = ent["orderId"]
-    entry_time = datetime.utcnow()
+    entry_time = datetime.now(CT)
 
     price = None
     for _ in range(12):
-        trades = [t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"]==oid]
+        trades = [t for t in search_trades(acct_id, datetime.now(CT)-timedelta(minutes=5)) if t["orderId"]==oid]
         tot = sum(t["size"] for t in trades)
         if tot:
             price = sum(t["price"]*t["size"] for t in trades)/tot
@@ -446,10 +446,10 @@ def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
 
     ent = place_market(acct_id, cid, side, size)
     oid = ent["orderId"]
-    entry_time = datetime.utcnow()
+    entry_time = datetime.now(CT)
     price = None
     for _ in range(12):
-        trades = [t for t in search_trades(acct_id, datetime.utcnow() - timedelta(minutes=5)) if t["orderId"] == oid]
+        trades = [t for t in search_trades(acct_id, datetime.now(CT) - timedelta(minutes=5)) if t["orderId"] == oid]
         tot = sum(t["size"] for t in trades)
         if tot:
             price = sum(t["price"] * t["size"] for t in trades) / tot
@@ -567,7 +567,7 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
     pos = [p for p in search_pos(acct_id) if p["contractId"] == cid]
     net_pos = sum(p["size"] if p["type"] == 1 else -p["size"] for p in pos)
     target = size if sig == "BUY" else -size
-    entry_time = datetime.utcnow()
+    entry_time = datetime.now(CT)
     trade_log = []
     oid = None  # Track the entry order id for logging
 
@@ -615,7 +615,7 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
         oid = ent.get("orderId")
 
     # Place stop loss only (no TP)
-    trades = [t for t in search_trades(acct_id, datetime.utcnow() - timedelta(minutes=5))
+    trades = [t for t in search_trades(acct_id, datetime.now(CT) - timedelta(minutes=5))
               if t["contractId"] == cid]
     entry_price = trades[-1]["price"] if trades else None
     if entry_price is not None:
