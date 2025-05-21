@@ -270,6 +270,7 @@ def check_for_phantom_orders(acct_id, cid):
 
 
 def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta=None):
+    logging.info("Attempting to log trade results to Supabase")
     """
     Fetches trades since entry_time from TopstepX API, sums profitAndLoss,
     and logs all info to Supabase.
