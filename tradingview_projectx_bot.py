@@ -13,6 +13,8 @@ import pytz
 import logging
 import json
 from logging.handlers import RotatingFileHandler
+from signalr_listener import launch_signalr_listener
+
 
 log_file = '/tmp/tradingview_projectx_bot.log'
 file_handler = RotatingFileHandler(
@@ -713,5 +715,6 @@ threading.Thread(target=phantom_order_sweeper, daemon=True).start()
 
 
 if __name__ == "__main__":
-    app.logger.info("Starting  server.")
+    signalr_listener = launch_signalr_listener()
+    app.logger.info("Starting server.")
     app.run(host="0.0.0.0", port=TV_PORT)
