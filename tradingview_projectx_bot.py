@@ -14,6 +14,7 @@ import logging
 import json
 from logging.handlers import RotatingFileHandler
 from signalr_listener import launch_signalr_listener
+from signalr_listener import track_trade
 
 
 log_file = '/tmp/tradingview_projectx_bot.log'
@@ -381,20 +382,23 @@ def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
 
     # --- Save trade meta for SignalR logging ---
     from signalr_listener import trade_meta
-    trade_meta[(acct_id, cid)] = {
-        "entry_time": entry_time,
-        "ai_decision_id": ai_decision_id,
-        "strategy": "bracket",
-        "signal": sig,
-        "size": size,
-        "order_id": oid,
-        "alert": alert,
-        "account": acct_id,
-        "symbol": sym,
-        "sl_id": sl_id,
-        "tp_ids": tp_ids,
-        # add more fields as needed!
-    }
+   track_trade(
+    acct_id=acct_id,
+    cid=cid,
+    entry_time=entry_time,
+    ai_decision_id=ai_decision_id,
+    strategy="bracket",  # or "brackmod" or "pivot"
+    sig=sig,
+    size=size,
+    order_id=oid,
+    alert=alert,
+    account=acct_id,
+    symbol=sym,
+    sl_id=sl_id if 'sl_id' in locals() else None,
+    tp_ids=tp_ids if 'tp_ids' in locals() else None,
+    trades=trade_log if 'trade_log' in locals() else None,
+)
+
 
     # Don't start watcher thread here. All flattening/logging happens via SignalR events.
     check_for_phantom_orders(acct_id, cid)
@@ -444,19 +448,21 @@ def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
 
     # --- Track trade meta for event-driven logging ---
     from signalr_listener import trade_meta
-    trade_meta[(acct_id, cid)] = {
-        "entry_time": entry_time,
-        "ai_decision_id": ai_decision_id,
-        "strategy": "brackmod",
-        "signal": sig,
-        "size": size,
-        "order_id": oid,
-        "alert": alert,
-        "account": acct_id,
-        "symbol": sym,
-        "sl_id": sl_id,
-        "tp_ids": tp_ids,
-    }
+   track_trade(
+    acct_id=acct_id,
+    cid=cid,
+    entry_time=entry_time,
+    ai_decision_id=ai_decision_id,
+    strategy="brackmod",
+    sig=sig,
+    size=size,
+    order_id=oid,
+    alert=alert,
+    account=acct_id,
+    symbol=sym,
+    sl_id=sl_id,
+    tp_ids=tp_ids,
+)
 
     # No watcher thread needed—SignalR event handler handles all completion/logging!
     check_for_phantom_orders(acct_id, cid)
@@ -530,19 +536,21 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
 
     # --- Track trade meta for event-driven logging ---
     from signalr_listener import trade_meta
-    trade_meta[(acct_id, cid)] = {
-        "entry_time": entry_time,
-        "ai_decision_id": ai_decision_id,
-        "strategy": "pivot",
-        "signal": sig,
-        "size": size,
-        "order_id": oid,
-        "sl_id": sl_id,
-        "alert": alert,
-        "account": acct_id,
-        "symbol": sym,
-        "trades": trade_log,
-    }
+   track_trade(
+    acct_id=acct_id,
+    cid=cid,
+    entry_time=entry_time,
+    ai_decision_id=ai_decision_id,
+    strategy="pivot",
+    sig=sig,
+    size=size,
+    order_id=oid,
+    alert=alert,
+    account=acct_id,
+    symbol=sym,
+    sl_id=sl_id if 'sl_id' in locals() else None,
+    trades=trade_log,
+)
 
     # No watcher thread needed—SignalR event handler handles all logging!
     check_for_phantom_orders(acct_id, cid)
