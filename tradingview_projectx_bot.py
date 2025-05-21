@@ -606,20 +606,6 @@ def tv_webhook():
     else:
         return jsonify(error=f"Unknown strategy '{strat}'"), 400
 
-# ----- def phantom_order_sweeper():
-#    while True:
-#        for acct_name, acct_id in ACCOUNTS.items():
-#            cid = OVERRIDE_CONTRACT_ID
- #           try:
-#                check_for_phantom_orders(acct_id, cid)
-#            except Exception as e:
-#                logging.error(f"Error in phantom sweeper for {acct_name}: {e}")
-#        time.sleep(30)  # Sweep every 30s
-#
-# Start sweeper thread
-#threading.Thread(target=phantom_order_sweeper, daemon=True).start() -----
-
-
 if __name__ == "__main__":
     signalr_listener = launch_signalr_listener()
     app.logger.info("Starting server.")
