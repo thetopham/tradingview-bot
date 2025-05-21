@@ -120,20 +120,6 @@
       "webhookId": "5c793395-f218-4a49-a620-51d297f2dbfb"
     },
     {
-      "parameters": {
-        "respondWith": "binary",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.2,
-      "position": [
-        1860,
-        -320
-      ],
-      "id": "575ee1a3-3091-49d5-9d46-7179890382f2",
-      "name": "Respond to Webhook"
-    },
-    {
       "parameters": {},
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
@@ -298,6 +284,68 @@
       ],
       "id": "9c1b17cb-af6f-4a65-8777-7631a160cc33",
       "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an expert day trading analyst for the Micro E-mini S&P 500 (MES).\n\nAnalyze the attached chart image for the {{ $('If').item.json.timeframe }} timeframe.\n\n**Your tasks:**\n1. Identify the short-term trade signal: BUY, SELL, or HOLD.\n2. Identify the trend: up, down, or sideways.\n3. Give a concise reason referencing only visible chart features (candles, price action, or any charted indicators shown).\n\n**Indicators you may see:**\n- ATR Crayon Candles: Green = bullish, Red = bearish\n- FSVZO\n- Phobos momentum\n- Fisher: Red H/R = hidden or regular bearish divergence; Green H/R = hidden or regular bullish divergence\n\n**Instructions:**\n- Use only information from the chart image.\n- Respond with **valid JSON only** (no extra text or formatting or '''json):\n\n{\n  \"timeframe\": \"{{ $('If').item.json.timeframe }}\",\n  \"signal\": \"BUY|SELL|HOLD\",\n  \"entrylimit\": <float>,\n  \"tp1\": <float>,\n  \"tp2\": <float>,\n  \"tp3\": <float>,\n  \"sl\": <float>,\n  \"trend\": \"up|down|sideways\",\n  \"reason\": \"<concise chart-based rationale>\",\n  \"url\": \"{{ $('If').item.json.chart_url }}\"\n}\n",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "messageType": "imageBinary"
+            }
+          ]
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [
+        1840,
+        -320
+      ],
+      "id": "7504a1ad-8795-4ca0-9290-94148338dcb6",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "chatgpt-4o-latest",
+          "mode": "list",
+          "cachedResultName": "chatgpt-4o-latest"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1860,
+        -100
+      ],
+      "id": "e993c524-8cb5-4717-ba2f-5cd3421e54be",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "hOvrgCZvpztkucKb",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.text }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.2,
+      "position": [
+        2240,
+        -320
+      ],
+      "id": "4bf1d196-977f-40cc-8f7b-dc8394fdbe00",
+      "name": "Respond to Webhook1"
     }
   ],
   "pinData": {},
@@ -339,7 +387,7 @@
       "main": [
         [
           {
-            "node": "Respond to Webhook",
+            "node": "Basic LLM Chain",
             "type": "main",
             "index": 0
           }
@@ -418,13 +466,35 @@
           }
         ]
       ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": true,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "14e51239-c82c-4b72-b8f5-977af7f84779",
+  "versionId": "01c6ad3a-4fe7-44a0-8c25-5c97bb6db06d",
   "meta": {
     "instanceId": "9783a33f8d5600da0ff08d35d1dc9051c104e0a37fceb74a2ffe1557dcda02bc"
   },
