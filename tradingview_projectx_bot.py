@@ -427,27 +427,27 @@ def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
     check_for_phantom_orders(acct_id, cid)
     return jsonify(status="ok",strategy="bracket",entry=ent),200
 
-# ─── Brackmod Strategy (shorter SL/TP logic, with logging) ───────────
 def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
-    cid      = get_contract(sym)
-    side     = 0 if sig=="BUY" else 1
-    exit_side= 1-side
-    pos = [p for p in search_pos(acct_id) if p["contractId"]==cid]
-    if any((side==0 and p["type"]==1) or (side==1 and p["type"]==2) for p in pos):
-        return jsonify(status="ok",strategy="brackmod",message="skip same"),200
-    if any((side==0 and p["type"]==2) or (side==1 and p["type"]==1) for p in pos):
+    cid = get_contract(sym)
+    side = 0 if sig == "BUY" else 1
+    exit_side = 1 - side
+    pos = [p for p in search_pos(acct_id) if p["contractId"] == cid]
+    if any((side == 0 and p["type"] == 1) or (side == 1 and p["type"] == 2) for p in pos):
+        return jsonify(status="ok", strategy="brackmod", message="skip same"), 200
+    if any((side == 0 and p["type"] == 2) or (side == 1 and p["type"] == 1) for p in pos):
         success = flatten_contract(acct_id, cid, timeout=10)
         if not success:
             return jsonify(status="error", message="Could not flatten contract—old orders/positions remain."), 500
+
     ent = place_market(acct_id, cid, side, size)
     oid = ent["orderId"]
     entry_time = datetime.utcnow()
     price = None
     for _ in range(12):
-        trades = [t for t in search_trades(acct_id, datetime.utcnow()-timedelta(minutes=5)) if t["orderId"]==oid]
+        trades = [t for t in search_trades(acct_id, datetime.utcnow() - timedelta(minutes=5)) if t["orderId"] == oid]
         tot = sum(t["size"] for t in trades)
         if tot:
-            price = sum(t["price"]*t["size"] for t in trades)/tot
+            price = sum(t["price"] * t["size"] for t in trades) / tot
             break
         price = ent.get("fillPrice")
         if price is not None:
@@ -455,62 +455,104 @@ def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
         time.sleep(1)
     if price is None:
         return jsonify(status="error", message="No fill price available"), 500
+
     STOP_LOSS_POINTS = 5.75
-    slp = price - STOP_LOSS_POINTS if side==0 else price + STOP_LOSS_POINTS
-    sl  = place_stop(acct_id, cid, exit_side, size, slp)
+    slp = price - STOP_LOSS_POINTS if side == 0 else price + STOP_LOSS_POINTS
+    sl = place_stop(acct_id, cid, exit_side, size, slp)
     sl_id = sl["orderId"]
     TP_POINTS = [2.5, 5.0]
     slices = [2, 1]
-    tp_ids=[]
+    tp_ids = []
     for pts, amt in zip(TP_POINTS, slices):
         px = price + pts if side == 0 else price - pts
         r = place_limit(acct_id, cid, exit_side, amt, px)
         tp_ids.append(r["orderId"])
-    def watcher():
-        def is_open(order_id):
-            return order_id in {o["id"] for o in search_open(acct_id)}
-        def cancel_all_tps():
-            for o in search_open(acct_id):
-                if o["contractId"] == cid and o["type"] == 1 and o["id"] in tp_ids:
-                    cancel(acct_id, o["id"])
-        def is_flat():
-            return not any(p for p in search_pos(acct_id) if p["contractId"] == cid)
-        while True:
-            if is_flat():
-                cancel_all_tps(); cancel_all_stops(acct_id, cid); break
-            if not is_open(tp_ids[0]): break
-            if not is_open(sl_id): cancel_all_tps(); cancel_all_stops(acct_id, cid); break
-            time.sleep(4)
-        cancel(acct_id, sl_id)
-        new1 = place_stop(acct_id, cid, exit_side, slices[1], slp)
-        st1 = new1["orderId"]
-        while True:
-            if is_flat():
-                cancel_all_tps(); cancel_all_stops(acct_id, cid); break
-            if not is_open(tp_ids[1]): break
-            if not is_open(st1): cancel_all_tps(); cancel_all_stops(acct_id, cid); break
-            time.sleep(4)
-        cancel_all_tps(); cancel_all_stops(acct_id, cid)
 
-        # --- LOGGING ---
-        log_trade_results_to_supabase(
-            acct_id=acct_id,
-            cid=cid,
-            entry_time=entry_time,
-            ai_decision_id=ai_decision_id,
-            meta={
-                "order_id": oid,
-                "symbol": sym,
-                "account": acct_id,
-                "strategy": "brackmod",
-                "signal": sig,
-                "size": size,
-                "alert": alert,
-            }
-        )
-    threading.Thread(target=watcher,daemon=True).start()
+    def watcher():
+        import traceback
+        try:
+            logging.info(f"[BRACKMOD/WATCHER] Started for {oid}")
+            start = time.time()
+            timeout_sec = 300  # 5 minutes fallback
+
+            def is_open(order_id):
+                return order_id in {o["id"] for o in search_open(acct_id)}
+
+            def cancel_all_tps():
+                for o in search_open(acct_id):
+                    if o["contractId"] == cid and o["type"] == 1 and o["id"] in tp_ids:
+                        cancel(acct_id, o["id"])
+
+            def is_flat():
+                return not any(p for p in search_pos(acct_id) if p["contractId"] == cid)
+
+            # First TP
+            while True:
+                if is_flat():
+                    logging.info(f"[BRACKMOD/WATCHER] Position is flat for {oid} (TP1/SL)")
+                    cancel_all_tps(); cancel_all_stops(acct_id, cid)
+                    break
+                if not is_open(tp_ids[0]):
+                    logging.info(f"[BRACKMOD/WATCHER] TP1 filled for {oid}")
+                    break
+                if not is_open(sl_id):
+                    logging.info(f"[BRACKMOD/WATCHER] SL filled for {oid} (pre-TP1)")
+                    cancel_all_tps(); cancel_all_stops(acct_id, cid)
+                    break
+                if time.time() - start > timeout_sec:
+                    logging.warning(f"[BRACKMOD/WATCHER] Timeout hit (TP1) for {oid}")
+                    break
+                time.sleep(4)
+            cancel(acct_id, sl_id)
+            new1 = place_stop(acct_id, cid, exit_side, slices[1], slp)
+            st1 = new1["orderId"]
+
+            # Second TP
+            tp2_start = time.time()
+            while True:
+                if is_flat():
+                    logging.info(f"[BRACKMOD/WATCHER] Position is flat for {oid} (TP2/SL)")
+                    cancel_all_tps(); cancel_all_stops(acct_id, cid)
+                    break
+                if not is_open(tp_ids[1]):
+                    logging.info(f"[BRACKMOD/WATCHER] TP2 filled for {oid}")
+                    break
+                if not is_open(st1):
+                    logging.info(f"[BRACKMOD/WATCHER] SL filled for {oid} (pre-TP2)")
+                    cancel_all_tps(); cancel_all_stops(acct_id, cid)
+                    break
+                if time.time() - tp2_start > timeout_sec:
+                    logging.warning(f"[BRACKMOD/WATCHER] Timeout hit (TP2) for {oid}")
+                    break
+                time.sleep(4)
+            cancel_all_tps(); cancel_all_stops(acct_id, cid)
+
+            # --- LOGGING ---
+            logging.info(f"[BRACKMOD/WATCHER] Logging trade results to Supabase for {oid}")
+            log_trade_results_to_supabase(
+                acct_id=acct_id,
+                cid=cid,
+                entry_time=entry_time,
+                ai_decision_id=ai_decision_id,
+                meta={
+                    "order_id": oid,
+                    "symbol": sym,
+                    "account": acct_id,
+                    "strategy": "brackmod",
+                    "signal": sig,
+                    "size": size,
+                    "alert": alert,
+                }
+            )
+            logging.info(f"[BRACKMOD/WATCHER] Logging complete for {oid}")
+        except Exception as e:
+            logging.error(f"[BRACKMOD/WATCHER] Exception for {oid}: {e}")
+            logging.error(traceback.format_exc())
+
+    threading.Thread(target=watcher, daemon=True).start()
     check_for_phantom_orders(acct_id, cid)
-    return jsonify(status="ok",strategy="brackmod",entry=ent),200
+    return jsonify(status="ok", strategy="brackmod", entry=ent), 200
+
 
 # ─── Pivot Strategy (sl, no tp, waits until next opposing signal) ───────────
 def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
