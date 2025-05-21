@@ -1,0 +1,507 @@
+{
+  "name": "ai overseer simple fast 1m",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Start here: Step-by Step Youtube Tutorial :star:\n\n[![Technical Analyst AI Agent using LLM Vision](https://img.youtube.com/vi/yjBHheCB6Ek/sddefault.jpg)](https://youtu.be/yjBHheCB6Ek)\n",
+        "height": 550,
+        "width": 507,
+        "color": 7
+      },
+      "id": "f808bd94-c39e-4f76-b4f0-fde613ab2aa2",
+      "name": "Sticky Note5",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -740,
+        -400
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fast",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        120,
+        -220
+      ],
+      "id": "e730904a-d7e9-41de-a373-6ba691afa6c6",
+      "name": "Webhook",
+      "webhookId": "5c793395-f218-4a49-a620-51d297f2dbfb"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        120,
+        -40
+      ],
+      "id": "74a450be-0a8c-4581-9ef3-9ddc5f8c6382",
+      "name": "When clicking ‘Test workflow’"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        120,
+        -420
+      ],
+      "id": "dd4af2cb-0b28-425f-9857-6d3b68857ee1",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Today is {{ $now }}\n\nYou are an expert financial analyst tasked with providing a technical analysis of an intraday 1 minute chart available through the 1m tool. Your analysis will be based on various technical indicators and will provide detailed insights for an ai trading bot that can place BUY SELL NOACTION trades only.\n\nThe market you will analyze is:\nMES1!\n\nPlease provide a json response in this format:\n\n{\n    \"signal\": \"BUY|SELL|HOLD\",\n    \"alert\": \"{{ $json.body.alert }}\",\n    \"strategy\": \"brackmod\",\n    \"timestamp\": \"{{ $now }}\",\n    \"symbol\": \"CON.F.US.MES.M25\",\n    \"account\": \"{{ $json.body.account }}\",    \n    \"size\": 3,\n    \"reason\": \"fisher transform divergence, crayon candles, FSVZO, support/resistance \",\n    \"urls\": \"url\"\n}\n\n",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.9,
+      "position": [
+        940,
+        -240
+      ],
+      "id": "5e54c0a1-ab1f-4167-8fb0-2749f3c19238",
+      "name": "AI Agent1"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        940,
+        -20
+      ],
+      "id": "da7d95dc-8d8b-4f40-8d4c-5edd426b48d1",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "hOvrgCZvpztkucKb",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "BKwZ2BR9J6CjMVDk",
+          "mode": "list",
+          "cachedResultName": "1m"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        -20
+      ],
+      "id": "68a8b881-a6f4-4d6f-96d4-f15a73ef72ff",
+      "name": "Call n8n Workflow Tool"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Today is {{ $now }}\n\nYou are an expert financial analyst tasked with providing a technical analysis of an intraday 1 minute chart. Your analysis will be based on various technical indicators and will provide detailed insights for an ai trading bot that can place BUY and SELL trades only.\n\nThe market you will analyze is:\nMES1!\n\nPlease provide a json response in this format:\n\n{\n    \"action\": \"BUY\",\n    \"reason\": \"fisher transform divergence, crayon candles, FSVZO, support/resistance, \",\n    \"chart_url\": \"{{ $('Tradingview Chart').item.json.url }}\"\n}\n\n",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "messageType": "imageBinary"
+            }
+          ]
+        }
+      },
+      "id": "dd37ff6b-4162-4c1e-9662-071960a370e8",
+      "name": "high win% basic model 1st draft",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "position": [
+        780,
+        -660
+      ],
+      "typeVersion": 1.4
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"strategy\": \"brackmod\",\n  \"signal\": \"{{ $('Code').item.json.signal }}\",\n  \"timestamp\": \"{{ $('Code').item.json.timestamp }}\",\n  \"symbol\": \"{{ $('Code').item.json.symbol }}\",\n  \"account\": \"beta\",\n  \"size\": {{ $('Code').item.json.size }},\n  \"ai_decision_id\": \"{{ $json.ai_decision_id }}\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.2,
+      "position": [
+        2080,
+        -400
+      ],
+      "id": "0da0bd09-f7a3-413a-afe5-7b94bb6eb8ed",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "tableId": "ai_trading_log",
+        "dataToSend": "autoMapInputData"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1620,
+        -400
+      ],
+      "id": "b0ed8d51-fa96-44b9-ac32-f8e646f0027d",
+      "name": "Supabase",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [ JSON.parse($input.first().json.output) ];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        -400
+      ],
+      "id": "f6850ab5-49b7-48a2-823c-149fd7abdbf2",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7d733105-b0e5-4590-ba13-b908adce16f5",
+              "name": "ai_decision_id",
+              "value": "={{ $json.ai_decision_id }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1880,
+        -400
+      ],
+      "id": "7a98a01b-6aa1-456b-aba9-7737f144b85d",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "resource": "object",
+        "operation": "create",
+        "bucketName": "tradingview-chart",
+        "objectName": "=charts/{{ $json.ai_decision_id }}/1m.jpg",
+        "createData": {},
+        "createQuery": {},
+        "encryptionHeaders": {},
+        "requestOptions": {}
+      },
+      "name": "Upload to GCS",
+      "type": "n8n-nodes-base.googleCloudStorage",
+      "typeVersion": 1,
+      "position": [
+        2180,
+        -100
+      ],
+      "id": "a251e295-2273-4c20-bae2-5b16af4aa0f7",
+      "credentials": {
+        "googleCloudStorageOAuth2Api": {
+          "id": "kT6LnTnLCRqZwDOj",
+          "name": "Google Cloud Storage account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.urls }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1900,
+        -100
+      ],
+      "id": "0b8bc340-2130-4a35-b1e6-de13b8a4b0e1",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = {};\nfor (const item of items) {\n  // Use the actual field names\n  out[item.json.timeframe] = item.json.url;\n}\nreturn [\n  {\n    json: {\n      id: items[0].json.id,\n      urls: out\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2620,
+        -100
+      ],
+      "id": "7c3917bd-a071-493f-8a6f-d12b546828b3",
+      "name": "Code2"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "27b01d5c-b00a-4266-b6aa-ae9a2472d2db",
+              "name": "url",
+              "value": "=https://storage.googleapis.com/tradingview-chart/charts/{{ $('HTTP Request').item.json.ai_decision_id }}/1m.jpg",
+              "type": "string"
+            },
+            {
+              "id": "6d0b4721-0211-4acb-9d58-882bd7bfe0a8",
+              "name": "timeframe",
+              "value": "=1m",
+              "type": "string"
+            },
+            {
+              "id": "45c55a40-6d76-4234-9217-b249ec4d4656",
+              "name": "id",
+              "value": "={{ $('HTTP Request').item.json.ai_decision_id }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2420,
+        -100
+      ],
+      "id": "7ff753d7-998e-4a46-8ba8-57dda299540f",
+      "name": "Edit Fields2"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "ai_trading_log",
+        "filterType": "string",
+        "filterString": "=ai_decision_id=eq.{{ $json.id }}\n",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "urls",
+              "fieldValue": "={{ $json.urls }}\n"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2820,
+        -100
+      ],
+      "id": "e82ce30a-8a98-4d20-bdda-69f1851332f4",
+      "name": "Supabase1",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Test workflow’": {
+      "main": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call n8n Workflow Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent1": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "high win% basic model 1st draft": {
+      "main": [
+        []
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Upload to GCS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to GCS": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields2": {
+      "main": [
+        [
+          {
+            "node": "Code2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code2": {
+      "main": [
+        [
+          {
+            "node": "Supabase1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "f467613f-1f06-4e73-9438-9077e00303bd",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9783a33f8d5600da0ff08d35d1dc9051c104e0a37fceb74a2ffe1557dcda02bc"
+  },
+  "id": "mn77oXRvgwFN1JSn",
+  "tags": []
+}
