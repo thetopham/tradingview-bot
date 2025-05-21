@@ -59,6 +59,14 @@
             {
               "name": "interval",
               "value": "1M"
+            },
+            {
+              "name": "width",
+              "value": "1920"
+            },
+            {
+              "name": "height",
+              "value": "1080"
             }
           ]
         },
@@ -416,7 +424,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "b7c7f5f8-b92a-4012-86de-b33e354eb323",
+  "versionId": "5208bb58-bdbc-4132-9a22-2da64bf2f4d1",
   "meta": {
     "instanceId": "9783a33f8d5600da0ff08d35d1dc9051c104e0a37fceb74a2ffe1557dcda02bc"
   },
