@@ -307,21 +307,27 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
 
     url = f"{SUPABASE_URL}/rest/v1/trade_results"
     headers = {
-        "apikey":       SUPABASE_KEY,
+        "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type":  "application/json",
-        "Prefer":        "return=minimal"
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal"
     }
 
     try:
         logging.info(f"Uploading to Supabase: {url}")
-        logging.info(f"Payload: {json.dumps(payload)[:1000]}")  # Truncate if needed
         r = session.post(url, json=payload, headers=headers, timeout=(3.05, 10))
         logging.info(f"Supabase status: {r.status_code}, {r.text}")
         r.raise_for_status()
     except Exception as e:
         logging.error(f"Supabase upload failed: {e}")
         logging.error(f"Payload that failed: {json.dumps(payload)[:1000]}")
+        # Fallback: Write to local file
+        try:
+            with open("/tmp/trade_results_fallback.jsonl", "a") as f:
+                f.write(json.dumps(payload) + "\n")
+            logging.info("Trade result written to local fallback log.")
+        except Exception as e2:
+            logging.error(f"Failed to write trade result to local log: {e2}")
 
 
 # ─── Bracket Strategy ─────────────────────────────────
