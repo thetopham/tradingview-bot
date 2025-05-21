@@ -58,28 +58,29 @@ def get_ai_trading_log(days=2):
     return rows.data
 
 def find_best_ai_log_match(trade, ai_logs):
-    # Match by order_id first if present
-    tid = str(trade.get('orderId') or "")
-    for log in ai_logs:
-        if str(log.get('order_id', "")) == tid:
-            return log
-    # Otherwise, match by entry_time and symbol (fuzzy, within 2 minutes)
-    entry_time = trade.get('entryTimestamp')
+    # Fuzzy match by symbol and closest timestamp (within 2 min) to creationTimestamp
     symbol = trade.get('contractId')
+    trade_time_str = trade.get('creationTimestamp')
     trade_time = None
     try:
-        trade_time = datetime.datetime.fromisoformat(entry_time.replace('Z', '+00:00'))
+        trade_time = datetime.datetime.fromisoformat(trade_time_str.replace('Z', '+00:00'))
     except Exception:
         return None
+    closest_log = None
+    min_diff = 120  # seconds
     for log in ai_logs:
+        if log.get('symbol') != symbol:
+            continue
         log_time = None
         try:
             log_time = datetime.datetime.fromisoformat(log.get('timestamp').replace('Z', '+00:00'))
         except Exception:
             continue
-        if log.get('symbol') == symbol and abs((trade_time - log_time).total_seconds()) < 120:
-            return log
-    return None
+        diff = abs((trade_time - log_time).total_seconds())
+        if diff < min_diff:
+            min_diff = diff
+            closest_log = log
+    return closest_log
 
 def main():
     days = 2
@@ -102,24 +103,24 @@ def main():
                 continue
 
             ai_log = find_best_ai_log_match(trade, ai_logs)
-            # Merge fields
+            # Merge fields, set times and duration as per available data
             payload = {
-                "ai_decision_id": ai_log.get("id") if ai_log else None,
+                "ai_decision_id": ai_log.get("ai_decision_id") if ai_log else None,
                 "order_id": order_id,
                 "symbol": contract_id,
                 "account": acct_id,
                 "strategy": ai_log.get("strategy") if ai_log else None,
                 "signal": ai_log.get("signal") if ai_log else None,
-                "entry_time": trade.get('entryTimestamp'),
-                "exit_time": trade.get('exitTimestamp'),
-                "duration_sec": trade.get('durationSec'),
+                "entry_time": trade.get('creationTimestamp'),
+                "exit_time": trade.get('creationTimestamp'),
+                "duration_sec": 0,
                 "size": trade.get('size'),
                 "total_pnl": trade.get('profitAndLoss'),
                 "alert": ai_log.get("alert") if ai_log else None,
                 "raw_trades": [trade],
-                "comment": f"Catchup script: backfilled from TopstepX; AI log merged: {bool(ai_log)}",
+                "comment": f"Catchup script: TopstepX; Only creationTimestamp present. AI log merged: {bool(ai_log)}",
             }
-            print(f"Uploading missing trade: {order_id}, pnl={trade.get('profitAndLoss')}, entry={trade.get('entryTimestamp')}, ai_log={'YES' if ai_log else 'NO'}")
+            print(f"Uploading missing trade: {order_id}, pnl={trade.get('profitAndLoss')}, entry={trade.get('creationTimestamp')}, ai_log={'YES' if ai_log else 'NO'}")
             try:
                 supabase.table('trade_results').insert(payload).execute()
                 print("...Uploaded.")
