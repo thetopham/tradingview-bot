@@ -61,7 +61,7 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "=Today is {{ $now }}\n\nYou are an expert financial analyst tasked with providing a technical analysis of an intraday 1 minute chart available through the 1m tool. Your analysis will be based on various technical indicators and will provide detailed insights for an ai trading bot that can place BUY SELL NOACTION trades only.\n\nThe market you will analyze is:\nMES1!\n\nPlease provide a json response in this format:\n\n{\n    \"signal\": \"BUY|SELL|HOLD\",\n    \"alert\": \"{{ $json.body.alert }}\",\n    \"strategy\": \"brackmod\",\n    \"timestamp\": \"{{ $now }}\",\n    \"symbol\": \"CON.F.US.MES.M25\",\n    \"account\": \"{{ $json.body.account }}\",    \n    \"size\": 3,\n    \"reason\": \"fisher transform divergence, crayon candles, FSVZO, support/resistance \",\n    \"urls\": \"url\"\n}\n\n",
+        "text": "=Today is {{ $now }}\n\nYou are an expert financial analyst tasked with providing a technical analysis of an intraday 1 minute chart available through the 1m tool. Your analysis will be based on various technical indicators and will provide detailed insights for an ai trading bot that can place BUY SELL NOACTION trades only.\n\n\nYou are the lead day trading analyst for the Micro E-mini S&P 500 (MES) tasked with providing a technical analysis of an intraday 1 minute chart available through the 1m tool. Your analysis will be based on various technical indicators and will provide detailed insights for an ai trading bot that can place BUY SELL HOLD trades only.\n\n**Indicators referenced:**\n- ATR Crayon Candles: Green = bullish, Red = bearish\n- FSVZO\n- Phobos momentum\n- Fisher: Red H/R = hidden/regular bearish divergence; Green H/R = hidden/regular bullish divergence\n\n**Task:**  \nBased **only** on the analyst reports provided, determine the best overall trade signal for MES using the brackmod strategy.  \n- Your decision must be based on the confluence of signals, trends, and rationales.\n- Provide a concise reason and indicator evidence.\n\n**Respond with valid JSON only** (no extra text, no triple '''json):\n\n{\n  \"strategy\": \"brackmod\",\n  \"signal\": \"BUY|SELL|HOLD\",\n  \"alert\": \"{{ $json.body.alert }}\",\n  \"timestamp\": \"{{ $now }}\",\n  \"entrylimit\": <float>,\n  \"tp1\": <float>,\n  \"tp2\": <float>,\n  \"tp3\": <float>,\n  \"sl\": <float>,\n  \"symbol\": \"CON.F.US.MES.M25\",\n  \"account\": \"{{ $json.body.account }}\",\n  \"size\": 3,\n  \"reason\": \"<Concise justification referencing the most important timeframes and indicator signals>\",\n  \"trend\": \"<up|down|sideways|unknown>\",\n  \"urls\": \"urlgoeshere\"\n\n}\n",
         "options": {}
       },
       "type": "@n8n/n8n-nodes-langchain.agent",
@@ -77,9 +77,9 @@
       "parameters": {
         "model": {
           "__rl": true,
-          "value": "gpt-4.1",
+          "value": "gpt-4o",
           "mode": "list",
-          "cachedResultName": "gpt-4.1"
+          "cachedResultName": "gpt-4o"
         },
         "options": {}
       },
@@ -237,6 +237,7 @@
         -100
       ],
       "id": "a251e295-2273-4c20-bae2-5b16af4aa0f7",
+      "retryOnFail": true,
       "credentials": {
         "googleCloudStorageOAuth2Api": {
           "id": "kT6LnTnLCRqZwDOj",
@@ -266,7 +267,7 @@
       "typeVersion": 2,
       "position": [
         2620,
-        -100
+        -280
       ],
       "id": "7c3917bd-a071-493f-8a6f-d12b546828b3",
       "name": "Code2"
@@ -316,7 +317,7 @@
           "fieldValues": [
             {
               "fieldId": "urls",
-              "fieldValue": "={{ $json.urls }}\n"
+              "fieldValue": "={{ $json.url }}\n"
             }
           ]
         }
@@ -474,7 +475,7 @@
       "main": [
         [
           {
-            "node": "Code2",
+            "node": "Supabase1",
             "type": "main",
             "index": 0
           }
@@ -483,13 +484,7 @@
     },
     "Code2": {
       "main": [
-        [
-          {
-            "node": "Supabase1",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     }
   },
@@ -497,7 +492,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "f467613f-1f06-4e73-9438-9077e00303bd",
+  "versionId": "d3406051-0c52-4dad-ac6f-11440ea2a0b1",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "9783a33f8d5600da0ff08d35d1dc9051c104e0a37fceb74a2ffe1557dcda02bc"
