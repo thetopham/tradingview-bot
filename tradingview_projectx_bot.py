@@ -271,26 +271,27 @@ def check_for_phantom_orders(acct_id, cid):
 
 def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta=None):
     logging.info("Attempting to log trade results to Supabase")
-    """
-    Fetches trades since entry_time from TopstepX API, sums profitAndLoss,
-    and logs all info to Supabase.
-    """
     meta = meta or {}
     resp = post("/api/Trade/search", {
         "accountId": acct_id,
         "startTimestamp": entry_time.isoformat()
     })
     trades = resp.get("trades", [])
-
-    total_pnl = sum(
-        t["profitAndLoss"] or 0
-        for t in trades
-        if t.get("contractId") == cid and not t.get("voided", False)
-    )
+    # Only trades for this contract, not voided, nonzero size
+    relevant_trades = [
+        t for t in trades
+        if t.get("contractId") == cid and not t.get("voided", False) and t.get("size", 0) > 0
+    ]
+    if not relevant_trades:
+        logging.warning("No relevant trades found, skipping Supabase log.")
+        return
+    total_pnl = sum(t.get("profitAndLoss", 0) for t in relevant_trades)
+    trade_ids = [t.get("id") for t in relevant_trades]
     exit_time = datetime.utcnow()
     payload = {
         "ai_decision_id": ai_decision_id,
         "order_id": meta.get("order_id"),
+        "trade_ids": trade_ids,
         "symbol": meta.get("symbol"),
         "account": meta.get("account"),
         "strategy": meta.get("strategy"),
@@ -301,10 +302,9 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         "size": meta.get("size"),
         "total_pnl": total_pnl,
         "alert": meta.get("alert"),
-        "raw_trades": trades,
+        "raw_trades": relevant_trades,
         "comment": meta.get("comment", ""),
     }
-
     url = f"{SUPABASE_URL}/rest/v1/trade_results"
     headers = {
         "apikey": SUPABASE_KEY,
@@ -312,7 +312,6 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         "Content-Type": "application/json",
         "Prefer": "return=minimal"
     }
-
     try:
         logging.info(f"Uploading to Supabase: {url}")
         r = session.post(url, json=payload, headers=headers, timeout=(3.05, 10))
@@ -321,13 +320,13 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
     except Exception as e:
         logging.error(f"Supabase upload failed: {e}")
         logging.error(f"Payload that failed: {json.dumps(payload)[:1000]}")
-        # Fallback: Write to local file
         try:
             with open("/tmp/trade_results_fallback.jsonl", "a") as f:
                 f.write(json.dumps(payload) + "\n")
             logging.info("Trade result written to local fallback log.")
         except Exception as e2:
             logging.error(f"Failed to write trade result to local log: {e2}")
+
 
 
 # ─── Bracket Strategy ─────────────────────────────────
