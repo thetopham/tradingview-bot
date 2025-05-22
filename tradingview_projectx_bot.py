@@ -18,7 +18,7 @@ from apscheduler.triggers.cron import CronTrigger
 from signalr_listener import launch_signalr_listener, track_trade
 from logging_config import setup_logging
 from config import load_config
-from api import api
+from api import post, place_market, place_limit, place_stop, search_open, cancel, search_pos, close_pos, search_trades, flatten_contract, cancel_all_stops, get_contract, ai_trade_decision, check_for_phantom_orders, log_trade_results_to_supabase
 
 setup_logging()
 config = load_config()
