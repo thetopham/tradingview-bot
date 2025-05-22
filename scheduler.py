@@ -5,8 +5,13 @@ import pytz
 import logging
 import requests
 from config import load_config
+from signalr_listener import get_current_position
 
 config = load_config()
+acct = "epsilon"
+acct_id = config['ACCOUNTS'][acct]
+cid = config['OVERRIDE_CONTRACT_ID']
+
 WEBHOOK_SECRET = config['WEBHOOK_SECRET']
 CT = pytz.timezone("America/Chicago")
 TV_PORT = config['TV_PORT']
@@ -14,14 +19,16 @@ TV_PORT = config['TV_PORT']
 def start_scheduler(app):
     scheduler = BackgroundScheduler()
     def cron_job():
+        position = get_current_position(acct_id, cid)
         data = {
             "secret": WEBHOOK_SECRET,
             "strategy": "brackmod",
-            "account": "epsilon",
-            "signal": "",
+            "account": acct,
+            "signal": "",  # Let AI choose
             "symbol": "CON.F.US.MES.M25",
             "size": 3,
-            "alert": f"APScheduler 5m"
+            "alert": "APScheduler 5m",
+            "position": position or {}
         }
         try:
             response = requests.post(f'http://localhost:{TV_PORT}/webhook', json=data)
