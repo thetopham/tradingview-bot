@@ -45,16 +45,6 @@ session.mount("https://", adapter)
 # ─── Flask App Setup ──────────────────────────────────
 app = Flask(__name__)
 
-if not any(isinstance(h, logging.Handler) and getattr(h, 'baseFilename', None) == log_file for h in app.logger.handlers):
-    app.logger.addHandler(file_handler)
-app.logger.setLevel(logging.INFO)
-app.logger.propagate = False
-
-if not any(isinstance(h, logging.Handler) and getattr(h, 'baseFilename', None) == log_file for h in logging.getLogger().handlers):
-    logging.getLogger().addHandler(file_handler)
-logging.getLogger().setLevel(logging.INFO)
-
-app.logger.info("==== LOGGING SYSTEM READY ====")
 
 # ─── Auth State ───────────────────────────────────────
 _token = None
@@ -95,12 +85,6 @@ def ensure_token():
     with auth_lock:
         if _token is None or time.time() >= _token_expiry:
             authenticate()
-
-# ─── API Functions ────────────────────────────────────
-def post(path, payload):
-    ensure_token()
-    url = f"{PX_BASE}{path}"
-    app.logger.debug("POST %s payload=%s", 
 
 
 @app.route("/webhook", methods=["POST"])
