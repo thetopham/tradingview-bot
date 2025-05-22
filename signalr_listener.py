@@ -116,7 +116,6 @@ class SignalRTradingListener(threading.Thread):
         if self.hub:
             self.hub.stop()
 
-
 # -- Enhanced handlers for event-driven performance logging! --
 
 def on_account_update(args):
