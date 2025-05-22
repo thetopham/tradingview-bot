@@ -15,7 +15,6 @@ import json
 from logging.handlers import RotatingFileHandler
 from signalr_listener import launch_signalr_listener
 from signalr_listener import track_trade
-import schedule
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -610,7 +609,7 @@ def process_market_timeframe(timeframe):
     payload = {
         "secret": WEBHOOK_SECRET,
         "strategy": "brackmod",   # or your logic
-        "account": DEFAULT_ACCOUNT,
+        "account": "epsilon",
         "signal": "",             # Or as needed
         "symbol": "CON.F.US.MES.M25",
         "size": 3,
