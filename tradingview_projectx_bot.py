@@ -15,6 +15,10 @@ import json
 from logging.handlers import RotatingFileHandler
 from signalr_listener import launch_signalr_listener
 from signalr_listener import track_trade
+import schedule
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+
 
 
 log_file = '/tmp/tradingview_projectx_bot.log'
@@ -599,7 +603,43 @@ def tv_webhook():
     else:
         return jsonify(error=f"Unknown strategy '{strat}'"), 400
 
+
+def process_market_timeframe(timeframe):
+    logging.info(f"[APScheduler] Running scheduled job for {timeframe}")
+    # Example: POST to your own webhook (optional)
+    payload = {
+        "secret": WEBHOOK_SECRET,
+        "strategy": "brackmod",   # or your logic
+        "account": DEFAULT_ACCOUNT,
+        "signal": "",             # Or as needed
+        "symbol": "CON.F.US.MES.M25",
+        "size": 3,
+        "alert": f"APScheduler {timeframe}"
+    }
+    url = f"http://localhost:{TV_PORT}/webhook"
+    try:
+        resp = requests.post(url, json=payload, timeout=10)
+        logging.info(f"[APScheduler] {timeframe} POST {resp.status_code}: {resp.text}")
+    except Exception as e:
+        logging.error(f"[APScheduler] {timeframe} job error: {e}")
+
+def start_scheduler():
+    scheduler = BackgroundScheduler()
+    # 5m: minute = 0,5,10,15,... (add 5s delay to ensure candle closes)
+    scheduler.add_job(
+        process_market_timeframe, 
+        CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=5), 
+        args=['5m'], 
+        id='5m_job', 
+        replace_existing=True
+    )    
+    scheduler.start()
+    logging.info("[APScheduler] Scheduler started with 5m and 15m jobs.")
+    return scheduler
+
+
 if __name__ == "__main__":
     signalr_listener = launch_signalr_listener()
+    scheduler = start_scheduler() 
     app.logger.info("Starting server.")
     app.run(host="0.0.0.0", port=TV_PORT)
