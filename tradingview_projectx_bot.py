@@ -638,6 +638,7 @@ def start_scheduler():
     return scheduler
 
 if __name__ == "__main__":
+    authenticate() 
     signalr_listener = launch_signalr_listener()
     scheduler = start_scheduler() 
     app.logger.info("Starting server.")
