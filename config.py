@@ -2,6 +2,7 @@
 import os
 from dotenv import load_dotenv
 from datetime import time as dtime
+import pytz
 
 def load_config():
     load_dotenv()
@@ -16,7 +17,6 @@ def load_config():
         'SUPABASE_URL': os.getenv("SUPABASE_URL"),
         'SUPABASE_KEY': os.getenv("SUPABASE_KEY"),
         'WEBHOOK': os.getenv("WEBHOOK"),
-        # ...any other config...
     }
     # Build account map
     config['ACCOUNTS'] = {
@@ -29,5 +29,6 @@ def load_config():
     config['OVERRIDE_CONTRACT_ID'] = os.getenv("OVERRIDE_CONTRACT_ID", "CON.F.US.MES.M25")
     config['GET_FLAT_START'] = dtime(15, 7)
     config['GET_FLAT_END'] = dtime(17, 0)
-    
+    config['CT'] = pytz.timezone("America/Chicago")
     return config
+
