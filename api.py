@@ -1,9 +1,11 @@
 # api.py
 import requests
+from auth import ensure_token
+from config import load_config
+
 session = requests.Session()
 
 
-from config import load_config
 config = load_config()
 OVERRIDE_CONTRACT_ID = config['OVERRIDE_CONTRACT_ID']
 
