@@ -8,6 +8,7 @@ session = requests.Session()
 
 config = load_config()
 OVERRIDE_CONTRACT_ID = config['OVERRIDE_CONTRACT_ID']
+PX_BASE = config['PX_BASE']
 
 
 # ─── API Functions ────────────────────────────────────
