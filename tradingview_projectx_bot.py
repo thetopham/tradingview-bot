@@ -645,8 +645,9 @@ if __name__ == "__main__":
     print(f"DEBUG: Got token: {_token[:12]}..., expiry: {_token_expiry}, now: {time.time()}")
     if not _token:
         raise RuntimeError("Token is None after authentication!")
+    from signalr_listener import launch_signalr_listener
     signalr_listener = launch_signalr_listener()
-    scheduler = start_scheduler() 
+    scheduler = start_scheduler()
     app.logger.info("Starting server.")
     app.run(host="0.0.0.0", port=TV_PORT, threaded=True)
 
