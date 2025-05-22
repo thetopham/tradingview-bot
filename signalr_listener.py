@@ -6,7 +6,7 @@ from datetime import datetime
 from signalrcore.hub_connection_builder import HubConnectionBuilder
 
 USER_HUB_URL_BASE = "wss://rtc.topstepx.com/hubs/user?access_token={}"
-MARKET_HUB_URL_BASE = "wss://rtc.topstepx.com/hubs/market?access_token={}"
+
 
 orders_state = {}
 positions_state = {}
