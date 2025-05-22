@@ -54,6 +54,10 @@ AI_ENDPOINTS = {
     # add more as needed
 }
 
+from tradingview_projectx_bot import authenticate, _token, _token_expiry
+authenticate()
+print(_token)
+
 
 STOP_LOSS_POINTS = 10.0
 TP_POINTS        = [2.5, 5.0, 10.0]
@@ -99,6 +103,7 @@ def authenticate():
         headers={"Content-Type": "application/json"},
         timeout=(3.05, 10)
     )
+    app.logger.info(f"Topstep response: {resp.status_code} {resp.text}")
     resp.raise_for_status()
     data = resp.json()
     if not data.get("success"):
@@ -107,6 +112,7 @@ def authenticate():
     _token = data["token"]
     _token_expiry = time.time() + 23 * 3600
     app.logger.info(f"Authentication successful; token (first 8): {_token[:8]}... expires in ~23h.")
+
 
 
 def ensure_token():
@@ -639,9 +645,13 @@ def start_scheduler():
     return scheduler
 
 if __name__ == "__main__":
-    authenticate()  # Ensure token is valid at startup!
+    authenticate()
+    print(f"DEBUG: Got token: {_token[:12]}..., expiry: {_token_expiry}, now: {time.time()}")
+    if not _token:
+        raise RuntimeError("Token is None after authentication!")
     signalr_listener = launch_signalr_listener()
     scheduler = start_scheduler() 
     app.logger.info("Starting server.")
     app.run(host="0.0.0.0", port=TV_PORT, threaded=True)
+
 
