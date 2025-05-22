@@ -15,14 +15,14 @@ def in_get_flat(now=None):
 
 def authenticate():
     global _token, _token_expiry
-    app.logger.info("Authenticating to Topstep API...")
+    logging.info("Authenticating to Topstep API...")
     resp = session.post(
         f"{PX_BASE}/api/Auth/loginKey",
         json={"userName": USER_NAME, "apiKey": API_KEY},
         headers={"Content-Type": "application/json"},
         timeout=(3.05, 10)
     )
-    app.logger.info(f"Topstep response: {resp.status_code} {resp.text}")
+    logging.info(f"Topstep response: {resp.status_code} {resp.text}")
     resp.raise_for_status()
     data = resp.json()
     if not data.get("success"):
@@ -30,7 +30,7 @@ def authenticate():
         raise RuntimeError("Auth failed")
     _token = data["token"]
     _token_expiry = time.time() + 23 * 3600
-    app.logger.info(f"Authentication successful; token (first 8): {_token[:8]}... expires in ~23h.")
+    logging.info(f"Authentication successful; token (first 8): {_token[:8]}... expires in ~23h.")
 
 def get_token():
     return _token
