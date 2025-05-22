@@ -20,6 +20,8 @@ from logging_config import setup_logging
 from config import load_config
 from api import post, place_market, place_limit, place_stop, search_open, cancel, search_pos, close_pos, search_trades, flatten_contract, cancel_all_stops, get_contract, ai_trade_decision, check_for_phantom_orders, log_trade_results_to_supabase
 from strategies import run_bracket, run_brackmod, run_pivot
+from scheduler import process_market_timeframe, start_scheduler
+from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token
 
 setup_logging()
 config = load_config()
@@ -45,46 +47,6 @@ session.mount("https://", adapter)
 # ─── Flask App Setup ──────────────────────────────────
 app = Flask(__name__)
 
-
-# ─── Auth State ───────────────────────────────────────
-_token = None
-_token_expiry = 0
-auth_lock = threading.Lock()
-
-def in_get_flat(now=None):
-    now = now or datetime.now(CT)
-    t = now.timetz() if hasattr(now, "timetz") else now
-    return GET_FLAT_START <= t <= GET_FLAT_END
-
-def authenticate():
-    global _token, _token_expiry
-    app.logger.info("Authenticating to Topstep API...")
-    resp = session.post(
-        f"{PX_BASE}/api/Auth/loginKey",
-        json={"userName": USER_NAME, "apiKey": API_KEY},
-        headers={"Content-Type": "application/json"},
-        timeout=(3.05, 10)
-    )
-    app.logger.info(f"Topstep response: {resp.status_code} {resp.text}")
-    resp.raise_for_status()
-    data = resp.json()
-    if not data.get("success"):
-        app.logger.error("Auth failed: %s", data)
-        raise RuntimeError("Auth failed")
-    _token = data["token"]
-    _token_expiry = time.time() + 23 * 3600
-    app.logger.info(f"Authentication successful; token (first 8): {_token[:8]}... expires in ~23h.")
-
-def get_token():
-    return _token
-
-def get_token_expiry():
-    return _token_expiry
-
-def ensure_token():
-    with auth_lock:
-        if _token is None or time.time() >= _token_expiry:
-            authenticate()
 
 
 @app.route("/webhook", methods=["POST"])
@@ -141,39 +103,6 @@ def tv_webhook():
         return run_pivot(acct_id, sym, sig, size, alert, ai_decision_id)
     else:
         return jsonify(error=f"Unknown strategy '{strat}'"), 400
-
-
-def process_market_timeframe(timeframe):
-    # Instead of requests.post(...)
-    # Directly call the trading logic as a function
-    from flask import Request
-    data = {
-        "secret": WEBHOOK_SECRET,
-        "strategy": "brackmod",
-        "account": "epsilon",
-        "signal": "",
-        "symbol": "CON.F.US.MES.M25",
-        "size": 3,
-        "alert": f"APScheduler {timeframe}"
-    }
-    # Call your webhook function directly, simulating a request
-    with app.test_request_context('/webhook', json=data):
-        response = tv_webhook()
-        logging.info(f"[APScheduler] {timeframe} direct call: {response}")
-
-
-def start_scheduler():
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(
-        process_market_timeframe, 
-        CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=5, timezone=CT), 
-        args=['5m'], 
-        id='5m_job', 
-        replace_existing=True
-    )
-    scheduler.start()
-    logging.info("[APScheduler] Scheduler started with 5m job.")
-    return scheduler
 
 if __name__ == "__main__":
     authenticate()
