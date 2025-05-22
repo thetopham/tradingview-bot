@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # tradingview_projectx_bot.py
 
-# at the top of tradingview_projectx_bot.py
 import os
 import time
 import threading
@@ -16,16 +15,11 @@ import json
 from logging.handlers import RotatingFileHandler
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-
-# signalr_listener import near the top as well, unless there's a true circular dependency
 from signalr_listener import launch_signalr_listener, track_trade
 
-
-
+# ─── Logging Setup ─────────────────────────────────────
 log_file = '/tmp/tradingview_projectx_bot.log'
-file_handler = RotatingFileHandler(
-    log_file, maxBytes=10*1024*1024, backupCount=5
-)
+file_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5)
 file_handler.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
 file_handler.setFormatter(formatter)
@@ -56,7 +50,6 @@ AI_ENDPOINTS = {
     # add more as needed
 }
 
-
 STOP_LOSS_POINTS = 10.0
 TP_POINTS        = [2.5, 5.0, 10.0]
 OVERRIDE_CONTRACT_ID = "CON.F.US.MES.M25"
@@ -69,7 +62,7 @@ session = requests.Session()
 adapter = HTTPAdapter(pool_maxsize=10, max_retries=3)
 session.mount("https://", adapter)
 
-print("MODULE LOADED")
+# ─── Flask App Setup ──────────────────────────────────
 app = Flask(__name__)
 
 if not any(isinstance(h, logging.Handler) and getattr(h, 'baseFilename', None) == log_file for h in app.logger.handlers):
@@ -83,6 +76,7 @@ logging.getLogger().setLevel(logging.INFO)
 
 app.logger.info("==== LOGGING SYSTEM READY ====")
 
+# ─── Auth State ───────────────────────────────────────
 _token = None
 _token_expiry = 0
 auth_lock = threading.Lock()
@@ -112,8 +106,6 @@ def authenticate():
     app.logger.info(f"Authentication successful; token (first 8): {_token[:8]}... expires in ~23h.")
 
 def get_token():
-    # Optionally print for debugging
-    print(f"DEBUG [get_token]: current _token={_token}")
     return _token
 
 def get_token_expiry():
@@ -124,10 +116,10 @@ def ensure_token():
         if _token is None or time.time() >= _token_expiry:
             authenticate()
 
+# ─── API Functions ────────────────────────────────────
 def post(path, payload):
     ensure_token()
     url = f"{PX_BASE}{path}"
-    # DEBUG level, not INFO
     app.logger.debug("POST %s payload=%s", url, payload)
     resp = session.post(
         url,
@@ -146,7 +138,6 @@ def post(path, payload):
     data = resp.json()
     app.logger.debug("Response JSON: %s", data)
     return data
-
 
 def place_market(acct_id, cid, side, size):
     app.logger.info("Placing market order acct=%s cid=%s side=%s size=%s", acct_id, cid, side, size)
@@ -653,8 +644,6 @@ if __name__ == "__main__":
     print(f"DEBUG: Got token: {_token[:12]}..., expiry: {_token_expiry}, now: {time.time()}")
     if not _token:
         raise RuntimeError("Token is None after authentication!")
-    from signalr_listener import launch_signalr_listener
-    # Pass the getter functions if your launch_signalr_listener accepts them (update import as needed)
     signalr_listener = launch_signalr_listener(get_token=get_token, get_token_expiry=get_token_expiry)
     scheduler = start_scheduler()
     app.logger.info("Starting server.")
