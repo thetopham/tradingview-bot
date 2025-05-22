@@ -1,6 +1,7 @@
 #auth.py
 
 import threading
+import logging
 
 
 # ─── Auth State ───────────────────────────────────────
