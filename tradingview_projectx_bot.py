@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # tradingview_projectx_bot.py
 
+# at the top of tradingview_projectx_bot.py
 import os
 import time
 import threading
@@ -13,10 +14,11 @@ import pytz
 import logging
 import json
 from logging.handlers import RotatingFileHandler
-from signalr_listener import launch_signalr_listener
-from signalr_listener import track_trade
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+
+# signalr_listener import near the top as well, unless there's a true circular dependency
+from signalr_listener import launch_signalr_listener, track_trade
 
 
 
@@ -109,7 +111,13 @@ def authenticate():
     _token_expiry = time.time() + 23 * 3600
     app.logger.info(f"Authentication successful; token (first 8): {_token[:8]}... expires in ~23h.")
 
+def get_token():
+    # Optionally print for debugging
+    print(f"DEBUG [get_token]: current _token={_token}")
+    return _token
 
+def get_token_expiry():
+    return _token_expiry
 
 def ensure_token():
     with auth_lock:
@@ -646,7 +654,8 @@ if __name__ == "__main__":
     if not _token:
         raise RuntimeError("Token is None after authentication!")
     from signalr_listener import launch_signalr_listener
-    signalr_listener = launch_signalr_listener()
+    # Pass the getter functions if your launch_signalr_listener accepts them (update import as needed)
+    signalr_listener = launch_signalr_listener(get_token=get_token, get_token_expiry=get_token_expiry)
     scheduler = start_scheduler()
     app.logger.info("Starting server.")
     app.run(host="0.0.0.0", port=TV_PORT, threaded=True)
