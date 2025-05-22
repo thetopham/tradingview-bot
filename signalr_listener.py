@@ -5,10 +5,6 @@ import logging
 from datetime import datetime
 from signalrcore.hub_connection_builder import HubConnectionBuilder
 
-
-# Setup logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-
 USER_HUB_URL_BASE = "wss://rtc.topstepx.com/hubs/user?access_token={}"
 
 # --- In-memory live state tracking ---
@@ -53,7 +49,7 @@ class SignalRTradingListener(threading.Thread):
                 if token != self.last_token:
                     self.last_token = token
                 self.connect_signalr(token)
-                self.stop_event.wait(3600)  # Wait; token will refresh before expiry
+                self.stop_event.wait(3600)
             except Exception as e:
                 logging.error(f"SignalRListener error: {e}", exc_info=True)
                 time.sleep(10)
@@ -117,7 +113,7 @@ class SignalRTradingListener(threading.Thread):
         if self.hub:
             self.hub.stop()
 
-# -- Enhanced handlers for event-driven performance logging! --
+# --- Event Handlers ---
 
 def on_account_update(args):
     logging.info(f"[Account Update] {args}")
@@ -129,11 +125,9 @@ def on_order_update(args):
     contract_id = order.get("contractId")
     status = order.get("status")  # 2 = filled, 3 = canceled
 
-    # Update order state
     orders_state.setdefault(account_id, {})[order_id] = order
 
-    # If filled and is an entry order, save meta for logging later
-    if status == 2:  # Filled
+    if status == 2:
         now = time.time()
         trade_meta[(account_id, contract_id)] = {
             "entry_time": now,
@@ -142,16 +136,14 @@ def on_order_update(args):
         logging.info(f"Order filled: {order}")
 
 def on_position_update(args):
-    # Avoid circular import by importing here
+    # Import to avoid circular dep
     from tradingview_projectx_bot import log_trade_results_to_supabase
     position = args[0] if isinstance(args, list) and args else args
     account_id = position.get("accountId")
     contract_id = position.get("contractId")
     size = position.get("size", 0)
-    # Update position state
     positions_state.setdefault(account_id, {})[contract_id] = position
 
-    # Position flattened? Log results.
     if size == 0:
         meta = trade_meta.pop((account_id, contract_id), None)
         if meta:
@@ -169,24 +161,17 @@ def on_position_update(args):
 def on_trade_update(args):
     logging.info(f"[Trade Update] {args}")
 
-def launch_signalr_listener():
-    
-    print(f"DEBUG [SignalR]: token before connect = {_token}")   # <-- inside the function, after import
-
-    def get_token():
-        print(f"DEBUG [SignalR]: get_token called, _token={_token}")
-        return _token
-
-    def get_token_expiry():
-        return _token_expiry
-
+def launch_signalr_listener(get_token, get_token_expiry):
+    # These imports are deferred to avoid circular dependency
+    from tradingview_projectx_bot import (
+        ACCOUNTS, authenticate, auth_lock
+    )
     event_handlers = {
         "on_account_update": on_account_update,
         "on_order_update": on_order_update,
         "on_position_update": on_position_update,
         "on_trade_update": on_trade_update,
     }
-
     listener = SignalRTradingListener(
         ACCOUNTS,
         authenticate_func=authenticate,
@@ -198,33 +183,6 @@ def launch_signalr_listener():
     listener.start()
     return listener
 
-
+# Optional: test stub
 if __name__ == "__main__":
-    from tradingview_projectx_bot import (
-        ACCOUNTS, authenticate, _token, _token_expiry, auth_lock
-    )
-    def get_token():
-        return _token
-    def get_token_expiry():
-        return _token_expiry
-    event_handlers = {
-        "on_account_update": on_account_update,
-        "on_order_update": on_order_update,
-        "on_position_update": on_position_update,
-        "on_trade_update": on_trade_update,
-    }
-    authenticate()  # Ensure token is valid at startup!
-    listener = SignalRTradingListener(
-        ACCOUNTS,
-        authenticate_func=authenticate,
-        token_getter=get_token,
-        token_expiry_getter=get_token_expiry,
-        auth_lock=auth_lock,
-        event_handlers=event_handlers
-    )
-    listener.start()
-    try:
-        while True:
-            time.sleep(60)
-    except KeyboardInterrupt:
-        listener.stop()
+    print("SignalR Listener module. Run via tradingview_projectx_bot.py.")
