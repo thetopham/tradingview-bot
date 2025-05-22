@@ -2,6 +2,9 @@
 import requests
 from auth import ensure_token
 from config import load_config
+import logging
+logging.debug("POST %s payload=%s", url, payload)
+
 
 session = requests.Session()
 
@@ -17,7 +20,7 @@ SUPABASE_KEY = config['SUPABASE_KEY']
 def post(path, payload):
     ensure_token()
     url = f"{PX_BASE}{path}"
-    app.logger.debug("POST %s payload=%s", url, payload)
+    logging.debug("POST %s payload=%s", url, payload)
     resp = session.post(
         url,
         json=payload,
@@ -28,30 +31,30 @@ def post(path, payload):
         timeout=(3.05, 10)
     )
     if resp.status_code == 429:
-        app.logger.warning("Rate limit hit: %s %s", resp.status_code, resp.text)
+        logging.warning("Rate limit hit: %s %s", resp.status_code, resp.text)
     if resp.status_code >= 400:
-        app.logger.error("Error on POST %s: %s", url, resp.text)
+        logging.error("Error on POST %s: %s", url, resp.text)
     resp.raise_for_status()
     data = resp.json()
-    app.logger.debug("Response JSON: %s", data)
+    logging.debug("Response JSON: %s", data)
     return data
 
 def place_market(acct_id, cid, side, size):
-    app.logger.info("Placing market order acct=%s cid=%s side=%s size=%s", acct_id, cid, side, size)
+    logging.info("Placing market order acct=%s cid=%s side=%s size=%s", acct_id, cid, side, size)
     return post("/api/Order/place", {
         "accountId": acct_id, "contractId": cid,
         "type": 2, "side": side, "size": size
     })
 
 def place_limit(acct_id, cid, side, size, px):
-    app.logger.info("Placing limit order acct=%s cid=%s size=%s px=%s", acct_id, cid, size, px)
+    logging.info("Placing limit order acct=%s cid=%s size=%s px=%s", acct_id, cid, size, px)
     return post("/api/Order/place", {
         "accountId": acct_id, "contractId": cid,
         "type": 1, "side": side, "size": size, "limitPrice": px
     })
 
 def place_stop(acct_id, cid, side, size, px):
-    app.logger.info("Placing stop order acct=%s cid=%s size=%s px=%s", acct_id, cid, size, px)
+    logging.info("Placing stop order acct=%s cid=%s size=%s px=%s", acct_id, cid, size, px)
     return post("/api/Order/place", {
         "accountId": acct_id, "contractId": cid,
         "type": 4, "side": side, "size": size, "stopPrice": px
@@ -59,24 +62,24 @@ def place_stop(acct_id, cid, side, size, px):
 
 def search_open(acct_id):
     orders = post("/api/Order/searchOpen", {"accountId": acct_id}).get("orders", [])
-    app.logger.debug("Open orders for %s: %s", acct_id, orders)
+    logging.debug("Open orders for %s: %s", acct_id, orders)
     return orders
 
 def cancel(acct_id, order_id):
     resp = post("/api/Order/cancel", {"accountId": acct_id, "orderId": order_id})
     if not resp.get("success", True):
-        app.logger.warning("Cancel reported failure: %s", resp)
+        logging.warning("Cancel reported failure: %s", resp)
     return resp
 
 def search_pos(acct_id):
     pos = post("/api/Position/searchOpen", {"accountId": acct_id}).get("positions", [])
-    app.logger.debug("Open positions for %s: %s", acct_id, pos)
+    logging.debug("Open positions for %s: %s", acct_id, pos)
     return pos
 
 def close_pos(acct_id, cid):
     resp = post("/api/Position/closeContract", {"accountId": acct_id, "contractId": cid})
     if not resp.get("success", True):
-        app.logger.warning("Close position reported failure: %s", resp)
+        logging.warning("Close position reported failure: %s", resp)
     return resp
 
 def search_trades(acct_id, since):
@@ -84,7 +87,7 @@ def search_trades(acct_id, since):
     return trades
 
 def flatten_contract(acct_id, cid, timeout=10):
-    app.logger.info("Flattening contract %s for acct %s", cid, acct_id)
+    logging.info("Flattening contract %s for acct %s", cid, acct_id)
     end = time.time() + timeout
     while time.time() < end:
         open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
@@ -94,7 +97,7 @@ def flatten_contract(acct_id, cid, timeout=10):
             try:
                 cancel(acct_id, o["id"])
             except Exception as e:
-                app.logger.error("Error cancelling %s: %s", o["id"], e)
+                logging.error("Error cancelling %s: %s", o["id"], e)
         time.sleep(1)
     while time.time() < end:
         positions = [p for p in search_pos(acct_id) if p["contractId"] == cid]
@@ -104,17 +107,17 @@ def flatten_contract(acct_id, cid, timeout=10):
             try:
                 close_pos(acct_id, cid)
             except Exception as e:
-                app.logger.error("Error closing position %s: %s", cid, e)
+                logging.error("Error closing position %s: %s", cid, e)
         time.sleep(1)
     while time.time() < end:
         rem_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
         rem_pos    = [p for p in search_pos(acct_id) if p["contractId"] == cid]
         if not rem_orders and not rem_pos:
-            app.logger.info("Flatten complete for %s", cid)
+            logging.info("Flatten complete for %s", cid)
             return True
-        app.logger.info("Waiting for flatten: %d orders, %d positions remain", len(rem_orders), len(rem_pos))
+        logging.info("Waiting for flatten: %d orders, %d positions remain", len(rem_orders), len(rem_pos))
         time.sleep(1)
-    app.logger.error("Flatten timeout: %s still has %d orders, %d positions", cid, len(rem_orders), len(rem_pos))
+    logging.error("Flatten timeout: %s still has %d orders, %d positions", cid, len(rem_orders), len(rem_pos))
     return False
 
 def cancel_all_stops(acct_id, cid):
