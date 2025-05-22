@@ -11,6 +11,10 @@ USER_HUB_URL_BASE = "wss://rtc.topstepx.com/hubs/user?access_token={}"
 orders_state = {}
 positions_state = {}
 trade_meta = {}
+positions_state[account_id][contract_id] = position
+
+def get_current_position(acct_id, contract_id):
+    return positions_state.get(acct_id, {}).get(contract_id)
 
 def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, order_id, alert, account, symbol, sl_id=None, tp_ids=None, trades=None):
     trade_meta[(acct_id, cid)] = {
