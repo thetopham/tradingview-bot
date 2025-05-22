@@ -4,6 +4,9 @@ import threading
 import logging
 from state import session
 
+from config import load_config
+config = load_config()
+PX_BASE = config['PX_BASE']
 
 
 # ─── Auth State ───────────────────────────────────────
