@@ -24,6 +24,8 @@ from datetime import datetime
 setup_logging()
 config = load_config()
 
+position = data.get("position", {})
+
 TV_PORT         = config['TV_PORT']
 WEBHOOK_SECRET  = config['WEBHOOK_SECRET']
 ACCOUNTS        = config['ACCOUNTS']
