@@ -2,6 +2,8 @@
 
 import threading
 import logging
+from state import session
+
 
 
 # ─── Auth State ───────────────────────────────────────
