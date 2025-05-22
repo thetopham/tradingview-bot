@@ -98,9 +98,6 @@ class SignalRTradingListener(threading.Thread):
         self.subscribe_all()
 
     def subscribe_all(self):
-        if not self.hub:
-            logging.error("SignalR hub not initialized!")
-            return
         self.hub.send("SubscribeAccounts")
         self.hub.send("SubscribeOrders", self.accounts)
         self.hub.send("SubscribePositions", self.accounts)
