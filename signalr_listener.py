@@ -2,6 +2,7 @@ import os
 import time
 import threading
 import logging
+from datetime import datetime
 from signalrcore.hub_connection_builder import HubConnectionBuilder
 
 # Setup logging
@@ -86,7 +87,7 @@ class SignalRTradingListener(threading.Thread):
         self.hub.on("GatewayUserTrade", self.event_handlers.get("on_trade_update", self.default_handler))
         self.hub.on_open(lambda: logging.info("SignalR connection established."))
         self.hub.on_close(lambda: logging.info("SignalR connection closed."))
-        self.hub.on_reconnected(self.on_reconnected)
+        self.hub.on_reconnect(self.on_reconnected)   # <--- FIXED LINE
         self.hub.on_error(lambda err: logging.error(f"SignalR connection error: {err}"))
         self.hub.start()
         self.subscribe_all()
@@ -127,16 +128,15 @@ def on_order_update(args):
 
     # If filled and is an entry order, save meta for logging later
     if status == 2:  # Filled
-        # Save trade meta (populate with whatever your strategies provide)
         now = time.time()
         trade_meta[(account_id, contract_id)] = {
-            "entry_time": now,  # Could use a datetime if you want
+            "entry_time": now,
             "order_id": order_id,
-            # Add any relevant meta: strategy, signal, ai_decision_id, etc.
         }
         logging.info(f"Order filled: {order}")
 
 def on_position_update(args):
+    # Avoid circular import by importing here
     from tradingview_projectx_bot import log_trade_results_to_supabase
     position = args[0] if isinstance(args, list) and args else args
     account_id = position.get("accountId")
