@@ -103,10 +103,11 @@ class SignalRTradingListener(threading.Thread):
     def subscribe_all(self):
         self.hub.send("SubscribeAccounts", [])
         logging.info(f"SubscribeOrders payload: {self.accounts} (type={type(self.accounts)})")
-        self.hub.send("SubscribeOrders", self.accounts)
-        self.hub.send("SubscribePositions", self.accounts)
-        self.hub.send("SubscribeTrades", self.accounts)
+        self.hub.send("SubscribeOrders", *self.accounts)
+        self.hub.send("SubscribePositions", *self.accounts)
+        self.hub.send("SubscribeTrades", *self.accounts)
         logging.info(f"Subscribed to accounts/orders/positions/trades for: {self.accounts}")
+
 
 
     def on_reconnected(self):
