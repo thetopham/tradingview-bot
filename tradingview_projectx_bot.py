@@ -607,24 +607,23 @@ def tv_webhook():
 
 
 def process_market_timeframe(timeframe):
-    print(f"[APScheduler] Running scheduled job for {timeframe}", flush=True)
-    logging.info(f"[APScheduler] Running scheduled job for {timeframe}")
-    # Example: POST to your own webhook (optional)
-    payload = {
+    # Instead of requests.post(...)
+    # Directly call the trading logic as a function
+    from flask import Request
+    data = {
         "secret": WEBHOOK_SECRET,
-        "strategy": "brackmod",   # or your logic
+        "strategy": "brackmod",
         "account": "epsilon",
-        "signal": "",             # Or as needed
+        "signal": "",
         "symbol": "CON.F.US.MES.M25",
         "size": 3,
         "alert": f"APScheduler {timeframe}"
     }
-    url = WEBHOOK
-    try:
-        resp = requests.post(url, json=payload, timeout=10)
-        logging.info(f"[APScheduler] {timeframe} POST {resp.status_code}: {resp.text}")
-    except Exception as e:
-        logging.error(f"[APScheduler] {timeframe} job error: {e}")
+    # Call your webhook function directly, simulating a request
+    with app.test_request_context('/webhook', json=data):
+        response = tv_webhook()
+        logging.info(f"[APScheduler] {timeframe} direct call: {response}")
+
 
 def start_scheduler():
     scheduler = BackgroundScheduler()
