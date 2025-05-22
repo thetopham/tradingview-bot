@@ -644,15 +644,21 @@ if __name__ == "__main__":
     print(f"DEBUG: Got token: {_token[:12]}..., expiry: {_token_expiry}, now: {time.time()}")
     if not _token:
         raise RuntimeError("Token is None after authentication!")
-    signalr_listener = launch_signalr_listener(get_token=get_token, get_token_expiry=get_token_expiry)
+
+    signalr_listener = launch_signalr_listener(
+        get_token=get_token, 
+        get_token_expiry=get_token_expiry
+    )
     market_listener = launch_market_listener(
-        contract_ids=["CON.F.US.MES.M25"],  # <-- Your desired contract(s)
+        contract_ids=["CON.F.US.MES.M25"],  # Add additional contract IDs as needed
         get_token=get_token,
         get_token_expiry=get_token_expiry,
         auth_lock=auth_lock,
     )
     scheduler = start_scheduler()
     app.logger.info("Starting server.")
+    app.run(host="0.0.0.0", port=TV_PORT, threaded=True)
+
     app.run(host="0.0.0.0", port=TV_PORT, threaded=True)
 
 
