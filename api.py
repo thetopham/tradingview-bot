@@ -1,9 +1,6 @@
 # api.py
 
 
-OVERRIDE_CONTRACT_ID = "CON.F.US.MES.M25"
-
-
 from config import load_config
 config = load_config()
 OVERRIDE_CONTRACT_ID = config['OVERRIDE_CONTRACT_ID']
