@@ -6,11 +6,12 @@ from datetime import datetime
 from signalrcore.hub_connection_builder import HubConnectionBuilder
 
 USER_HUB_URL_BASE = "wss://rtc.topstepx.com/hubs/user?access_token={}"
+MARKET_HUB_URL_BASE = "wss://rtc.topstepx.com/hubs/market?access_token={}"
 
 # --- In-memory live state tracking ---
-orders_state = {}      # {account_id: {order_id: order_data}}
-positions_state = {}   # {account_id: {contract_id: position_data}}
-trade_meta = {}        # {(account_id, contract_id): {entry_time, ai_decision_id, ...}}
+orders_state = {}
+positions_state = {}
+trade_meta = {}
 
 def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, order_id, alert, account, symbol, sl_id=None, tp_ids=None, trades=None):
     trade_meta[(acct_id, cid)] = {
@@ -119,66 +120,114 @@ class SignalRTradingListener(threading.Thread):
         if self.hub:
             self.hub.stop()
 
-# --- Event Handlers ---
+# --- Market Hub Listener ---
+class SignalRMarketListener(threading.Thread):
+    def __init__(self, contract_ids, token_getter, token_expiry_getter, auth_lock, event_handlers=None):
+        super().__init__(daemon=True)
+        self.contract_ids = contract_ids if isinstance(contract_ids, list) else [contract_ids]
+        self.token_getter = token_getter
+        self.token_expiry_getter = token_expiry_getter
+        self.auth_lock = auth_lock
+        self.event_handlers = event_handlers or {}
+        self.hub = None
+        self.stop_event = threading.Event()
+        self.last_token = None
 
-def on_account_update(args):
-    logging.info(f"[Account Update] {args}")
+    def run(self):
+        while not self.stop_event.is_set():
+            try:
+                self.ensure_token_valid()
+                token = self.token_getter()
+                if token != self.last_token:
+                    self.last_token = token
+                self.connect_signalr(token)
+                self.stop_event.wait(3600)
+            except Exception as e:
+                logging.error(f"MarketListener error: {e}", exc_info=True)
+                time.sleep(10)
 
-def on_order_update(args):
-    order = args[0] if isinstance(args, list) and args else args
-    account_id = order.get("accountId")
-    order_id = order.get("id")
-    contract_id = order.get("contractId")
-    status = order.get("status")  # 2 = filled, 3 = canceled
+    def ensure_token_valid(self):
+        with self.auth_lock:
+            if self.token_expiry_getter() - time.time() < 60:
+                logging.info("Refreshing JWT token for MarketHub connection.")
+                # You may need to call your authenticate function here
 
-    orders_state.setdefault(account_id, {})[order_id] = order
+    def connect_signalr(self, token):
+        if not token:
+            logging.error("No token available for MarketHub connection! Check authentication.")
+            return
+        logging.info(f"Using token for MarketHub (first 8): {token[:8]}...")
 
-    if status == 2:
-        now = time.time()
-        trade_meta[(account_id, contract_id)] = {
-            "entry_time": now,
-            "order_id": order_id,
-        }
-        logging.info(f"Order filled: {order}")
+        url = MARKET_HUB_URL_BASE.format(token)
+        if self.hub:
+            self.hub.stop()
+        self.hub = (
+            HubConnectionBuilder()
+            .with_url(url, options={
+                "access_token_factory": lambda: token,
+                "headers": {"Authorization": f"Bearer {token}"},
+            })
+            .configure_logging(logging.INFO)
+            .with_automatic_reconnect({
+                "type": "raw",
+                "keep_alive_interval": 10,
+                "reconnect_interval": 5
+            })
+            .build()
+        )
 
-def on_position_update(args):
-    from tradingview_projectx_bot import log_trade_results_to_supabase
-    position = args[0] if isinstance(args, list) and args else args
-    account_id = position.get("accountId")
-    contract_id = position.get("contractId")
-    size = position.get("size", 0)
-    positions_state.setdefault(account_id, {})[contract_id] = position
+        # Market data event handlers
+        self.hub.on("GatewayQuote", self.event_handlers.get("on_quote", self.default_handler))
+        self.hub.on("GatewayTrade", self.event_handlers.get("on_trade", self.default_handler))
+        self.hub.on("GatewayDepth", self.event_handlers.get("on_depth", self.default_handler))
 
-    if size == 0:
-        meta = trade_meta.pop((account_id, contract_id), None)
-        if meta:
-            logging.info(f"Position flattened, logging trade results: acct={account_id} contract={contract_id}")
-            entry_time = meta.get("entry_time")
-            ai_decision_id = meta.get("ai_decision_id")
-            log_trade_results_to_supabase(
-                acct_id=account_id,
-                cid=contract_id,
-                entry_time=datetime.fromtimestamp(entry_time),
-                ai_decision_id=ai_decision_id,
-                meta=meta
-            )
+        self.hub.on_open(lambda: self.on_open())
+        self.hub.on_close(lambda: logging.info("MarketHub connection closed."))
+        self.hub.on_reconnect(self.on_reconnected)
+        self.hub.on_error(lambda err: logging.error(f"MarketHub connection error: {err}"))
+        self.hub.start()
 
-def on_trade_update(args):
-    logging.info(f"[Trade Update] {args}")
+    def on_open(self):
+        logging.info("MarketHub connection established. Subscribing to contract events.")
+        self.subscribe_all()
 
-def launch_signalr_listener(get_token, get_token_expiry):
-    from tradingview_projectx_bot import (
-        ACCOUNTS, authenticate, auth_lock
-    )
+    def subscribe_all(self):
+        for contract_id in self.contract_ids:
+            self.hub.send("SubscribeContractQuotes", [contract_id])
+            self.hub.send("SubscribeContractTrades", [contract_id])
+            self.hub.send("SubscribeContractMarketDepth", [contract_id])
+        logging.info(f"Subscribed to market events for contracts: {self.contract_ids}")
+
+    def on_reconnected(self):
+        logging.info("MarketHub reconnected! Resubscribing to all contract events...")
+        self.subscribe_all()
+
+    def default_handler(self, *args):
+        logging.info(f"MarketHub event: {args}")
+
+    def stop(self):
+        self.stop_event.set()
+        if self.hub:
+            self.hub.stop()
+
+# --- Market Data Event Handlers ---
+def on_quote(*args):
+    logging.info(f"[Market Quote] {args}")
+
+def on_trade(*args):
+    logging.info(f"[Market Trade] {args}")
+
+def on_depth(*args):
+    logging.info(f"[Market Depth] {args}")
+
+def launch_market_listener(contract_ids, get_token, get_token_expiry, auth_lock):
     event_handlers = {
-        "on_account_update": on_account_update,
-        "on_order_update": on_order_update,
-        "on_position_update": on_position_update,
-        "on_trade_update": on_trade_update,
+        "on_quote": on_quote,
+        "on_trade": on_trade,
+        "on_depth": on_depth,
     }
-    listener = SignalRTradingListener(
-        ACCOUNTS,
-        authenticate_func=authenticate,
+    listener = SignalRMarketListener(
+        contract_ids,
         token_getter=get_token,
         token_expiry_getter=get_token_expiry,
         auth_lock=auth_lock,
@@ -187,6 +236,6 @@ def launch_signalr_listener(get_token, get_token_expiry):
     listener.start()
     return listener
 
-# Optional: test stub
+# If you want to test in standalone mode
 if __name__ == "__main__":
-    print("SignalR Listener module. Run via tradingview_projectx_bot.py.")
+    print("SignalR Market Listener module. Import and launch from your trading bot.")
