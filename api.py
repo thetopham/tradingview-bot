@@ -1,9 +1,10 @@
+# api.py
+
 from config import load_config
 config = load_config()
-OVERRIDE_CONTRACT_ID = config.get('OVERRIDE_CONTRACT_ID', None)
+OVERRIDE_CONTRACT_ID = config['OVERRIDE_CONTRACT_ID']
 
 
-# api.py
 # ─── API Functions ────────────────────────────────────
 def post(path, payload):
     ensure_token()
