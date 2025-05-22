@@ -104,6 +104,6 @@ if __name__ == "__main__":
         authenticate=authenticate,
         auth_lock=threading.Lock()
     ) 
-    scheduler = start_scheduler()
+    scheduler = start_scheduler(app)
     app.logger.info("Starting server.")
     app.run(host="0.0.0.0", port=TV_PORT, threaded=True)
