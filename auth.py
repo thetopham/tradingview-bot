@@ -1,5 +1,8 @@
 #auth.py
 
+import threading
+
+
 # ─── Auth State ───────────────────────────────────────
 _token = None
 _token_expiry = 0
