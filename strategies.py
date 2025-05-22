@@ -1,5 +1,23 @@
 #strategies.py
 
+import time
+from datetime import datetime, timedelta
+from flask import jsonify
+
+from api import (
+    get_contract, search_pos, flatten_contract, place_market,
+    place_limit, place_stop, search_open, cancel, search_trades,
+    check_for_phantom_orders, log_trade_results_to_supabase
+)
+from signalr_listener import track_trade
+from config import load_config
+
+config = load_config()
+STOP_LOSS_POINTS = config.get('STOP_LOSS_POINTS', 10.0)
+TP_POINTS = config.get('TP_POINTS', [2.5, 5.0, 10.0])
+CT = config['CT']
+
+
 def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
     cid = get_contract(sym)
     side = 0 if sig == "BUY" else 1
