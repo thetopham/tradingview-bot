@@ -64,6 +64,12 @@ class SignalRTradingListener(threading.Thread):
                 self.authenticate_func()
 
     def connect_signalr(self, token):
+    if not token:
+        logging.error("No token available for SignalR connection! Check authentication.")
+        return
+        logging.info(f"Using token for SignalR (first 8): {token[:8]}...")
+   
+
         url = USER_HUB_URL_BASE.format(token)
         if self.hub:
             self.hub.stop()
