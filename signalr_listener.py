@@ -142,7 +142,7 @@ def on_order_update(args):
         logging.info(f"Order filled: {order}")
 
 def on_position_update(args):
-    from tradingview_projectx_bot import log_trade_results_to_supabase
+    from api import log_trade_results_to_supabase
     position = args[0] if isinstance(args, list) and args else args
     account_id = position.get("accountId")
     contract_id = position.get("contractId")
