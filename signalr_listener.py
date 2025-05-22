@@ -83,15 +83,21 @@ class SignalRTradingListener(threading.Thread):
             })
             .build()
         )
+
+        # Register event handlers
         self.hub.on("GatewayUserAccount", self.event_handlers.get("on_account_update", self.default_handler))
         self.hub.on("GatewayUserOrder", self.event_handlers.get("on_order_update", self.default_handler))
         self.hub.on("GatewayUserPosition", self.event_handlers.get("on_position_update", self.default_handler))
         self.hub.on("GatewayUserTrade", self.event_handlers.get("on_trade_update", self.default_handler))
-        self.hub.on_open(lambda: logging.info("SignalR connection established."))
+
+        self.hub.on_open(lambda: self.on_open())
         self.hub.on_close(lambda: logging.info("SignalR connection closed."))
         self.hub.on_reconnect(self.on_reconnected)
         self.hub.on_error(lambda err: logging.error(f"SignalR connection error: {err}"))
         self.hub.start()
+
+    def on_open(self):
+        logging.info("SignalR connection established. Subscribing to all events.")
         self.subscribe_all()
 
     def subscribe_all(self):
@@ -100,7 +106,6 @@ class SignalRTradingListener(threading.Thread):
         self.hub.send("SubscribePositions", [self.accounts])
         self.hub.send("SubscribeTrades", [self.accounts])
         logging.info(f"Subscribed to accounts/orders/positions/trades for: {self.accounts}")
-
 
     def on_reconnected(self):
         logging.info("SignalR reconnected! Resubscribing to all events...")
@@ -137,7 +142,6 @@ def on_order_update(args):
         logging.info(f"Order filled: {order}")
 
 def on_position_update(args):
-    # Import to avoid circular dep
     from tradingview_projectx_bot import log_trade_results_to_supabase
     position = args[0] if isinstance(args, list) and args else args
     account_id = position.get("accountId")
@@ -163,7 +167,6 @@ def on_trade_update(args):
     logging.info(f"[Trade Update] {args}")
 
 def launch_signalr_listener(get_token, get_token_expiry):
-    # These imports are deferred to avoid circular dependency
     from tradingview_projectx_bot import (
         ACCOUNTS, authenticate, auth_lock
     )
