@@ -63,42 +63,44 @@ class SignalRTradingListener(threading.Thread):
                 logging.info("Refreshing JWT token for SignalR connection.")
                 self.authenticate_func()
 
-def connect_signalr(self, token):
-    if not token:
-        logging.error("No token available for SignalR connection! Check authentication.")
-        return
-    logging.info(f"Using token for SignalR (first 8): {token[:8]}...")
+    def connect_signalr(self, token):
+        if not token:
+            logging.error("No token available for SignalR connection! Check authentication.")
+            return
+        logging.info(f"Using token for SignalR (first 8): {token[:8]}...")
 
-    url = USER_HUB_URL_BASE.format(token)
-    if self.hub:
-        self.hub.stop()
-    self.hub = (
-        HubConnectionBuilder()
-        .with_url(url, options={
-            "access_token_factory": lambda: token,
-            "headers": {"Authorization": f"Bearer {token}"},
-        })
-        .configure_logging(logging.INFO)
-        .with_automatic_reconnect({
-            "type": "raw",
-            "keep_alive_interval": 10,
-            "reconnect_interval": 5
-        })
-        .build()
-    )
-    self.hub.on("GatewayUserAccount", self.event_handlers.get("on_account_update", self.default_handler))
-    self.hub.on("GatewayUserOrder", self.event_handlers.get("on_order_update", self.default_handler))
-    self.hub.on("GatewayUserPosition", self.event_handlers.get("on_position_update", self.default_handler))
-    self.hub.on("GatewayUserTrade", self.event_handlers.get("on_trade_update", self.default_handler))
-    self.hub.on_open(lambda: logging.info("SignalR connection established."))
-    self.hub.on_close(lambda: logging.info("SignalR connection closed."))
-    self.hub.on_reconnect(self.on_reconnected)
-    self.hub.on_error(lambda err: logging.error(f"SignalR connection error: {err}"))
-    self.hub.start()
-    self.subscribe_all()
-
+        url = USER_HUB_URL_BASE.format(token)
+        if self.hub:
+            self.hub.stop()
+        self.hub = (
+            HubConnectionBuilder()
+            .with_url(url, options={
+                "access_token_factory": lambda: token,
+                "headers": {"Authorization": f"Bearer {token}"},
+            })
+            .configure_logging(logging.INFO)
+            .with_automatic_reconnect({
+                "type": "raw",
+                "keep_alive_interval": 10,
+                "reconnect_interval": 5
+            })
+            .build()
+        )
+        self.hub.on("GatewayUserAccount", self.event_handlers.get("on_account_update", self.default_handler))
+        self.hub.on("GatewayUserOrder", self.event_handlers.get("on_order_update", self.default_handler))
+        self.hub.on("GatewayUserPosition", self.event_handlers.get("on_position_update", self.default_handler))
+        self.hub.on("GatewayUserTrade", self.event_handlers.get("on_trade_update", self.default_handler))
+        self.hub.on_open(lambda: logging.info("SignalR connection established."))
+        self.hub.on_close(lambda: logging.info("SignalR connection closed."))
+        self.hub.on_reconnect(self.on_reconnected)
+        self.hub.on_error(lambda err: logging.error(f"SignalR connection error: {err}"))
+        self.hub.start()
+        self.subscribe_all()
 
     def subscribe_all(self):
+        if not self.hub:
+            logging.error("SignalR hub not initialized!")
+            return
         self.hub.send("SubscribeAccounts")
         self.hub.send("SubscribeOrders", self.accounts)
         self.hub.send("SubscribePositions", self.accounts)
@@ -116,6 +118,7 @@ def connect_signalr(self, token):
         self.stop_event.set()
         if self.hub:
             self.hub.stop()
+
 
 # -- Enhanced handlers for event-driven performance logging! --
 
