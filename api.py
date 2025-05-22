@@ -3,7 +3,7 @@ import requests
 from auth import ensure_token
 from config import load_config
 import logging
-logging.debug("POST %s payload=%s", url, payload)
+
 
 
 session = requests.Session()
