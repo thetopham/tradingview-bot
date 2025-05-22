@@ -35,10 +35,11 @@ PX_BASE         = os.getenv("PROJECTX_BASE_URL")
 USER_NAME       = os.getenv("PROJECTX_USERNAME")
 API_KEY         = os.getenv("PROJECTX_API_KEY")
 WEBHOOK_SECRET  = os.getenv("WEBHOOK_SECRET")
-N8N_AI_URL      = "https://n8n.thetopham.com/webhook/5c793395-f218-4a49-a620-51d297f2dbfb"
-N8N_AI_URL2      = "https://n8n.thetopham.com/webhook/fast"
-SUPABASE_URL    = os.getenv("SUPABASE_URL")   # e.g. https://xxxx.supabase.co/rest/v1
-SUPABASE_KEY    = os.getenv("SUPABASE_KEY")   # your Supabase API key
+N8N_AI_URL      = os.getenv("N8N_AI_URL")
+N8N_AI_URL2     = os.getenv("N8N_AI_URL2")
+SUPABASE_URL    = os.getenv("SUPABASE_URL")   
+SUPABASE_KEY    = os.getenv("SUPABASE_KEY") 
+WEBHOOK         = os.getenv("WEBHOOK")
 
 # Build account map from .env: any var ACCOUNT_<NAME>=<ID>
 ACCOUNTS = {k[len("ACCOUNT_"):].lower(): int(v)
@@ -616,7 +617,7 @@ def process_market_timeframe(timeframe):
         "size": 3,
         "alert": f"APScheduler {timeframe}"
     }
-    url = f"http://localhost:{TV_PORT}/webhook"
+    url = WEBHOOK
     try:
         resp = requests.post(url, json=payload, timeout=10)
         logging.info(f"[APScheduler] {timeframe} POST {resp.status_code}: {resp.text}")
