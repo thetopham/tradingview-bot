@@ -1,3 +1,8 @@
+from config import load_config
+config = load_config()
+OVERRIDE_CONTRACT_ID = config.get('OVERRIDE_CONTRACT_ID', None)
+
+
 # api.py
 # ─── API Functions ────────────────────────────────────
 def post(path, payload):
