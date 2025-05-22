@@ -8,7 +8,6 @@ from signalrcore.hub_connection_builder import HubConnectionBuilder
 USER_HUB_URL_BASE = "wss://rtc.topstepx.com/hubs/user?access_token={}"
 MARKET_HUB_URL_BASE = "wss://rtc.topstepx.com/hubs/market?access_token={}"
 
-# --- In-memory live state tracking ---
 orders_state = {}
 positions_state = {}
 trade_meta = {}
@@ -120,7 +119,7 @@ class SignalRTradingListener(threading.Thread):
         if self.hub:
             self.hub.stop()
 
-# --- Market Hub Listener ---
+# --- Market Listener ---
 class SignalRMarketListener(threading.Thread):
     def __init__(self, contract_ids, token_getter, token_expiry_getter, auth_lock, event_handlers=None):
         super().__init__(daemon=True)
@@ -150,7 +149,6 @@ class SignalRMarketListener(threading.Thread):
         with self.auth_lock:
             if self.token_expiry_getter() - time.time() < 60:
                 logging.info("Refreshing JWT token for MarketHub connection.")
-                # You may need to call your authenticate function here
 
     def connect_signalr(self, token):
         if not token:
@@ -210,6 +208,52 @@ class SignalRMarketListener(threading.Thread):
         if self.hub:
             self.hub.stop()
 
+# --- User Event Handlers ---
+def on_account_update(args):
+    logging.info(f"[Account Update] {args}")
+
+def on_order_update(args):
+    order = args[0] if isinstance(args, list) and args else args
+    account_id = order.get("accountId")
+    order_id = order.get("id")
+    contract_id = order.get("contractId")
+    status = order.get("status")  # 2 = filled, 3 = canceled
+
+    orders_state.setdefault(account_id, {})[order_id] = order
+
+    if status == 2:
+        now = time.time()
+        trade_meta[(account_id, contract_id)] = {
+            "entry_time": now,
+            "order_id": order_id,
+        }
+        logging.info(f"Order filled: {order}")
+
+def on_position_update(args):
+    from tradingview_projectx_bot import log_trade_results_to_supabase
+    position = args[0] if isinstance(args, list) and args else args
+    account_id = position.get("accountId")
+    contract_id = position.get("contractId")
+    size = position.get("size", 0)
+    positions_state.setdefault(account_id, {})[contract_id] = position
+
+    if size == 0:
+        meta = trade_meta.pop((account_id, contract_id), None)
+        if meta:
+            logging.info(f"Position flattened, logging trade results: acct={account_id} contract={contract_id}")
+            entry_time = meta.get("entry_time")
+            ai_decision_id = meta.get("ai_decision_id")
+            log_trade_results_to_supabase(
+                acct_id=account_id,
+                cid=contract_id,
+                entry_time=datetime.fromtimestamp(entry_time),
+                ai_decision_id=ai_decision_id,
+                meta=meta
+            )
+
+def on_trade_update(args):
+    logging.info(f"[Trade Update] {args}")
+
 # --- Market Data Event Handlers ---
 def on_quote(*args):
     logging.info(f"[Market Quote] {args}")
@@ -219,6 +263,27 @@ def on_trade(*args):
 
 def on_depth(*args):
     logging.info(f"[Market Depth] {args}")
+
+def launch_signalr_listener(get_token, get_token_expiry):
+    from tradingview_projectx_bot import (
+        ACCOUNTS, authenticate, auth_lock
+    )
+    event_handlers = {
+        "on_account_update": on_account_update,
+        "on_order_update": on_order_update,
+        "on_position_update": on_position_update,
+        "on_trade_update": on_trade_update,
+    }
+    listener = SignalRTradingListener(
+        ACCOUNTS,
+        authenticate_func=authenticate,
+        token_getter=get_token,
+        token_expiry_getter=get_token_expiry,
+        auth_lock=auth_lock,
+        event_handlers=event_handlers
+    )
+    listener.start()
+    return listener
 
 def launch_market_listener(contract_ids, get_token, get_token_expiry, auth_lock):
     event_handlers = {
@@ -236,6 +301,5 @@ def launch_market_listener(contract_ids, get_token, get_token_expiry, auth_lock)
     listener.start()
     return listener
 
-# If you want to test in standalone mode
 if __name__ == "__main__":
-    print("SignalR Market Listener module. Import and launch from your trading bot.")
+    print("SignalR Listener module. Run via tradingview_projectx_bot.py.")
