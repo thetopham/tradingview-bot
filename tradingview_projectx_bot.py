@@ -106,7 +106,8 @@ def authenticate():
         raise RuntimeError("Auth failed")
     _token = data["token"]
     _token_expiry = time.time() + 23 * 3600
-    app.logger.info("Authentication successful; token expires in ~23h.")
+    app.logger.info(f"Authentication successful; token (first 8): {_token[:8]}... expires in ~23h.")
+
 
 def ensure_token():
     with auth_lock:
@@ -638,8 +639,9 @@ def start_scheduler():
     return scheduler
 
 if __name__ == "__main__":
-    authenticate() 
+    authenticate()  # Ensure token is valid at startup!
     signalr_listener = launch_signalr_listener()
     scheduler = start_scheduler() 
     app.logger.info("Starting server.")
     app.run(host="0.0.0.0", port=TV_PORT, threaded=True)
+
