@@ -2,6 +2,7 @@ import os
 import time
 import threading
 import logging
+from api import search_pos
 from datetime import datetime
 from signalrcore.hub_connection_builder import HubConnectionBuilder
 
