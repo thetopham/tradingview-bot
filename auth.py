@@ -7,6 +7,10 @@ from state import session
 from config import load_config
 config = load_config()
 PX_BASE = config['PX_BASE']
+USER_NAME = config['USER_NAME']
+API_KEY = config['API_KEY']
+
+
 
 
 # ─── Auth State ───────────────────────────────────────
