@@ -3,17 +3,19 @@
 import time
 import threading
 import logging
-from state import session
+from datetime import datetime
+import pytz
 
+from state import session  # Only if using shared session, otherwise use requests.Session()
 from config import load_config
+
 config = load_config()
 PX_BASE = config['PX_BASE']
 USER_NAME = config['USER_NAME']
 API_KEY = config['API_KEY']
 GET_FLAT_START = config['GET_FLAT_START']
 GET_FLAT_END = config['GET_FLAT_END']
-
-
+CT = pytz.timezone("America/Chicago")  # Or load from config if you want
 
 
 # ─── Auth State ───────────────────────────────────────
@@ -39,7 +41,7 @@ def authenticate():
     resp.raise_for_status()
     data = resp.json()
     if not data.get("success"):
-        app.logger.error("Auth failed: %s", data)
+        logging.error("Auth failed: %s", data)
         raise RuntimeError("Auth failed")
     _token = data["token"]
     _token_expiry = time.time() + 23 * 3600
