@@ -1,4 +1,6 @@
 # api.py
+import requests
+session = requests.Session()
 
 
 from config import load_config
