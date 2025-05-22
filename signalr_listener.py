@@ -7,7 +7,6 @@ from signalrcore.hub_connection_builder import HubConnectionBuilder
 
 USER_HUB_URL_BASE = "wss://rtc.topstepx.com/hubs/user?access_token={}"
 
-
 orders_state = {}
 positions_state = {}
 trade_meta = {}
@@ -29,9 +28,9 @@ def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, o
     }
 
 class SignalRTradingListener(threading.Thread):
-    def __init__(self, accounts, authenticate_func, token_getter, token_expiry_getter, auth_lock, event_handlers=None):
+    def __init__(self, account, authenticate_func, token_getter, token_expiry_getter, auth_lock, event_handlers=None):
         super().__init__(daemon=True)
-        self.accounts = list(accounts.values())
+        self.account = account  # single account id (int)
         self.authenticate_func = authenticate_func
         self.token_getter = token_getter
         self.token_expiry_getter = token_expiry_getter
@@ -101,14 +100,12 @@ class SignalRTradingListener(threading.Thread):
         self.subscribe_all()
 
     def subscribe_all(self):
-        self.hub.send("SubscribeAccounts", [])  # Accounts list may be empty or all accounts
-        for acct_id in self.accounts:
-            logging.info(f"Subscribing for account: {acct_id}")
-            self.hub.send("SubscribeOrders", [acct_id])
-            self.hub.send("SubscribePositions", [acct_id])
-            self.hub.send("SubscribeTrades", [acct_id])
-        logging.info(f"Subscribed to accounts/orders/positions/trades for: {self.accounts}")
-
+        self.hub.send("SubscribeAccounts", [])
+        logging.info(f"Subscribing for account: {self.account}")
+        self.hub.send("SubscribeOrders", [self.account])
+        self.hub.send("SubscribePositions", [self.account])
+        self.hub.send("SubscribeTrades", [self.account])
+        logging.info(f"Subscribed to accounts/orders/positions/trades for: {self.account}")
 
     def on_reconnected(self):
         logging.info("SignalR reconnected! Resubscribing to all events...")
@@ -122,12 +119,11 @@ class SignalRTradingListener(threading.Thread):
         if self.hub:
             self.hub.stop()
 
-# --- User Event Handlers ---
+# --- Event Handlers ---
 def on_account_update(args):
     logging.info(f"[Account Update] {args}")
 
 def on_order_update(args):
-    logging.info("Order event handler called")
     order = args[0] if isinstance(args, list) and args else args
     account_id = order.get("accountId")
     order_id = order.get("id")
@@ -169,10 +165,8 @@ def on_position_update(args):
 def on_trade_update(args):
     logging.info(f"[Trade Update] {args}")
 
-def launch_signalr_listener(get_token, get_token_expiry):
-    from tradingview_projectx_bot import (
-        ACCOUNTS, authenticate, auth_lock
-    )
+def launch_signalr_listener(get_token, get_token_expiry, account):
+    from tradingview_projectx_bot import authenticate, auth_lock
     event_handlers = {
         "on_account_update": on_account_update,
         "on_order_update": on_order_update,
@@ -180,7 +174,7 @@ def launch_signalr_listener(get_token, get_token_expiry):
         "on_trade_update": on_trade_update,
     }
     listener = SignalRTradingListener(
-        ACCOUNTS,
+        account=account,
         authenticate_func=authenticate,
         token_getter=get_token,
         token_expiry_getter=get_token_expiry,
@@ -190,7 +184,7 @@ def launch_signalr_listener(get_token, get_token_expiry):
     listener.start()
     return listener
 
-
-
+# Usage Example:
 if __name__ == "__main__":
+    # You'll need to supply get_token, get_token_expiry, and account_id here.
     print("SignalR Listener module. Run via tradingview_projectx_bot.py.")
