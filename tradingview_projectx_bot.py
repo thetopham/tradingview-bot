@@ -54,10 +54,6 @@ AI_ENDPOINTS = {
     # add more as needed
 }
 
-from tradingview_projectx_bot import authenticate, _token, _token_expiry
-authenticate()
-print(_token)
-
 
 STOP_LOSS_POINTS = 10.0
 TP_POINTS        = [2.5, 5.0, 10.0]
