@@ -17,8 +17,10 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from signalr_listener import launch_signalr_listener, track_trade
 from logging_config import setup_logging
-setup_logging()
 from config import load_config
+from api import api
+
+setup_logging()
 config = load_config()
 
 AI_ENDPOINTS = {
