@@ -646,11 +646,14 @@ if __name__ == "__main__":
 
     signalr_listener = launch_signalr_listener(
         get_token=get_token, 
-        get_token_expiry=get_token_expiry
+        get_token_expiry=get_token_expiry,
+        authenticate=authenticate,         # <-- ADD THIS
+        auth_lock=auth_lock                # <-- AND THIS
     )
     scheduler = start_scheduler()
     app.logger.info("Starting server.")
     app.run(host="0.0.0.0", port=TV_PORT, threaded=True)
+
 
 
 
