@@ -604,6 +604,7 @@ def tv_webhook():
 
 
 def process_market_timeframe(timeframe):
+    print(f"[APScheduler] Running scheduled job for {timeframe}", flush=True)
     logging.info(f"[APScheduler] Running scheduled job for {timeframe}")
     # Example: POST to your own webhook (optional)
     payload = {
@@ -626,19 +627,17 @@ def start_scheduler():
     scheduler = BackgroundScheduler()
     scheduler.add_job(
         process_market_timeframe, 
-        CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=5), 
+        CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=5, timezone=CT), 
         args=['5m'], 
         id='5m_job', 
         replace_existing=True
-    )    
+    )
     scheduler.start()
     logging.info("[APScheduler] Scheduler started with 5m job.")
     return scheduler
-
-
 
 if __name__ == "__main__":
     signalr_listener = launch_signalr_listener()
     scheduler = start_scheduler() 
     app.logger.info("Starting server.")
-    app.run(host="0.0.0.0", port=TV_PORT)
+    app.run(host="0.0.0.0", port=TV_PORT, threaded=True)
