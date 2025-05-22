@@ -1,53 +1,42 @@
 #!/usr/bin/env python3
 # tradingview_projectx_bot.py
 
-import os
-import time
-import threading
-import requests
-from requests.adapters import HTTPAdapter
 from flask import Flask, request, jsonify
-from dotenv import load_dotenv
-from datetime import datetime, timedelta, time as dtime
-import pytz
-import logging
-import json
-from logging.handlers import RotatingFileHandler
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
-from signalr_listener import launch_signalr_listener, track_trade
 from logging_config import setup_logging
 from config import load_config
-from api import post, place_market, place_limit, place_stop, search_open, cancel, search_pos, close_pos, search_trades, flatten_contract, cancel_all_stops, get_contract, ai_trade_decision, check_for_phantom_orders, log_trade_results_to_supabase
+from api import (
+    flatten_contract, get_contract, ai_trade_decision, cancel_all_stops,
+    # ...other api functions...
+)
 from strategies import run_bracket, run_brackmod, run_pivot
-from scheduler import process_market_timeframe, start_scheduler
+from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token
+from signalr_listener import launch_signalr_listener
+
+import pytz
+from datetime import datetime, time as dtime
+import threading
 
 setup_logging()
 config = load_config()
 
+# Grab config values
+TV_PORT         = config['TV_PORT']
+WEBHOOK_SECRET  = config['WEBHOOK_SECRET']
+ACCOUNTS        = config['ACCOUNTS']
+DEFAULT_ACCOUNT = config['DEFAULT_ACCOUNT']
+
 AI_ENDPOINTS = {
-    "epsilon": N8N_AI_URL,
-    "beta": N8N_AI_URL2,
-    # add more as needed
+    "epsilon": config['N8N_AI_URL'],
+    "beta": config['N8N_AI_URL2'],
 }
 
-STOP_LOSS_POINTS = 10.0
-TP_POINTS        = [2.5, 5.0, 10.0]
-OVERRIDE_CONTRACT_ID = "CON.F.US.MES.M25"
-
+# You can keep time zone and get-flat times here for now
 CT = pytz.timezone("America/Chicago")
 GET_FLAT_START = dtime(15, 7)
 GET_FLAT_END   = dtime(17, 0)
 
-session = requests.Session()
-adapter = HTTPAdapter(pool_maxsize=10, max_retries=3)
-session.mount("https://", adapter)
-
-# ─── Flask App Setup ──────────────────────────────────
 app = Flask(__name__)
-
-
 
 @app.route("/webhook", methods=["POST"])
 def tv_webhook():
@@ -95,6 +84,9 @@ def tv_webhook():
         ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
 
     # ----- Continue for all accounts -----
+    # Cancel all stops before every new entry (safety!)
+    cancel_all_stops(acct_id, cid)
+
     if strat == "bracket":
         return run_bracket(acct_id, sym, sig, size, alert, ai_decision_id)
     elif strat == "brackmod":
@@ -106,21 +98,12 @@ def tv_webhook():
 
 if __name__ == "__main__":
     authenticate()
-    print(f"DEBUG: Got token: {_token[:12]}..., expiry: {_token_expiry}, now: {time.time()}")
-    if not _token:
-        raise RuntimeError("Token is None after authentication!")
-
     signalr_listener = launch_signalr_listener(
-        get_token=get_token, 
+        get_token=get_token,
         get_token_expiry=get_token_expiry,
-        authenticate=authenticate,         # <-- ADD THIS
-        auth_lock=auth_lock                # <-- AND THIS
+        authenticate=authenticate,
+        auth_lock=threading.Lock()
     )
-    scheduler = start_scheduler()
+    scheduler = start_scheduler(app, config)  # Pass app/config if your scheduler/process_market_timeframe needs them
     app.logger.info("Starting server.")
     app.run(host="0.0.0.0", port=TV_PORT, threaded=True)
-
-
-
-
-
