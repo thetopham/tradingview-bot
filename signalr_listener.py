@@ -95,11 +95,12 @@ class SignalRTradingListener(threading.Thread):
         self.subscribe_all()
 
     def subscribe_all(self):
-        self.hub.send("SubscribeAccounts")
-        self.hub.send("SubscribeOrders", self.accounts)
-        self.hub.send("SubscribePositions", self.accounts)
-        self.hub.send("SubscribeTrades", self.accounts)
+        self.hub.send("SubscribeAccounts", [])
+        self.hub.send("SubscribeOrders", [self.accounts])
+        self.hub.send("SubscribePositions", [self.accounts])
+        self.hub.send("SubscribeTrades", [self.accounts])
         logging.info(f"Subscribed to accounts/orders/positions/trades for: {self.accounts}")
+
 
     def on_reconnected(self):
         logging.info("SignalR reconnected! Resubscribing to all events...")
