@@ -10,6 +10,8 @@ config = load_config()
 PX_BASE = config['PX_BASE']
 USER_NAME = config['USER_NAME']
 API_KEY = config['API_KEY']
+GET_FLAT_START = config['GET_FLAT_START']
+GET_FLAT_END = config['GET_FLAT_END']
 
 
 
