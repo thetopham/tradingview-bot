@@ -16,13 +16,8 @@ from logging.handlers import RotatingFileHandler
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from signalr_listener import launch_signalr_listener, track_trade
-
-# ─── Logging Setup ─────────────────────────────────────
-log_file = '/tmp/tradingview_projectx_bot.log'
-file_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5)
-file_handler.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
-file_handler.setFormatter(formatter)
+from logging_config import setup_logging
+setup_logging()
 
 # ─── Load config ───────────────────────────────────────
 load_dotenv()
