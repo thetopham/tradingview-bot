@@ -1,6 +1,10 @@
 # config.py
 import os
 from dotenv import load_dotenv
+from datetime import time as dtime
+config['GET_FLAT_START'] = dtime(15, 7)
+config['GET_FLAT_END'] = dtime(17, 0)
+
 
 def load_config():
     load_dotenv()
