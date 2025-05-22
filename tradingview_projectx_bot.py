@@ -103,7 +103,7 @@ if __name__ == "__main__":
         get_token_expiry=get_token_expiry,
         authenticate=authenticate,
         auth_lock=threading.Lock()
-    )
-    scheduler = start_scheduler(app, config)  # Pass app/config if your scheduler/process_market_timeframe needs them
+    ) 
+    scheduler = start_scheduler()
     app.logger.info("Starting server.")
     app.run(host="0.0.0.0", port=TV_PORT, threaded=True)
