@@ -12,12 +12,6 @@ WEBHOOK_SECRET = config['WEBHOOK_SECRET']
 
 CT = pytz.timezone("America/Chicago")
 
-def process_market_timeframe(app, data):
-    with app.test_request_context('/webhook', json=data):
-        response = app.view_functions['tv_webhook']()
-        import logging
-        logging.info(f"[APScheduler] direct call: {response}")
-
 def start_scheduler(app):
     from apscheduler.schedulers.background import BackgroundScheduler
     from apscheduler.triggers.cron import CronTrigger
