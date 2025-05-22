@@ -127,6 +127,7 @@ def on_account_update(args):
     logging.info(f"[Account Update] {args}")
 
 def on_order_update(args):
+    logging.info("Order event handler called")
     order = args[0] if isinstance(args, list) and args else args
     account_id = order.get("accountId")
     order_id = order.get("id")
