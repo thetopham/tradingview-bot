@@ -1,19 +1,22 @@
 # api.py
 import requests
-from auth import ensure_token
-from config import load_config
 import logging
+import json
+import time
+from datetime import datetime
+import pytz
 
-
+from auth import ensure_token, get_token
+from config import load_config
 
 session = requests.Session()
-
-
 config = load_config()
 OVERRIDE_CONTRACT_ID = config['OVERRIDE_CONTRACT_ID']
 PX_BASE = config['PX_BASE']
 SUPABASE_URL = config['SUPABASE_URL']
 SUPABASE_KEY = config['SUPABASE_KEY']
+CT = pytz.timezone("America/Chicago")
+
 
 
 # ─── API Functions ────────────────────────────────────
@@ -26,7 +29,7 @@ def post(path, payload):
         json=payload,
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {_token}"
+            "Authorization": f"Bearer {get_token()}"
         },
         timeout=(3.05, 10)
     )
@@ -38,6 +41,7 @@ def post(path, payload):
     data = resp.json()
     logging.debug("Response JSON: %s", data)
     return data
+
 
 def place_market(acct_id, cid, side, size):
     logging.info("Placing market order acct=%s cid=%s side=%s size=%s", acct_id, cid, side, size)
