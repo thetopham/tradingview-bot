@@ -18,26 +18,8 @@ from apscheduler.triggers.cron import CronTrigger
 from signalr_listener import launch_signalr_listener, track_trade
 from logging_config import setup_logging
 setup_logging()
-
-# ─── Load config ───────────────────────────────────────
-load_dotenv()
-TV_PORT         = int(os.getenv("TV_PORT", 5000))
-PX_BASE         = os.getenv("PROJECTX_BASE_URL")
-USER_NAME       = os.getenv("PROJECTX_USERNAME")
-API_KEY         = os.getenv("PROJECTX_API_KEY")
-WEBHOOK_SECRET  = os.getenv("WEBHOOK_SECRET")
-N8N_AI_URL      = os.getenv("N8N_AI_URL")
-N8N_AI_URL2     = os.getenv("N8N_AI_URL2")
-SUPABASE_URL    = os.getenv("SUPABASE_URL")   
-SUPABASE_KEY    = os.getenv("SUPABASE_KEY") 
-WEBHOOK         = os.getenv("WEBHOOK")
-
-# Build account map from .env: any var ACCOUNT_<NAME>=<ID>
-ACCOUNTS = {k[len("ACCOUNT_"):].lower(): int(v)
-    for k, v in os.environ.items() if k.startswith("ACCOUNT_")}
-DEFAULT_ACCOUNT = next(iter(ACCOUNTS), None)
-if not ACCOUNTS:
-    raise RuntimeError("No accounts loaded from .env. Add ACCOUNT_<NAME>=<ID>.")
+from config import load_config
+config = load_config()
 
 AI_ENDPOINTS = {
     "epsilon": N8N_AI_URL,
