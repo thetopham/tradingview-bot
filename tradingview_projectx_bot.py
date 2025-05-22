@@ -624,7 +624,6 @@ def process_market_timeframe(timeframe):
 
 def start_scheduler():
     scheduler = BackgroundScheduler()
-    # 5m: minute = 0,5,10,15,... (add 5s delay to ensure candle closes)
     scheduler.add_job(
         process_market_timeframe, 
         CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=5), 
@@ -633,8 +632,9 @@ def start_scheduler():
         replace_existing=True
     )    
     scheduler.start()
-    logging.info("[APScheduler] Scheduler started with 5m and 15m jobs.")
+    logging.info("[APScheduler] Scheduler started with 5m job.")
     return scheduler
+
 
 
 if __name__ == "__main__":
