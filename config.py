@@ -25,4 +25,6 @@ def load_config():
     if not config['ACCOUNTS']:
         raise RuntimeError("No accounts loaded from .env. Add ACCOUNT_<NAME>=<ID>.")
     config['DEFAULT_ACCOUNT'] = next(iter(config['ACCOUNTS']))
+    config['OVERRIDE_CONTRACT_ID'] = os.getenv("OVERRIDE_CONTRACT_ID", "CON.F.US.MES.M25")
+    
     return config
