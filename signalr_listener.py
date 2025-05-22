@@ -170,9 +170,7 @@ def on_trade_update(args):
     logging.info(f"[Trade Update] {args}")
 
 def launch_signalr_listener():
-    from tradingview_projectx_bot import (
-        ACCOUNTS, authenticate, _token, _token_expiry, auth_lock
-    )
+    
     print(f"DEBUG [SignalR]: token before connect = {_token}")   # <-- inside the function, after import
 
     def get_token():
