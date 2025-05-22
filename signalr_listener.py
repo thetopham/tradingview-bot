@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 from signalrcore.hub_connection_builder import HubConnectionBuilder
 
+
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -172,16 +173,22 @@ def launch_signalr_listener():
     from tradingview_projectx_bot import (
         ACCOUNTS, authenticate, _token, _token_expiry, auth_lock
     )
+    print(f"DEBUG [SignalR]: token before connect = {_token}")   # <-- inside the function, after import
+
     def get_token():
+        print(f"DEBUG [SignalR]: get_token called, _token={_token}")
         return _token
+
     def get_token_expiry():
         return _token_expiry
+
     event_handlers = {
         "on_account_update": on_account_update,
         "on_order_update": on_order_update,
         "on_position_update": on_position_update,
         "on_trade_update": on_trade_update,
     }
+
     listener = SignalRTradingListener(
         ACCOUNTS,
         authenticate_func=authenticate,
@@ -192,6 +199,7 @@ def launch_signalr_listener():
     )
     listener.start()
     return listener
+
 
 if __name__ == "__main__":
     from tradingview_projectx_bot import (
