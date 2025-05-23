@@ -78,6 +78,7 @@ def place_stop(acct_id, cid, side, size, px):
     })
 
 def search_open(acct_id):
+    logging.error(f"[DEBUG] search_pos called with acct_id={acct_id!r} ({type(acct_id)})")
     orders = post("/api/Order/searchOpen", {"accountId": acct_id}).get("orders", [])
     logging.debug("Open orders for %s: %s", acct_id, orders)
     return orders
@@ -89,9 +90,11 @@ def cancel(acct_id, order_id):
     return resp
 
 def search_pos(acct_id):
+    logging.error(f"[DEBUG] search_pos called with acct_id={acct_id!r} ({type(acct_id)})")
     pos = post("/api/Position/searchOpen", {"accountId": acct_id}).get("positions", [])
     logging.debug("Open positions for %s: %s", acct_id, pos)
     return pos
+
 
 def close_pos(acct_id, cid):
     resp = post("/api/Position/closeContract", {"accountId": acct_id, "contractId": cid})
