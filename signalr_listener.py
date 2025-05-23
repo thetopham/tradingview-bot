@@ -129,11 +129,12 @@ def on_account_update(args):
 def on_order_update(args):
     order = args[0] if isinstance(args, list) and args else args
     account_id = order.get("accountId")
-    order_id = order.get("id")
     contract_id = order.get("contractId")
-    status = order.get("status")  # 2 = filled, 3 = canceled
+    status = order.get("status")
+    orders_state.setdefault(account_id, {})[order.get("id")] = order
 
-    orders_state.setdefault(account_id, {})[order_id] = order
+    if order.get("type") == 1 and status == 2:  # TP filled
+        ensure_stops_match_position(account_id, contract_id)
 
     if status == 2:
         now = time.time()
@@ -150,6 +151,7 @@ def on_position_update(args):
     contract_id = position.get("contractId")
     size = position.get("size", 0)
     positions_state.setdefault(account_id, {})[contract_id] = position
+    ensure_stops_match_position(account_id, contract_id)
 
     if size == 0:
         meta = trade_meta.pop((account_id, contract_id), None)
