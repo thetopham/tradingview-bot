@@ -153,29 +153,35 @@ def on_order_update(args):
 def on_position_update(args):
     from api import log_trade_results_to_supabase
     position = args[0] if isinstance(args, list) and args else args
-    position_data = position.get("data") if isinstance(position, dict) and "data" in position else position
-    account_id = position_data.get("accountId")
-    contract_id = position_data.get("contractId")
-    size = position_data.get("size", 0)
-    if not account_id or not contract_id:
-        logging.error(f"on_position_update: missing account_id or contract_id in {position}")
-        return
-    positions_state.setdefault(account_id, {})[contract_id] = position_data
+    account_id = position.get("accountId")
+    contract_id = position.get("contractId")
+    size = position.get("size", 0)
+    positions_state.setdefault(account_id, {})[contract_id] = position
+
+    # Use the broker's timestamp for entry
+    entry_time = position.get("creationTimestamp")
+    if size > 0:
+        # Only update trade_meta on open (or increase)
+        trade_meta[(account_id, contract_id)] = trade_meta.get((account_id, contract_id), {})
+        trade_meta[(account_id, contract_id)]["entry_time"] = entry_time
+
     ensure_stops_match_position(account_id, contract_id)
 
+    # On flatten, log results and clear meta
     if size == 0:
         meta = trade_meta.pop((account_id, contract_id), None)
         if meta:
             logging.info(f"Position flattened, logging trade results: acct={account_id} contract={contract_id}")
-            entry_time = meta.get("entry_time")
             ai_decision_id = meta.get("ai_decision_id")
+            # Pass the stored broker entry_time
             log_trade_results_to_supabase(
                 acct_id=account_id,
                 cid=contract_id,
-                entry_time=datetime.fromtimestamp(entry_time),
+                entry_time=meta.get("entry_time"),  # ISO8601 string
                 ai_decision_id=ai_decision_id,
                 meta=meta
             )
+
 
 
 
