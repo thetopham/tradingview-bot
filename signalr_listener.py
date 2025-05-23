@@ -12,6 +12,7 @@ orders_state = {}
 positions_state = {}
 trade_meta = {}
 
+
 def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, order_id, alert, account, symbol, sl_id=None, tp_ids=None, trades=None):
     trade_meta[(acct_id, cid)] = {
         "entry_time": entry_time,
@@ -200,6 +201,28 @@ def launch_signalr_listener(get_token, get_token_expiry, authenticate, auth_lock
     )
     listener.start()
     return listener
+
+def ensure_stops_match_position(acct_id, contract_id):
+    from api import search_open, place_stop, cancel
+    position = positions_state.get(acct_id, {}).get(contract_id)
+    current_size = position.get("size", 0) if position else 0
+
+    open_orders = search_open(acct_id)
+    stops = [o for o in open_orders if o["contractId"] == contract_id and o["type"] == 4 and o["status"] == 1]
+
+    for stop in stops:
+        if stop["size"] != current_size and current_size > 0:
+            logging.info(f"[SL SYNC] Canceling old stop of size {stop['size']} to match position {current_size}")
+            cancel(acct_id, stop["id"])
+            # Keep stop price the same (improve: recalc if you want dynamic trailing)
+            stop_side = stop["side"]
+            stop_price = stop.get("stopPrice")
+            place_stop(acct_id, contract_id, stop_side, current_size, stop_price)
+    if current_size == 0:
+        for stop in stops:
+            logging.info(f"[SL SYNC] No open position, canceling leftover stop {stop['id']}")
+            cancel(acct_id, stop["id"])
+
 
 # Example usage:
 if __name__ == "__main__":
