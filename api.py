@@ -236,7 +236,7 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
                 logging.error(f"Failed to write missing-trade log: {e2}")
             return
 
-        total_pnl = sum(t.get("profitAndLoss", 0) for t in relevant_trades)
+        total_pnl = sum(float(t.get("profitAndLoss") or 0.0) for t in relevant_trades)
         trade_ids = [t.get("id") for t in relevant_trades]
         duration_sec = int((exit_time - entry_time).total_seconds())
         payload = {
