@@ -16,8 +16,8 @@ def start_scheduler(app):
     def cron_job():
         data = {
             "secret": WEBHOOK_SECRET,
-            "strategy": "brackmod",
-            "account": "epsilon",
+            "strategy": "",
+            "account": "beta",
             "signal": "",
             "symbol": "CON.F.US.MES.M25",
             "size": 3,
