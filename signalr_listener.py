@@ -131,6 +131,9 @@ def on_order_update(args):
     account_id = order.get("accountId")
     contract_id = order.get("contractId")
     status = order.get("status")
+    if account_id is None or contract_id is None:
+        logging.error(f"on_order_update: missing account_id or contract_id in {order}")
+        return
     orders_state.setdefault(account_id, {})[order.get("id")] = order
 
     if order.get("type") == 1 and status == 2:  # TP filled
@@ -140,9 +143,10 @@ def on_order_update(args):
         now = time.time()
         trade_meta[(account_id, contract_id)] = {
             "entry_time": now,
-            "order_id": order_id,
+            "order_id": order.get("id"),
         }
         logging.info(f"Order filled: {order}")
+
 
 def on_position_update(args):
     from api import log_trade_results_to_supabase
@@ -150,6 +154,9 @@ def on_position_update(args):
     account_id = position.get("accountId")
     contract_id = position.get("contractId")
     size = position.get("size", 0)
+    if account_id is None or contract_id is None:
+        logging.error(f"on_position_update: missing account_id or contract_id in {position}")
+        return
     positions_state.setdefault(account_id, {})[contract_id] = position
     ensure_stops_match_position(account_id, contract_id)
 
@@ -166,6 +173,7 @@ def on_position_update(args):
                 ai_decision_id=ai_decision_id,
                 meta=meta
             )
+
 
 def on_trade_update(args):
     logging.info(f"[Trade Update] {args}")
@@ -205,6 +213,10 @@ def launch_signalr_listener(get_token, get_token_expiry, authenticate, auth_lock
     return listener
 
 def ensure_stops_match_position(acct_id, contract_id):
+    if acct_id is None or contract_id is None:
+        logging.error(f"ensure_stops_match_position called with acct_id={acct_id}, contract_id={contract_id} (BUG IN CALLER)")
+        return  # Or raise ValueError if you want to crash on this logic error
+
     from api import search_open, place_stop, cancel
     position = positions_state.get(acct_id, {}).get(contract_id)
     current_size = position.get("size", 0) if position else 0
@@ -216,7 +228,6 @@ def ensure_stops_match_position(acct_id, contract_id):
         if stop["size"] != current_size and current_size > 0:
             logging.info(f"[SL SYNC] Canceling old stop of size {stop['size']} to match position {current_size}")
             cancel(acct_id, stop["id"])
-            # Keep stop price the same (improve: recalc if you want dynamic trailing)
             stop_side = stop["side"]
             stop_price = stop.get("stopPrice")
             place_stop(acct_id, contract_id, stop_side, current_size, stop_price)
@@ -224,6 +235,7 @@ def ensure_stops_match_position(acct_id, contract_id):
         for stop in stops:
             logging.info(f"[SL SYNC] No open position, canceling leftover stop {stop['id']}")
             cancel(acct_id, stop["id"])
+
 
 
 # Example usage:
