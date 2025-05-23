@@ -239,23 +239,25 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         total_pnl = sum(float(t.get("profitAndLoss") or 0.0) for t in relevant_trades)
         trade_ids = [t.get("id") for t in relevant_trades]
         duration_sec = int((exit_time - entry_time).total_seconds())
+
         payload = {
-            "ai_decision_id": ai_decision_id,
-            "order_id": meta.get("order_id"),
-            "trade_ids": trade_ids,
-            "symbol": meta.get("symbol"),
-            "account": meta.get("account"),
-            "strategy": meta.get("strategy"),
-            "signal": meta.get("signal"),
-            "entry_time": entry_time.isoformat(),
-            "exit_time": exit_time.isoformat(),
-            "duration_sec": duration_sec,
-            "size": meta.get("size"),
-            "total_pnl": total_pnl,
-            "alert": meta.get("alert"),
-            "raw_trades": relevant_trades,
-            "comment": meta.get("comment", ""),
+            "strategy":      str(meta.get("strategy") or ""),
+            "signal":        str(meta.get("signal") or ""),
+            "symbol":        str(meta.get("symbol") or ""),
+            "account":       str(meta.get("account") or ""),
+            "size":          int(meta.get("size") or 0),
+            "ai_decision_id": int(ai_decision_id) if ai_decision_id is not None and str(ai_decision_id).isdigit() else None,
+            "entry_time":    entry_time.isoformat() if hasattr(entry_time, "isoformat") else str(entry_time),
+            "exit_time":     exit_time.isoformat() if hasattr(exit_time, "isoformat") else str(exit_time),
+            "duration_sec":  str(duration_sec) if duration_sec is not None else "0",
+            "alert":         str(meta.get("alert") or ""),
+            "total_pnl":     float(total_pnl) if total_pnl is not None else 0.0,
+            "raw_trades":    relevant_trades if relevant_trades else [],
+            "order_id":      str(meta.get("order_id") or ""),
+            "comment":       str(meta.get("comment") or ""),
+            "trade_ids":     trade_ids if trade_ids else [],
         }
+
         url = f"{SUPABASE_URL}/rest/v1/trade_results"
         headers = {
             "apikey": SUPABASE_KEY,
@@ -280,6 +282,7 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
 
     except Exception as e:
         logging.error(f"Supabase log error (outer): {e}")
+
 
 
 
