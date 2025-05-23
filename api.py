@@ -21,16 +21,23 @@ CT = pytz.timezone("America/Chicago")
 
 # ─── API Functions ────────────────────────────────────
 def post(path, payload):
-    # If not already wrapped, wrap the payload in a 'request' dict for TopstepX internal API
-    if not (isinstance(payload, dict) and "request" in payload):
-        payload = {"request": payload}
-    # Universal fix for accountId type
+    # --- Aggressively enforce payload wrapping ---
+    if not isinstance(payload, dict) or "accountId" not in payload.get("request", payload):
+        # Always rebuild to be correct
+        if "accountId" in payload:
+            payload = {"request": payload}
+        elif "request" in payload and "accountId" in payload["request"]:
+            pass  # already good
+        else:
+            raise ValueError(f"Payload missing accountId: {payload}")
+    # Now always type-cast accountId
     if "request" in payload and "accountId" in payload["request"]:
         try:
-            if payload["request"]["accountId"] is not None and not isinstance(payload["request"]["accountId"], int):
-                payload["request"]["accountId"] = int(payload["request"]["accountId"])
+            payload["request"]["accountId"] = int(payload["request"]["accountId"])
         except Exception as e:
             logging.error(f"Failed to cast nested accountId to int: {payload['request']['accountId']} - {e}")
+    # ...rest of function...
+
 
     ensure_token()
     url = f"{PX_BASE}{path}"
