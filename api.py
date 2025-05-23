@@ -158,6 +158,7 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url):
         }
 
 def check_for_phantom_orders(acct_id, cid):
+  
     # 1. Check for open position(s)
     positions = [p for p in search_pos(acct_id) if p["contractId"] == cid]
     open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
@@ -178,6 +179,7 @@ def check_for_phantom_orders(acct_id, cid):
                     cancel(acct_id, o["id"])
                 except Exception as e:
                     logging.error(f"Error cancelling phantom order {o['id']}: {e}")
+
 
 
 def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta=None):
