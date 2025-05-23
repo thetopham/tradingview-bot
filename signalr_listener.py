@@ -148,8 +148,6 @@ def on_order_update(args):
         }
         logging.info(f"Order filled: {order_data}")
 
-
-
 def on_position_update(args):
     from api import log_trade_results_to_supabase
     position = args[0] if isinstance(args, list) and args else args
@@ -160,6 +158,10 @@ def on_position_update(args):
 
     # Use the broker's timestamp for entry
     entry_time = position.get("creationTimestamp")
+    if account_id is None or contract_id is None:
+        logging.error(f"on_position_update: missing account_id or contract_id in {position}")
+        return
+
     if size > 0:
         # Only update trade_meta on open (or increase)
         trade_meta[(account_id, contract_id)] = trade_meta.get((account_id, contract_id), {})
@@ -181,9 +183,6 @@ def on_position_update(args):
                 ai_decision_id=ai_decision_id,
                 meta=meta
             )
-
-
-
 
 def on_trade_update(args):
     logging.info(f"[Trade Update] {args}")
@@ -222,7 +221,6 @@ def launch_signalr_listener(get_token, get_token_expiry, authenticate, auth_lock
     listener.start()
     return listener
 
-
 def ensure_stops_match_position(acct_id, contract_id, max_retries=5, retry_delay=0.4):
     from api import search_open, place_stop, cancel, search_pos
 
@@ -257,7 +255,6 @@ def ensure_stops_match_position(acct_id, contract_id, max_retries=5, retry_delay
         for stop in stops:
             logging.info(f"[SL SYNC] No open position, canceling leftover stop {stop['id']}")
             cancel(acct_id, stop["id"])
-
 
 
 # Example usage:
