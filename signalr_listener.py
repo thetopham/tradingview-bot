@@ -114,6 +114,7 @@ class SignalRTradingListener(threading.Thread):
     def on_reconnected(self):
         logging.info("SignalR reconnected! Resubscribing to all events...")
         self.subscribe_all()
+        self.sweep_and_cleanup_positions_and_stops()
 
     def default_handler(self, args):
         logging.info(f"SignalR event: {args}")
@@ -272,6 +273,29 @@ def ensure_stops_match_position(acct_id, contract_id, max_retries=5, retry_delay
         for stop in stops:
             logging.info(f"[SL SYNC] No open position, canceling leftover stop {stop['id']}")
             cancel(acct_id, stop["id"])
+
+def sweep_and_cleanup_positions_and_stops(self):
+    from api import search_pos, search_open, cancel
+    logging.info("[Sweep] Starting stop/order cleanup for all accounts/contracts")
+    for acct_id in self.accounts:
+        try:
+            positions = search_pos(acct_id)
+            open_orders = search_open(acct_id)
+            contracts_with_positions = set()
+            for pos in positions:
+                if pos.get("size", 0) > 0:
+                    contracts_with_positions.add(pos["contractId"])
+            for order in open_orders:
+                cid = order.get("contractId")
+                # Cancel all stops if flat, or any stop that doesn't match open position
+                if order.get("type") == 4 and order.get("status") == 1:  # Stop order, open
+                    if cid not in contracts_with_positions:
+                        logging.info(f"[Sweep] Canceling leftover stop {order['id']} (flat in {cid})")
+                        cancel(acct_id, order["id"])
+        except Exception as e:
+            logging.error(f"[Sweep] Cleanup failed for acct {acct_id}: {e}")
+    logging.info("[Sweep] Stop/order cleanup completed")
+
 
 # Example usage:
 if __name__ == "__main__":
