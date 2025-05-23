@@ -222,15 +222,25 @@ def launch_signalr_listener(get_token, get_token_expiry, authenticate, auth_lock
     listener.start()
     return listener
 
-def ensure_stops_match_position(acct_id, contract_id):
-    if acct_id is None or contract_id is None:
-        logging.error(f"ensure_stops_match_position called with acct_id={acct_id}, contract_id={contract_id} (BUG IN CALLER)")
-        return  # Or raise ValueError if you want to crash on this logic error
 
-    from api import search_open, place_stop, cancel
-    position = positions_state.get(acct_id, {}).get(contract_id)
-    current_size = position.get("size", 0) if position else 0
+def ensure_stops_match_position(acct_id, contract_id, max_retries=5, retry_delay=0.4):
+    from api import search_open, place_stop, cancel, search_pos
+    for attempt in range(max_retries):
+        position = positions_state.get(acct_id, {}).get(contract_id)
+        if position is None:
+            # Fetch fresh position info
+            fresh_positions = search_pos(acct_id)
+            position = next((p for p in fresh_positions if p["contractId"] == contract_id), None)
+            if position:
+                positions_state.setdefault(acct_id, {})[contract_id] = position
+        current_size = position.get("size", 0) if position else 0
 
+        # Only break if we've got a confirmed size > 0 or tried enough times
+        if current_size > 0 or attempt == max_retries - 1:
+            break
+        time.sleep(retry_delay)
+
+    # Now proceed as before...
     open_orders = search_open(acct_id)
     stops = [o for o in open_orders if o["contractId"] == contract_id and o["type"] == 4 and o["status"] == 1]
 
@@ -245,6 +255,7 @@ def ensure_stops_match_position(acct_id, contract_id):
         for stop in stops:
             logging.info(f"[SL SYNC] No open position, canceling leftover stop {stop['id']}")
             cancel(acct_id, stop["id"])
+
 
 
 
