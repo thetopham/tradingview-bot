@@ -5,7 +5,7 @@ import json
 import time
 from datetime import datetime
 import pytz
-import traceback
+
 from auth import ensure_token, get_token
 from config import load_config
 
@@ -21,18 +21,9 @@ CT = pytz.timezone("America/Chicago")
 
 # ─── API Functions ────────────────────────────────────
 def post(path, payload):
-    logging.error("🔥 POST WRAPPER CALLED (GATEWAY FLAT PAYLOAD) 🔥")
-    # Always send FLAT payload, never wrap in {"request": ...}
-    if "accountId" in payload and payload["accountId"] is not None:
-        try:
-            payload["accountId"] = int(payload["accountId"])
-        except Exception as e:
-            logging.error(f"Failed to cast accountId to int: {payload['accountId']} - {e}")
     ensure_token()
     url = f"{PX_BASE}{path}"
     logging.debug("POST %s payload=%s", url, payload)
-    logging.error(f"OUTGOING PAYLOAD for {path}: {json.dumps(payload)}")
-
     resp = session.post(
         url,
         json=payload,
@@ -50,6 +41,7 @@ def post(path, payload):
     data = resp.json()
     logging.debug("Response JSON: %s", data)
     return data
+
 
 def place_market(acct_id, cid, side, size):
     logging.info("Placing market order acct=%s cid=%s side=%s size=%s", acct_id, cid, side, size)
@@ -73,7 +65,6 @@ def place_stop(acct_id, cid, side, size, px):
     })
 
 def search_open(acct_id):
-    logging.error(f"[DEBUG] search_pos called with acct_id={acct_id!r} ({type(acct_id)})")
     orders = post("/api/Order/searchOpen", {"accountId": acct_id}).get("orders", [])
     logging.debug("Open orders for %s: %s", acct_id, orders)
     return orders
@@ -85,15 +76,9 @@ def cancel(acct_id, order_id):
     return resp
 
 def search_pos(acct_id):
-    if acct_id is None:
-        logging.error("search_pos called with acct_id=None! This is a bug in the caller.")
-        traceback.print_stack()  # Will print a full stack trace to the logs
-        raise ValueError("search_pos called with acct_id=None")
-    logging.error(f"[DEBUG] search_pos called with acct_id={acct_id!r} ({type(acct_id)})")
     pos = post("/api/Position/searchOpen", {"accountId": acct_id}).get("positions", [])
     logging.debug("Open positions for %s: %s", acct_id, pos)
     return pos
-
 
 def close_pos(acct_id, cid):
     resp = post("/api/Position/closeContract", {"accountId": acct_id, "contractId": cid})
@@ -159,7 +144,7 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url):
         "alert": alert
     }
     try:
-        resp = session.post(ai_url, json=payload, timeout=120)
+        resp = session.post(ai_url, json=payload, timeout=60)
         resp.raise_for_status()
         data = resp.json()
         return data
