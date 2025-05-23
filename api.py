@@ -134,15 +134,14 @@ def get_contract(sym):
         return OVERRIDE_CONTRACT_ID
     return None
 
-def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, position=None):
+def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url):
     payload = {
         "account": account,
         "strategy": strat,
         "signal": sig,
         "symbol": sym,
         "size": size,
-        "alert": alert,
-        "position": position or {}
+        "alert": alert
     }
     try:
         resp = session.post(ai_url, json=payload, timeout=60)
