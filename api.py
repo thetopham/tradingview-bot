@@ -21,8 +21,8 @@ CT = pytz.timezone("America/Chicago")
 
 # ─── API Functions ────────────────────────────────────
 def post(path, payload):
-    logging.error("🔥 POST WRAPPER CALLED (GATEWAY) 🔥")
-    # For Gateway API: do NOT wrap!
+    logging.error("🔥 POST WRAPPER CALLED (GATEWAY FLAT PAYLOAD) 🔥")
+    # Always send FLAT payload, never wrap in {"request": ...}
     if "accountId" in payload and payload["accountId"] is not None:
         try:
             payload["accountId"] = int(payload["accountId"])
@@ -50,11 +50,6 @@ def post(path, payload):
     data = resp.json()
     logging.debug("Response JSON: %s", data)
     return data
-
-
-
-
-
 
 def place_market(acct_id, cid, side, size):
     logging.info("Placing market order acct=%s cid=%s side=%s size=%s", acct_id, cid, side, size)
