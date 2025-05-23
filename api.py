@@ -183,59 +183,97 @@ def check_for_phantom_orders(acct_id, cid):
 
 
 def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta=None):
+    import json
+    import time
+    from datetime import timedelta
+
     logging.info("Attempting to log trade results to Supabase")
     meta = meta or {}
-    resp = post("/api/Trade/search", {
-        "accountId": acct_id,
-        "startTimestamp": entry_time.isoformat()
-    })
-    trades = resp.get("trades", [])
-    # Only trades for this contract, not voided, nonzero size
-    relevant_trades = [
-        t for t in trades
-        if t.get("contractId") == cid and not t.get("voided", False) and t.get("size", 0) > 0
-    ]
-    if not relevant_trades:
-        logging.warning("No relevant trades found, skipping Supabase log.")
-        return
-    total_pnl = sum(t.get("profitAndLoss", 0) for t in relevant_trades)
-    trade_ids = [t.get("id") for t in relevant_trades]
-    exit_time = datetime.now(CT)
-    payload = {
-        "ai_decision_id": ai_decision_id,
-        "order_id": meta.get("order_id"),
-        "trade_ids": trade_ids,
-        "symbol": meta.get("symbol"),
-        "account": meta.get("account"),
-        "strategy": meta.get("strategy"),
-        "signal": meta.get("signal"),
-        "entry_time": entry_time.isoformat(),
-        "exit_time": exit_time.isoformat(),
-        "duration_sec": int((exit_time - entry_time).total_seconds()),
-        "size": meta.get("size"),
-        "total_pnl": total_pnl,
-        "alert": meta.get("alert"),
-        "raw_trades": relevant_trades,
-        "comment": meta.get("comment", ""),
-    }
-    url = f"{SUPABASE_URL}/rest/v1/trade_results"
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-        "Prefer": "return=minimal"
-    }
+
+    # --- Normalize entry_time ---
     try:
-        logging.info(f"Uploading to Supabase: {url}")
-        r = session.post(url, json=payload, headers=headers, timeout=(3.05, 10))
-        logging.info(f"Supabase status: {r.status_code}, {r.text}")
-        r.raise_for_status()
+        if not isinstance(entry_time, datetime):
+            # If float (timestamp), convert to datetime
+            entry_time = datetime.fromtimestamp(entry_time)
     except Exception as e:
-        logging.error(f"Supabase upload failed: {e}")
-        logging.error(f"Payload that failed: {json.dumps(payload)[:1000]}")
+        logging.error(f"entry_time conversion error: {entry_time} ({type(entry_time)}): {e}")
+        entry_time = datetime.now(CT)
+
+    # --- Search trades using a window to avoid missing the fill ---
+    start_time = entry_time - timedelta(minutes=2)
+    try:
+        resp = post("/api/Trade/search", {
+            "accountId": acct_id,
+            "startTimestamp": start_time.isoformat()
+        })
+        trades = resp.get("trades", [])
+        logging.info(f"All trades returned for acct={acct_id}, cid={cid}: {trades}")
+
+        # --- Filter relevant trades ---
+        relevant_trades = [
+            t for t in trades
+            if t.get("contractId") == cid and not t.get("voided", False) and t.get("size", 0) > 0
+        ]
+
+        if not relevant_trades:
+            logging.warning("No relevant trades found, skipping Supabase log.")
+            # Write missing-trade case to local file for later analysis
+            try:
+                with open("/tmp/trade_results_missing.jsonl", "a") as f:
+                    f.write(json.dumps({
+                        "acct_id": acct_id,
+                        "cid": cid,
+                        "entry_time": entry_time.isoformat(),
+                        "ai_decision_id": ai_decision_id,
+                        "meta": meta,
+                        "all_trades": trades
+                    }) + "\n")
+            except Exception as e2:
+                logging.error(f"Failed to write missing-trade log: {e2}")
+            return
+
+        total_pnl = sum(t.get("profitAndLoss", 0) for t in relevant_trades)
+        trade_ids = [t.get("id") for t in relevant_trades]
+        exit_time = datetime.now(CT)
+        payload = {
+            "ai_decision_id": ai_decision_id,
+            "order_id": meta.get("order_id"),
+            "trade_ids": trade_ids,
+            "symbol": meta.get("symbol"),
+            "account": meta.get("account"),
+            "strategy": meta.get("strategy"),
+            "signal": meta.get("signal"),
+            "entry_time": entry_time.isoformat(),
+            "exit_time": exit_time.isoformat(),
+            "duration_sec": int((exit_time - entry_time).total_seconds()),
+            "size": meta.get("size"),
+            "total_pnl": total_pnl,
+            "alert": meta.get("alert"),
+            "raw_trades": relevant_trades,
+            "comment": meta.get("comment", ""),
+        }
+        url = f"{SUPABASE_URL}/rest/v1/trade_results"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+        }
         try:
-            with open("/tmp/trade_results_fallback.jsonl", "a") as f:
-                f.write(json.dumps(payload) + "\n")
-            logging.info("Trade result written to local fallback log.")
-        except Exception as e2:
-            logging.error(f"Failed to write trade result to local log: {e2}")
+            logging.info(f"Uploading to Supabase: {url}")
+            r = session.post(url, json=payload, headers=headers, timeout=(3.05, 10))
+            logging.info(f"Supabase status: {r.status_code}, {r.text}")
+            r.raise_for_status()
+        except Exception as e:
+            logging.error(f"Supabase upload failed: {e}")
+            logging.error(f"Payload that failed: {json.dumps(payload)[:1000]}")
+            try:
+                with open("/tmp/trade_results_fallback.jsonl", "a") as f:
+                    f.write(json.dumps(payload) + "\n")
+                logging.info("Trade result written to local fallback log.")
+            except Exception as e2:
+                logging.error(f"Failed to write trade result to local log: {e2}")
+
+    except Exception as e:
+        logging.error(f"Supabase log error (outer): {e}")
+
