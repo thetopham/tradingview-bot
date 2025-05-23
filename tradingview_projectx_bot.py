@@ -24,8 +24,6 @@ from datetime import datetime
 setup_logging()
 config = load_config()
 
-position = data.get("position", {})
-
 TV_PORT         = config['TV_PORT']
 WEBHOOK_SECRET  = config['WEBHOOK_SECRET']
 ACCOUNTS        = config['ACCOUNTS']
@@ -83,7 +81,7 @@ def tv_webhook():
     # --- AI Overseer Routing ---
     if acct in AI_ENDPOINTS:
         ai_url = AI_ENDPOINTS[acct]
-        ai_decision = ai_trade_decision(acct, strat, sig, sym, size, alert, ai_url, position=position)
+        ai_decision = ai_trade_decision(acct, strat, sig, sym, size, alert, ai_url)
         if ai_decision.get("signal", "").upper() not in ("BUY", "SELL"):
             return jsonify(status="blocked", reason=ai_decision.get("reason", "No reason"), ai_decision=ai_decision), 200
         # Overwrite user values with AI's preferred decision
