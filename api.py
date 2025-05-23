@@ -22,17 +22,9 @@ CT = pytz.timezone("America/Chicago")
 # ─── API Functions ────────────────────────────────────
 def post(path, payload):
     logging.error("🔥 POST WRAPPER CALLED 🔥")
-
-    # --- Aggressively enforce payload wrapping ---
-    if not isinstance(payload, dict) or "accountId" not in payload.get("request", payload):
-        # Always rebuild to be correct
-        if "accountId" in payload:
-            payload = {"request": payload}
-        elif "request" in payload and "accountId" in payload["request"]:
-            pass  # already good
-        else:
-            raise ValueError(f"Payload missing accountId: {payload}")
-
+    # Always wrap unless "request" is already the only key
+    if not (isinstance(payload, dict) and "request" in payload and len(payload) == 1):
+        payload = {"request": payload}
     # Now always type-cast accountId
     if "request" in payload and "accountId" in payload["request"]:
         try:
