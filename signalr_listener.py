@@ -146,12 +146,15 @@ def on_order_update(args):
         ensure_stops_match_position(account_id, contract_id)
 
     if status == 2:
-        now = time.time()
-        trade_meta[(account_id, contract_id)] = {
-            "entry_time": now,
-            "order_id": order_data.get("id"),
-        }
+        # Only add missing fields to meta, never overwrite!
+        meta = trade_meta.setdefault((account_id, contract_id), {})
+        if "entry_time" not in meta or not meta["entry_time"]:
+            meta["entry_time"] = order_data.get("creationTimestamp") or time.time()
+        if "order_id" not in meta or not meta["order_id"]:
+            meta["order_id"] = order_data.get("id")
         logging.info(f"Order filled: {order_data}")
+        logging.info(f"[on_order_update] meta after update: {meta}")
+
 
 def on_position_update(args):
     # Always unwrap if data is present
@@ -170,8 +173,13 @@ def on_position_update(args):
     # Use the broker's timestamp for entry
     entry_time = position_data.get("creationTimestamp")
     if size > 0:
-        trade_meta[(account_id, contract_id)] = trade_meta.get((account_id, contract_id), {})
-        trade_meta[(account_id, contract_id)]["entry_time"] = entry_time
+        # Only update the entry_time field in meta if meta exists
+        meta = trade_meta.get((account_id, contract_id))
+        if meta is not None:
+            meta["entry_time"] = entry_time
+        else:
+            # Optionally: log if meta is missing at entry time (should rarely happen)
+            logging.warning(f"[on_position_update] No meta at entry for acct={account_id}, cid={contract_id}. Not updating entry_time.")
 
     ensure_stops_match_position(account_id, contract_id)
 
@@ -191,6 +199,7 @@ def on_position_update(args):
             )
         else:
             logging.warning(f"[on_position_update] No meta found for acct={account_id} cid={contract_id} on flatten!")
+
 
 def on_trade_update(args):
     logging.info(f"[Trade Update] {args}")
