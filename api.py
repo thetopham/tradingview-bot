@@ -3,9 +3,9 @@ import requests
 import logging
 import json
 import time
-from datetime import datetime
 import pytz
 
+from datetime import datetime, timezone
 from auth import ensure_token, get_token
 from config import load_config
 
@@ -180,8 +180,6 @@ def check_for_phantom_orders(acct_id, cid):
                     logging.error(f"Error cancelling phantom order {o['id']}: {e}")
 
 
-
-
 def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta=None):
     import json
     import time
@@ -190,14 +188,21 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
     logging.info("Attempting to log trade results to Supabase")
     meta = meta or {}
 
-    # --- Normalize entry_time ---
+    # --- Normalize entry_time to be timezone-aware (Chicago) ---
     try:
         if not isinstance(entry_time, datetime):
             # If float (timestamp), convert to datetime
-            entry_time = datetime.fromtimestamp(entry_time)
+            entry_time = datetime.fromtimestamp(entry_time, CT)
+        elif entry_time.tzinfo is None:
+            entry_time = CT.localize(entry_time)
+        else:
+            entry_time = entry_time.astimezone(CT)
     except Exception as e:
         logging.error(f"entry_time conversion error: {entry_time} ({type(entry_time)}): {e}")
         entry_time = datetime.now(CT)
+
+    # --- Get a timezone-aware exit_time ---
+    exit_time = datetime.now(CT)
 
     # --- Search trades using a window to avoid missing the fill ---
     start_time = entry_time - timedelta(minutes=2)
@@ -209,7 +214,6 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         trades = resp.get("trades", [])
         logging.info(f"All trades returned for acct={acct_id}, cid={cid}: {trades}")
 
-        # --- Filter relevant trades ---
         relevant_trades = [
             t for t in trades
             if t.get("contractId") == cid and not t.get("voided", False) and t.get("size", 0) > 0
@@ -217,7 +221,6 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
 
         if not relevant_trades:
             logging.warning("No relevant trades found, skipping Supabase log.")
-            # Write missing-trade case to local file for later analysis
             try:
                 with open("/tmp/trade_results_missing.jsonl", "a") as f:
                     f.write(json.dumps({
@@ -234,7 +237,8 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
 
         total_pnl = sum(t.get("profitAndLoss", 0) for t in relevant_trades)
         trade_ids = [t.get("id") for t in relevant_trades]
-        exit_time = datetime.now(CT)
+
+        duration_sec = int((exit_time - entry_time).total_seconds())
         payload = {
             "ai_decision_id": ai_decision_id,
             "order_id": meta.get("order_id"),
@@ -245,7 +249,7 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
             "signal": meta.get("signal"),
             "entry_time": entry_time.isoformat(),
             "exit_time": exit_time.isoformat(),
-            "duration_sec": int((exit_time - entry_time).total_seconds()),
+            "duration_sec": duration_sec,
             "size": meta.get("size"),
             "total_pnl": total_pnl,
             "alert": meta.get("alert"),
@@ -276,4 +280,5 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
 
     except Exception as e:
         logging.error(f"Supabase log error (outer): {e}")
+
 
