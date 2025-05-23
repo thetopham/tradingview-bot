@@ -145,7 +145,7 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url):
         "alert": alert
     }
     try:
-        resp = session.post(ai_url, json=payload, timeout=150)
+        resp = session.post(ai_url, json=payload, timeout=180)
         resp.raise_for_status()
         try:
             data = resp.json()
