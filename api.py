@@ -1,3 +1,185 @@
+# api.py
+import requests
+import logging
+import json
+import time
+import pytz
+
+from datetime import datetime, timezone
+from auth import ensure_token, get_token
+from config import load_config
+
+session = requests.Session()
+config = load_config()
+OVERRIDE_CONTRACT_ID = config['OVERRIDE_CONTRACT_ID']
+PX_BASE = config['PX_BASE']
+SUPABASE_URL = config['SUPABASE_URL']
+SUPABASE_KEY = config['SUPABASE_KEY']
+CT = pytz.timezone("America/Chicago")
+
+
+
+# ─── API Functions ────────────────────────────────────
+def post(path, payload):
+    ensure_token()
+    url = f"{PX_BASE}{path}"
+    logging.debug("POST %s payload=%s", url, payload)
+    resp = session.post(
+        url,
+        json=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {get_token()}"
+        },
+        timeout=(3.05, 10)
+    )
+    if resp.status_code == 429:
+        logging.warning("Rate limit hit: %s %s", resp.status_code, resp.text)
+    if resp.status_code >= 400:
+        logging.error("Error on POST %s: %s", url, resp.text)
+    resp.raise_for_status()
+    data = resp.json()
+    logging.debug("Response JSON: %s", data)
+    return data
+
+
+def place_market(acct_id, cid, side, size):
+    logging.info("Placing market order acct=%s cid=%s side=%s size=%s", acct_id, cid, side, size)
+    return post("/api/Order/place", {
+        "accountId": acct_id, "contractId": cid,
+        "type": 2, "side": side, "size": size
+    })
+
+def place_limit(acct_id, cid, side, size, px):
+    logging.info("Placing limit order acct=%s cid=%s size=%s px=%s", acct_id, cid, size, px)
+    return post("/api/Order/place", {
+        "accountId": acct_id, "contractId": cid,
+        "type": 1, "side": side, "size": size, "limitPrice": px
+    })
+
+def place_stop(acct_id, cid, side, size, px):
+    logging.info("Placing stop order acct=%s cid=%s size=%s px=%s", acct_id, cid, size, px)
+    return post("/api/Order/place", {
+        "accountId": acct_id, "contractId": cid,
+        "type": 4, "side": side, "size": size, "stopPrice": px
+    })
+
+def search_open(acct_id):
+    orders = post("/api/Order/searchOpen", {"accountId": acct_id}).get("orders", [])
+    logging.debug("Open orders for %s: %s", acct_id, orders)
+    return orders
+
+def cancel(acct_id, order_id):
+    resp = post("/api/Order/cancel", {"accountId": acct_id, "orderId": order_id})
+    if not resp.get("success", True):
+        logging.warning("Cancel reported failure: %s", resp)
+    return resp
+
+def search_pos(acct_id):
+    pos = post("/api/Position/searchOpen", {"accountId": acct_id}).get("positions", [])
+    logging.debug("Open positions for %s: %s", acct_id, pos)
+    return pos
+
+def close_pos(acct_id, cid):
+    resp = post("/api/Position/closeContract", {"accountId": acct_id, "contractId": cid})
+    if not resp.get("success", True):
+        logging.warning("Close position reported failure: %s", resp)
+    return resp
+
+def search_trades(acct_id, since):
+    trades = post("/api/Trade/search", {"accountId": acct_id, "startTimestamp": since.isoformat()}).get("trades", [])
+    return trades
+
+def flatten_contract(acct_id, cid, timeout=10):
+    logging.info("Flattening contract %s for acct %s", cid, acct_id)
+    end = time.time() + timeout
+    while time.time() < end:
+        open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
+        if not open_orders:
+            break
+        for o in open_orders:
+            try:
+                cancel(acct_id, o["id"])
+            except Exception as e:
+                logging.error("Error cancelling %s: %s", o["id"], e)
+        time.sleep(1)
+    while time.time() < end:
+        positions = [p for p in search_pos(acct_id) if p["contractId"] == cid]
+        if not positions:
+            break
+        for _ in positions:
+            try:
+                close_pos(acct_id, cid)
+            except Exception as e:
+                logging.error("Error closing position %s: %s", cid, e)
+        time.sleep(1)
+    while time.time() < end:
+        rem_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
+        rem_pos    = [p for p in search_pos(acct_id) if p["contractId"] == cid]
+        if not rem_orders and not rem_pos:
+            logging.info("Flatten complete for %s", cid)
+            return True
+        logging.info("Waiting for flatten: %d orders, %d positions remain", len(rem_orders), len(rem_pos))
+        time.sleep(1)
+    logging.error("Flatten timeout: %s still has %d orders, %d positions", cid, len(rem_orders), len(rem_pos))
+    return False
+
+def cancel_all_stops(acct_id, cid):
+    for o in search_open(acct_id):
+        if o["contractId"] == cid and o["type"] == 4:
+            cancel(acct_id, o["id"])
+
+def get_contract(sym):
+    if OVERRIDE_CONTRACT_ID:
+        return OVERRIDE_CONTRACT_ID
+    return None
+
+def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url):
+    payload = {
+        "account": account,
+        "strategy": strat,
+        "signal": sig,
+        "symbol": sym,
+        "size": size,
+        "alert": alert
+    }
+    try:
+        resp = session.post(ai_url, json=payload, timeout=60)
+        resp.raise_for_status()
+        data = resp.json()
+        return data
+    except Exception as e:
+        return {
+            "strategy": strat,
+            "signal": "HOLD",
+            "account": account,
+            "reason": f"AI error: {str(e)}",
+            "error": True
+        }
+
+def check_for_phantom_orders(acct_id, cid):
+    # 1. Check for open position(s)
+    positions = [p for p in search_pos(acct_id) if p["contractId"] == cid]
+    open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
+
+    # 2. If there is an open position, make sure there are protective orders
+    if positions:
+        has_protective = any(o["type"] in (1, 4) and o["status"] == 1 for o in open_orders)
+        if not has_protective:
+            logging.warning(f"Phantom position detected! No stop/limit attached. Positions: {positions}, Orders: {open_orders}")
+            flatten_contract(acct_id, cid, timeout=10)
+    else:
+        # 3. If there are no positions, but open stop/limit orders remain, cancel them
+        leftover_orders = [o for o in open_orders if o["type"] in (1, 4) and o["status"] == 1]
+        if leftover_orders:
+            logging.warning(f"Leftover stop/limit order(s) found without a position! Orders: {leftover_orders}")
+            for o in leftover_orders:
+                try:
+                    cancel(acct_id, o["id"])
+                except Exception as e:
+                    logging.error(f"Error cancelling phantom order {o['id']}: {e}")
+
+
 def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta=None):
     import json
     import time
@@ -113,3 +295,8 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
 
     except Exception as e:
         logging.error(f"[log_trade_results_to_supabase] Outer error: {e}")
+
+
+
+
+
