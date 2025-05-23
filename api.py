@@ -8,6 +8,7 @@ import pytz
 from datetime import datetime, timezone
 from auth import ensure_token, get_token
 from config import load_config
+from dateutil import parser
 
 session = requests.Session()
 config = load_config()
@@ -203,18 +204,22 @@ def check_for_phantom_orders(acct_id, cid):
 
 
 
+
 def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta=None):
     import json
     import time
-    from datetime import timedelta
+    from datetime import datetime, timedelta
     import logging
 
     meta = meta or {}
 
     # --- Normalize entry_time to be timezone-aware (Chicago) ---
     try:
-        if not isinstance(entry_time, datetime):
+        if isinstance(entry_time, (float, int)):
             entry_time = datetime.fromtimestamp(entry_time, CT)
+        elif isinstance(entry_time, str):
+            # Handles ISO8601 strings like '2025-05-23T13:50:50.957529+00:00'
+            entry_time = parser.isoparse(entry_time).astimezone(CT)
         elif entry_time.tzinfo is None:
             entry_time = CT.localize(entry_time)
         else:
@@ -285,7 +290,6 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         }
         try:
             r = session.post(url, json=payload, headers=headers, timeout=(3.05, 10))
-            # Only log one line for successful upload
             if r.status_code == 201:
                 logging.info(f"[log_trade_results_to_supabase] Uploaded trade result for acct={acct_id}, cid={cid}, PnL={total_pnl}, ai_decision_id={ai_decision_id_out}")
             else:
@@ -302,6 +306,7 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
 
     except Exception as e:
         logging.error(f"[log_trade_results_to_supabase] Outer error: {e}")
+
 
 
 
