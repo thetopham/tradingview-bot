@@ -186,14 +186,11 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
     from datetime import timedelta
     import logging
 
-    logging.info(f"[log_trade_results_to_supabase] CALLED: acct_id={acct_id}, cid={cid}, entry_time={entry_time}, ai_decision_id={ai_decision_id}, meta={meta}")
-
     meta = meta or {}
 
     # --- Normalize entry_time to be timezone-aware (Chicago) ---
     try:
         if not isinstance(entry_time, datetime):
-            # If float (timestamp), convert to datetime
             entry_time = datetime.fromtimestamp(entry_time, CT)
         elif entry_time.tzinfo is None:
             entry_time = CT.localize(entry_time)
@@ -203,28 +200,20 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         logging.error(f"[log_trade_results_to_supabase] entry_time conversion error: {entry_time} ({type(entry_time)}): {e}")
         entry_time = datetime.now(CT)
 
-    # --- Get a timezone-aware exit_time ---
     exit_time = datetime.now(CT)
-
-    # --- Search trades using a window to avoid missing the fill ---
     start_time = entry_time - timedelta(minutes=2)
     try:
-        logging.info(f"[log_trade_results_to_supabase] Querying trades: acct_id={acct_id}, cid={cid}, start_time={start_time.isoformat()}")
         resp = post("/api/Trade/search", {
             "accountId": acct_id,
             "startTimestamp": start_time.isoformat()
         })
         trades = resp.get("trades", [])
-        logging.info(f"[log_trade_results_to_supabase] All trades returned: {json.dumps(trades, indent=2)}")
 
         relevant_trades = [
             t for t in trades
             if t.get("contractId") == cid and not t.get("voided", False) and t.get("size", 0) > 0
         ]
 
-        logging.info(f"[log_trade_results_to_supabase] Relevant trades: {json.dumps(relevant_trades, indent=2)}")
-
-        # --- If no relevant trades, log to missing file and skip ---
         if not relevant_trades:
             logging.warning("[log_trade_results_to_supabase] No relevant trades found, skipping Supabase log.")
             try:
@@ -244,11 +233,6 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         total_pnl = sum(float(t.get("profitAndLoss") or 0.0) for t in relevant_trades)
         trade_ids = [t.get("id") for t in relevant_trades]
         duration_sec = int((exit_time - entry_time).total_seconds())
-
-        # LOG the raw ai_decision_id and type!
-        logging.info(f"[log_trade_results_to_supabase] About to construct payload with ai_decision_id={ai_decision_id} (type={type(ai_decision_id)})")
-
-        # Patch: Accept string or int for ai_decision_id
         ai_decision_id_out = str(ai_decision_id) if ai_decision_id is not None else None
 
         payload = {
@@ -269,8 +253,6 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
             "trade_ids":     trade_ids if trade_ids else [],
         }
 
-        logging.info(f"[log_trade_results_to_supabase] Final payload to upload: {json.dumps(payload, indent=2)}")
-
         url = f"{SUPABASE_URL}/rest/v1/trade_results"
         headers = {
             "apikey": SUPABASE_KEY,
@@ -279,13 +261,15 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
             "Prefer": "return=minimal"
         }
         try:
-            logging.info(f"[log_trade_results_to_supabase] Uploading to Supabase: {url}")
             r = session.post(url, json=payload, headers=headers, timeout=(3.05, 10))
-            logging.info(f"[log_trade_results_to_supabase] Supabase response status: {r.status_code}, text: {r.text}")
+            # Only log one line for successful upload
+            if r.status_code == 201:
+                logging.info(f"[log_trade_results_to_supabase] Uploaded trade result for acct={acct_id}, cid={cid}, PnL={total_pnl}, ai_decision_id={ai_decision_id_out}")
+            else:
+                logging.warning(f"[log_trade_results_to_supabase] Supabase returned non-201: status={r.status_code}, text={r.text}")
             r.raise_for_status()
         except Exception as e:
             logging.error(f"[log_trade_results_to_supabase] Supabase upload failed: {e}")
-            logging.error(f"[log_trade_results_to_supabase] Payload that failed: {json.dumps(payload)[:1000]}")
             try:
                 with open("/tmp/trade_results_fallback.jsonl", "a") as f:
                     f.write(json.dumps(payload) + "\n")
@@ -295,6 +279,7 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
 
     except Exception as e:
         logging.error(f"[log_trade_results_to_supabase] Outer error: {e}")
+
 
 
 
