@@ -5,7 +5,7 @@ import json
 import time
 from datetime import datetime
 import pytz
-
+import traceback
 from auth import ensure_token, get_token
 from config import load_config
 
@@ -95,6 +95,7 @@ def cancel(acct_id, order_id):
 def search_pos(acct_id):
     if acct_id is None:
         logging.error("search_pos called with acct_id=None! This is a bug in the caller.")
+        traceback.print_stack()  # Will print a full stack trace to the logs
         raise ValueError("search_pos called with acct_id=None")
     logging.error(f"[DEBUG] search_pos called with acct_id={acct_id!r} ({type(acct_id)})")
     pos = post("/api/Position/searchOpen", {"accountId": acct_id}).get("positions", [])
