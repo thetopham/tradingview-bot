@@ -12,7 +12,6 @@ orders_state = {}
 positions_state = {}
 trade_meta = {}
 
-
 def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, order_id, alert, account, symbol, sl_id=None, tp_ids=None, trades=None):
     trade_meta[(acct_id, cid)] = {
         "entry_time": entry_time,
@@ -123,18 +122,22 @@ class SignalRTradingListener(threading.Thread):
             self.hub.stop()
 
 # --- Event Handlers ---
+
 def on_account_update(args):
     logging.info(f"[Account Update] {args}")
 
 def on_order_update(args):
+    # Always unwrap if data is present
     order = args[0] if isinstance(args, list) and args else args
     order_data = order.get("data") if isinstance(order, dict) and "data" in order else order
+
     account_id = order_data.get("accountId")
     contract_id = order_data.get("contractId")
     status = order_data.get("status")
-    if not account_id or not contract_id:
-        logging.error(f"on_order_update: missing account_id or contract_id in {order}")
+    if account_id is None or contract_id is None:
+        logging.error(f"on_order_update: missing account_id or contract_id in {order_data}")
         return
+
     orders_state.setdefault(account_id, {})[order_data.get("id")] = order_data
 
     if order_data.get("type") == 1 and status == 2:  # TP filled
@@ -150,32 +153,32 @@ def on_order_update(args):
 
 def on_position_update(args):
     from api import log_trade_results_to_supabase
+    # Always unwrap if data is present
     position = args[0] if isinstance(args, list) and args else args
-    account_id = position.get("accountId")
-    contract_id = position.get("contractId")
-    size = position.get("size", 0)
-    positions_state.setdefault(account_id, {})[contract_id] = position
+    position_data = position.get("data") if isinstance(position, dict) and "data" in position else position
 
-    # Use the broker's timestamp for entry
-    entry_time = position.get("creationTimestamp")
+    account_id = position_data.get("accountId")
+    contract_id = position_data.get("contractId")
+    size = position_data.get("size", 0)
     if account_id is None or contract_id is None:
-        logging.error(f"on_position_update: missing account_id or contract_id in {position}")
+        logging.error(f"on_position_update: missing account_id or contract_id in {position_data}")
         return
 
+    positions_state.setdefault(account_id, {})[contract_id] = position_data
+
+    # Use the broker's timestamp for entry
+    entry_time = position_data.get("creationTimestamp")
     if size > 0:
-        # Only update trade_meta on open (or increase)
         trade_meta[(account_id, contract_id)] = trade_meta.get((account_id, contract_id), {})
         trade_meta[(account_id, contract_id)]["entry_time"] = entry_time
 
     ensure_stops_match_position(account_id, contract_id)
 
-    # On flatten, log results and clear meta
     if size == 0:
         meta = trade_meta.pop((account_id, contract_id), None)
         if meta:
             logging.info(f"Position flattened, logging trade results: acct={account_id} contract={contract_id}")
             ai_decision_id = meta.get("ai_decision_id")
-            # Pass the stored broker entry_time
             log_trade_results_to_supabase(
                 acct_id=account_id,
                 cid=contract_id,
@@ -255,7 +258,6 @@ def ensure_stops_match_position(acct_id, contract_id, max_retries=5, retry_delay
         for stop in stops:
             logging.info(f"[SL SYNC] No open position, canceling leftover stop {stop['id']}")
             cancel(acct_id, stop["id"])
-
 
 # Example usage:
 if __name__ == "__main__":
