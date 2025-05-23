@@ -219,6 +219,7 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
             if t.get("contractId") == cid and not t.get("voided", False) and t.get("size", 0) > 0
         ]
 
+        # --- If no relevant trades, log to missing file and skip ---
         if not relevant_trades:
             logging.warning("No relevant trades found, skipping Supabase log.")
             try:
@@ -237,7 +238,6 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
 
         total_pnl = sum(t.get("profitAndLoss", 0) for t in relevant_trades)
         trade_ids = [t.get("id") for t in relevant_trades]
-
         duration_sec = int((exit_time - entry_time).total_seconds())
         payload = {
             "ai_decision_id": ai_decision_id,
@@ -280,5 +280,6 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
 
     except Exception as e:
         logging.error(f"Supabase log error (outer): {e}")
+
 
 
