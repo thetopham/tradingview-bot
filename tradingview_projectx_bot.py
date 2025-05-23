@@ -35,7 +35,7 @@ GET_FLAT_END    = config['GET_FLAT_END']
 
 AI_ENDPOINTS = {
     "epsilon": config['N8N_AI_URL'],
-    "beta": config['N8N_AI_URL2'],
+    "beta": config['N8N_AI_URL'],
 }
 
 AUTH_LOCK = threading.Lock()
