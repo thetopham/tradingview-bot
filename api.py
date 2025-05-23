@@ -146,9 +146,29 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url):
     try:
         resp = session.post(ai_url, json=payload, timeout=60)
         resp.raise_for_status()
-        data = resp.json()
+        try:
+            data = resp.json()
+        except Exception as e:
+            logging.error(f"AI response not valid JSON: {resp.text}")
+            return {
+                "strategy": strat,
+                "signal": "HOLD",
+                "account": account,
+                "reason": f"AI response not valid JSON: {str(e)} (raw: {resp.text})",
+                "error": True
+            }
+        if not data:
+            logging.error(f"AI response empty or null: {resp.text}")
+            return {
+                "strategy": strat,
+                "signal": "HOLD",
+                "account": account,
+                "reason": "AI response was empty.",
+                "error": True
+            }
         return data
     except Exception as e:
+        logging.error(f"AI error: {str(e)}")
         return {
             "strategy": strat,
             "signal": "HOLD",
@@ -156,6 +176,7 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url):
             "reason": f"AI error: {str(e)}",
             "error": True
         }
+
 
 def check_for_phantom_orders(acct_id, cid):
   
