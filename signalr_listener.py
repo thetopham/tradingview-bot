@@ -41,6 +41,7 @@ class SignalRTradingListener(threading.Thread):
         self.event_handlers = event_handlers or {}
         self.hub = None
         self.stop_event = threading.Event()
+        self.reconnect_event = threading.Event()  # For forced reconnects
         self.last_token = None
 
     def run(self):
@@ -51,13 +52,21 @@ class SignalRTradingListener(threading.Thread):
                 if token != self.last_token:
                     self.last_token = token
                 self.connect_signalr(token)
-                self.stop_event.wait(3600)
+                # Short sleep increments for fast reconnect on disconnect
+                for _ in range(3600):  # Up to an hour, check every second
+                    if self.stop_event.is_set() or self.reconnect_event.is_set():
+                        break
+                    time.sleep(1)
+                # If reconnect_event was set, clear it for next loop
+                if self.reconnect_event.is_set():
+                    self.reconnect_event.clear()
             except Exception as e:
                 logging.error(f"SignalRListener error: {e}", exc_info=True)
                 time.sleep(10)
 
     def ensure_token_valid(self):
         with self.auth_lock:
+            # If token is near expiry, refresh
             if self.token_expiry_getter() - time.time() < 60:
                 logging.info("Refreshing JWT token for SignalR connection.")
                 self.authenticate_func()
@@ -93,9 +102,9 @@ class SignalRTradingListener(threading.Thread):
         self.hub.on("GatewayUserTrade", self.event_handlers.get("on_trade_update", self.default_handler))
 
         self.hub.on_open(lambda: self.on_open())
-        self.hub.on_close(lambda: logging.info("SignalR connection closed."))
+        self.hub.on_close(lambda: self.handle_close())
         self.hub.on_reconnect(self.on_reconnected)
-        self.hub.on_error(lambda err: logging.error(f"SignalR connection error: {err}"))
+        self.hub.on_error(lambda err: self.handle_error(err))
         self.hub.start()
 
     def on_open(self):
@@ -119,10 +128,46 @@ class SignalRTradingListener(threading.Thread):
     def default_handler(self, args):
         logging.info(f"SignalR event: {args}")
 
+    def handle_close(self):
+        logging.warning("SignalR connection closed! Forcing reconnect.")
+        # Force reconnect immediately
+        self.reconnect_event.set()
+        if self.hub:
+            self.hub.stop()
+
+    def handle_error(self, err):
+        logging.error(f"SignalR connection error: {err}")
+        # On error, trigger a forced reconnect
+        self.reconnect_event.set()
+        if self.hub:
+            self.hub.stop()
+
     def stop(self):
         self.stop_event.set()
         if self.hub:
             self.hub.stop()
+
+    def sweep_and_cleanup_positions_and_stops(self):
+        from api import search_pos, search_open, cancel
+        logging.info("[Sweep] Starting stop/order cleanup for all accounts/contracts")
+        for acct_id in self.accounts:
+            try:
+                positions = search_pos(acct_id)
+                open_orders = search_open(acct_id)
+                contracts_with_positions = set()
+                for pos in positions:
+                    if pos.get("size", 0) > 0:
+                        contracts_with_positions.add(pos["contractId"])
+                for order in open_orders:
+                    cid = order.get("contractId")
+                    # Cancel all stops if flat, or any stop that doesn't match open position
+                    if order.get("type") == 4 and order.get("status") == 1:  # Stop order, open
+                        if cid not in contracts_with_positions:
+                            logging.info(f"[Sweep] Canceling leftover stop {order['id']} (flat in {cid})")
+                            cancel(acct_id, order["id"])
+            except Exception as e:
+                logging.error(f"[Sweep] Cleanup failed for acct {acct_id}: {e}")
+        logging.info("[Sweep] Stop/order cleanup completed")
 
 # --- Event Handlers ---
 
@@ -130,7 +175,6 @@ def on_account_update(args):
     logging.info(f"[Account Update] {args}")
 
 def on_order_update(args):
-    # Always unwrap if data is present
     order = args[0] if isinstance(args, list) and args else args
     order_data = order.get("data") if isinstance(order, dict) and "data" in order else order
 
@@ -147,7 +191,6 @@ def on_order_update(args):
         ensure_stops_match_position(account_id, contract_id)
 
     if status == 2:
-        # Only add missing fields to meta, never overwrite!
         meta = trade_meta.setdefault((account_id, contract_id), {})
         if "entry_time" not in meta or not meta["entry_time"]:
             meta["entry_time"] = order_data.get("creationTimestamp") or time.time()
@@ -156,9 +199,7 @@ def on_order_update(args):
         logging.info(f"Order filled: {order_data}")
         logging.info(f"[on_order_update] meta after update: {meta}")
 
-
 def on_position_update(args):
-    # Always unwrap if data is present
     position = args[0] if isinstance(args, list) and args else args
     position_data = position.get("data") if isinstance(position, dict) and "data" in position else position
 
@@ -171,15 +212,12 @@ def on_position_update(args):
 
     positions_state.setdefault(account_id, {})[contract_id] = position_data
 
-    # Use the broker's timestamp for entry
     entry_time = position_data.get("creationTimestamp")
     if size > 0:
-        # Only update the entry_time field in meta if meta exists
         meta = trade_meta.get((account_id, contract_id))
         if meta is not None:
             meta["entry_time"] = entry_time
         else:
-            # Optionally: log if meta is missing at entry time (should rarely happen)
             logging.warning(f"[on_position_update] No meta at entry for acct={account_id}, cid={contract_id}. Not updating entry_time.")
 
     ensure_stops_match_position(account_id, contract_id)
@@ -194,7 +232,7 @@ def on_position_update(args):
             log_trade_results_to_supabase(
                 acct_id=account_id,
                 cid=contract_id,
-                entry_time=meta.get("entry_time"),  # ISO8601 string
+                entry_time=meta.get("entry_time"),
                 ai_decision_id=ai_decision_id,
                 meta=meta
             )
@@ -206,9 +244,6 @@ def on_trade_update(args):
     logging.info(f"[Trade Update] {args}")
 
 def parse_account_ids_from_env():
-    """
-    Parses all ACCOUNT_... variables that are numeric (Topstep account IDs)
-    """
     result = []
     for k, v in os.environ.items():
         if k.startswith("ACCOUNT_"):
@@ -273,29 +308,6 @@ def ensure_stops_match_position(acct_id, contract_id, max_retries=5, retry_delay
         for stop in stops:
             logging.info(f"[SL SYNC] No open position, canceling leftover stop {stop['id']}")
             cancel(acct_id, stop["id"])
-
-def sweep_and_cleanup_positions_and_stops(self):
-    from api import search_pos, search_open, cancel
-    logging.info("[Sweep] Starting stop/order cleanup for all accounts/contracts")
-    for acct_id in self.accounts:
-        try:
-            positions = search_pos(acct_id)
-            open_orders = search_open(acct_id)
-            contracts_with_positions = set()
-            for pos in positions:
-                if pos.get("size", 0) > 0:
-                    contracts_with_positions.add(pos["contractId"])
-            for order in open_orders:
-                cid = order.get("contractId")
-                # Cancel all stops if flat, or any stop that doesn't match open position
-                if order.get("type") == 4 and order.get("status") == 1:  # Stop order, open
-                    if cid not in contracts_with_positions:
-                        logging.info(f"[Sweep] Canceling leftover stop {order['id']} (flat in {cid})")
-                        cancel(acct_id, order["id"])
-        except Exception as e:
-            logging.error(f"[Sweep] Cleanup failed for acct {acct_id}: {e}")
-    logging.info("[Sweep] Stop/order cleanup completed")
-
 
 # Example usage:
 if __name__ == "__main__":
