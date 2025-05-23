@@ -21,6 +21,9 @@ CT = pytz.timezone("America/Chicago")
 
 # ─── API Functions ────────────────────────────────────
 def post(path, payload):
+   logging.error("🔥 POST WRAPPER CALLED 🔥")
+    ...
+
     # --- Aggressively enforce payload wrapping ---
     if not isinstance(payload, dict) or "accountId" not in payload.get("request", payload):
         # Always rebuild to be correct
