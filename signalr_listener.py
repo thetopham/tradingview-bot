@@ -199,7 +199,7 @@ def on_position_update(args):
             )
         else:
             logging.warning(f"[on_position_update] No meta found for acct={account_id} cid={contract_id} on flatten!")
-
+        check_for_phantom_orders(account_id, contract_id)
 
 def on_trade_update(args):
     logging.info(f"[Trade Update] {args}")
