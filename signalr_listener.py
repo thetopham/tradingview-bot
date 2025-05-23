@@ -2,7 +2,7 @@ import os
 import time
 import threading
 import logging
-from api import search_pos
+from api import search_pos, log_trade_results_to_supabase
 from datetime import datetime
 from signalrcore.hub_connection_builder import HubConnectionBuilder
 
@@ -13,7 +13,7 @@ positions_state = {}
 trade_meta = {}
 
 def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, order_id, alert, account, symbol, sl_id=None, tp_ids=None, trades=None):
-    trade_meta[(acct_id, cid)] = {
+    meta = {
         "entry_time": entry_time,
         "ai_decision_id": ai_decision_id,
         "strategy": strategy,
@@ -27,6 +27,8 @@ def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, o
         "symbol": symbol,
         "trades": trades,
     }
+    logging.info(f"[track_trade] Called with ai_decision_id={ai_decision_id}, meta={meta}")
+    trade_meta[(acct_id, cid)] = meta
 
 class SignalRTradingListener(threading.Thread):
     def __init__(self, accounts, authenticate_func, token_getter, token_expiry_getter, auth_lock, event_handlers=None):
@@ -152,7 +154,6 @@ def on_order_update(args):
         logging.info(f"Order filled: {order_data}")
 
 def on_position_update(args):
-    from api import log_trade_results_to_supabase
     # Always unwrap if data is present
     position = args[0] if isinstance(args, list) and args else args
     position_data = position.get("data") if isinstance(position, dict) and "data" in position else position
@@ -176,9 +177,11 @@ def on_position_update(args):
 
     if size == 0:
         meta = trade_meta.pop((account_id, contract_id), None)
+        logging.info(f"[on_position_update] Position closed for acct={account_id}, cid={contract_id}")
+        logging.info(f"[on_position_update] meta at close: {meta}")
         if meta:
-            logging.info(f"Position flattened, logging trade results: acct={account_id} contract={contract_id}")
             ai_decision_id = meta.get("ai_decision_id")
+            logging.info(f"[on_position_update] Calling log_trade_results_to_supabase with ai_decision_id={ai_decision_id}")
             log_trade_results_to_supabase(
                 acct_id=account_id,
                 cid=contract_id,
@@ -186,6 +189,8 @@ def on_position_update(args):
                 ai_decision_id=ai_decision_id,
                 meta=meta
             )
+        else:
+            logging.warning(f"[on_position_update] No meta found for acct={account_id} cid={contract_id} on flatten!")
 
 def on_trade_update(args):
     logging.info(f"[Trade Update] {args}")
