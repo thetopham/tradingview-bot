@@ -19,6 +19,7 @@ from signalr_listener import launch_signalr_listener
 from threading import Thread
 import threading
 from datetime import datetime
+import logging
 
 # --- Logging/Config/Globals ---
 setup_logging()
@@ -46,15 +47,13 @@ app = Flask(__name__)
 def healthz():
     return jsonify(status="ok", time=str(datetime.now(CT)))
 
-
-
 @app.route("/webhook", methods=["POST"])
 def tv_webhook():
     data = request.get_json()
     if data.get("secret") != WEBHOOK_SECRET:
         return jsonify(error="unauthorized"), 403
 
-    # Respond immediately
+    # Respond immediately to TradingView/n8n
     Thread(target=handle_webhook_logic, args=(data,)).start()
     return jsonify(status="accepted", msg="Processing started"), 202
 
@@ -69,7 +68,7 @@ def handle_webhook_logic(data):
         ai_decision_id = data.get("ai_decision_id", None)
 
         if acct not in ACCOUNTS:
-            # Optionally log error here
+            logging.error(f"Unknown account '{acct}'")
             return
 
         acct_id = ACCOUNTS[acct]
@@ -78,10 +77,12 @@ def handle_webhook_logic(data):
         # Manual flatten (close all) signal
         if sig == "FLAT":
             flatten_contract(acct_id, cid, timeout=10)
+            logging.info(f"Manual flatten signal processed for {acct_id} {cid}")
             return
 
         now = datetime.now(CT)
         if in_get_flat(now):
+            logging.info("In get-flat window, no trades processed")
             return
 
         # --- AI Overseer Routing ---
@@ -89,7 +90,7 @@ def handle_webhook_logic(data):
             ai_url = AI_ENDPOINTS[acct]
             ai_decision = ai_trade_decision(acct, strat, sig, sym, size, alert, ai_url)
             if ai_decision.get("signal", "").upper() not in ("BUY", "SELL"):
-                # Optionally log a blocked trade here
+                logging.info(f"AI blocked trade: {ai_decision.get('reason', 'No reason')}")
                 return
             # Overwrite user values with AI's preferred decision
             strat = ai_decision.get("strategy", strat)
@@ -113,8 +114,7 @@ def handle_webhook_logic(data):
         elif strat == "pivot":
             run_pivot(acct_id, sym, sig, size, alert, ai_decision_id)
         else:
-            # Optionally log unknown strategy
-            pass
+            logging.error(f"Unknown strategy '{strat}'")
     except Exception as e:
         import traceback
         logging.error(f"Exception in handle_webhook_logic: {e}\n{traceback.format_exc()}")
@@ -132,5 +132,4 @@ if __name__ == "__main__":
         app.logger.info("Starting server.")
         app.run(host="0.0.0.0", port=TV_PORT, threaded=True)
     except Exception as e:
-        import logging
         logging.exception(f"Fatal error during startup: {e}")
