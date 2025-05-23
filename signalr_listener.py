@@ -128,36 +128,39 @@ def on_account_update(args):
 
 def on_order_update(args):
     order = args[0] if isinstance(args, list) and args else args
-    account_id = order.get("accountId")
-    contract_id = order.get("contractId")
-    status = order.get("status")
-    if account_id is None or contract_id is None:
+    order_data = order.get("data") if isinstance(order, dict) and "data" in order else order
+    account_id = order_data.get("accountId")
+    contract_id = order_data.get("contractId")
+    status = order_data.get("status")
+    if not account_id or not contract_id:
         logging.error(f"on_order_update: missing account_id or contract_id in {order}")
         return
-    orders_state.setdefault(account_id, {})[order.get("id")] = order
+    orders_state.setdefault(account_id, {})[order_data.get("id")] = order_data
 
-    if order.get("type") == 1 and status == 2:  # TP filled
+    if order_data.get("type") == 1 and status == 2:  # TP filled
         ensure_stops_match_position(account_id, contract_id)
 
     if status == 2:
         now = time.time()
         trade_meta[(account_id, contract_id)] = {
             "entry_time": now,
-            "order_id": order.get("id"),
+            "order_id": order_data.get("id"),
         }
-        logging.info(f"Order filled: {order}")
+        logging.info(f"Order filled: {order_data}")
+
 
 
 def on_position_update(args):
     from api import log_trade_results_to_supabase
     position = args[0] if isinstance(args, list) and args else args
-    account_id = position.get("accountId")
-    contract_id = position.get("contractId")
-    size = position.get("size", 0)
-    if account_id is None or contract_id is None:
+    position_data = position.get("data") if isinstance(position, dict) and "data" in position else position
+    account_id = position_data.get("accountId")
+    contract_id = position_data.get("contractId")
+    size = position_data.get("size", 0)
+    if not account_id or not contract_id:
         logging.error(f"on_position_update: missing account_id or contract_id in {position}")
         return
-    positions_state.setdefault(account_id, {})[contract_id] = position
+    positions_state.setdefault(account_id, {})[contract_id] = position_data
     ensure_stops_match_position(account_id, contract_id)
 
     if size == 0:
@@ -173,6 +176,7 @@ def on_position_update(args):
                 ai_decision_id=ai_decision_id,
                 meta=meta
             )
+
 
 
 def on_trade_update(args):
