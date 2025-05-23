@@ -52,7 +52,7 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "=Today is {{ $now }}.\n\nYou are the lead day trading analyst for the Micro E-mini S&P 500 (MES).\n\nYou have received structured chart analysis reports from multiple timeframes (tools available: 1m, 5m, 15m, 30m, 1h, 4h, 6h, 1D, 1W, 1M). Each report contains a trade signal (BUY, SELL, HOLD), trend, and rationale, referencing chart features and indicators.\n\n**Indicators referenced:**\n- ATR Crayon Candles: Green = bullish, Red = bearish\n- FSVZO\n- Phobos momentum\n- Fisher: Red H/R = hidden/regular bearish divergence; Green H/R = hidden/regular bullish divergence\n\n**Task:**  \nBased **only** on the analyst reports provided for each timeframe, determine the best overall trade signal for MES using the brackmod strategy.  \n- Your decision must be based on the confluence of signals, trends, and rationales from the timeframes.\n- Provide a concise reason referencing the most relevant timeframes and indicator evidence.\n\n**Respond with valid JSON only** (no extra text, no triple backticks):\n\n{\n  \"strategy\": \"brackmod\",\n  \"signal\": \"BUY|SELL|HOLD\",\n  \"alert\": \"{{ $json.body.alert }}\",\n  \"timestamp\": \"{{ $now }}\",\n  \"entrylimit\": <float>,\n  \"tp1\": <float>,\n  \"tp2\": <float>,\n  \"tp3\": <float>,\n  \"sl\": <float>,\n  \"symbol\": \"CON.F.US.MES.M25\",\n  \"account\": \"{{ $json.body.account }}\",\n  \"size\": 3,\n  \"reason\": \"<Concise justification referencing the most important timeframes and indicator signals>\",\n  \"trend\": {\n    \"5m\": \"<up|down|sideways|unknown>\",\n    \"15m\": \"<up|down|sideways|unknown>\",\n    \"1h\": \"<up|down|sideways|unknown>\"\n  },\n  \"urls\": {\n    \"5m\": \"<5m chart URL>\",\n    \"15m\": \"<15m chart URL>\",\n    \"1h\": \"<1h chart URL>\"\n  }\n}\n",
+        "text": "=Today is {{ $now }}.\n\nYou are the lead day trading analyst for the Micro E-mini S&P 500 (MES).\n\nYou have received structured chart analysis JSON reports from multiple timeframes (tools available: 1m, 5m, 15m, 30m, 1h, 1D).\nEach report contains:\n- trade signal (BUY, SELL, HOLD),\n- trend,\n- rationale,\n- key support and resistance levels,\n- indicator states,\n- price action summary,\n- and other chart features.\n\n**Indicators referenced:**\n- ATR Crayon Candles: Green = bullish, Red = bearish\n- FSVZO\n- Phobos momentum\n- Fisher: Red H/R = hidden/regular bearish divergence; Green H/R = hidden/regular bullish divergence\n\n**Task:**  \n- Parse all JSON reports and extract signal, trend, rationale, support/resistance, momentum, and other key fields for each timeframe.\n- Determine the best overall trade signal for MES using the **brackmod** strategy, based on confluence (agreement) of signals, support/resistance alignment, and overall market regime.\n- If signals disagree, favor higher timeframes or signal with stronger supporting evidence.\n- Provide a concise reason referencing the most relevant timeframes, indicator evidence, and any major support/resistance levels affecting the decision.\n\nStrategy Options:\n\n- brackmod: A scalping strategy for small, quick profits in choppy/range markets. 2.5 and 5 pt TPs, 10pt SL.\n- pivot: A trend-following strategy for larger moves after breakouts from consolidation or S/R levels. Uses trailing stops and partial scaling.\n\n**Respond with valid JSON only** (no extra text, no triple backticks):\n\n{\n  \"strategy\": \"<brackmod|pivot>\",\n  \"signal\": \"BUY|SELL|HOLD\",\n  \"alert\": \"{{ $json.body.alert }}\",\n  \"timestamp\": \"{{ $now }}\",\n  \"entrylimit\": <float>,\n  \"tp1\": <float>,\n  \"tp2\": <float>,\n  \"tp3\": <float>,\n  \"sl\": <float>,\n  \"symbol\": \"CON.F.US.MES.M25\",\n  \"account\": \"{{ $json.body.account }}\",\n  \"size\": 3,\n  \"reason\": \"<Concise justification referencing the most important timeframes, S/R, and indicator signals>\",\n  \"trend\": {\n    \"5m\": \"<up|down|sideways|unknown>\",\n    \"15m\": \"<up|down|sideways|unknown>\",\n    \"1h\": \"<up|down|sideways|unknown>\"\n  },\n  \"urls\": {\n    \"5m\": \"<5m chart URL>\",\n    \"15m\": \"<15m chart URL>\",\n    \"1h\": \"<1h chart URL>\"\n  },\n  \"support\": {\n    \"5m\": [<float>, ...],\n    \"15m\": [<float>, ...],\n    \"1h\": [<float>, ...]\n  },\n  \"resistance\": {\n    \"5m\": [<float>, ...],\n    \"15m\": [<float>, ...],\n    \"1h\": [<float>, ...]\n  }\n}\n",
         "options": {}
       },
       "type": "@n8n/n8n-nodes-langchain.agent",
@@ -77,7 +77,7 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.2,
       "position": [
-        1160,
+        1280,
         820
       ],
       "id": "71ab7622-50e7-44e8-bec3-c21a9036eab7",
@@ -109,7 +109,7 @@
       "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
       "typeVersion": 2.2,
       "position": [
-        1380,
+        1520,
         820
       ],
       "id": "599e7c39-df3d-4213-90b9-dc2a03c71914",
@@ -135,7 +135,7 @@
       "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
       "typeVersion": 2.2,
       "position": [
-        1680,
+        1840,
         820
       ],
       "id": "55f7479f-067b-4c40-b5d8-68a3d018ceb1",
@@ -149,7 +149,7 @@
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.2,
       "position": [
-        2320,
+        2060,
         820
       ],
       "id": "b44fb7eb-8fb3-4ea1-86bd-f82dc08e8539",
@@ -186,7 +186,7 @@
       "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
       "typeVersion": 2.2,
       "position": [
-        1580,
+        1720,
         820
       ],
       "id": "0681e2d1-b4e0-459c-836b-4798199772d2",
@@ -212,63 +212,11 @@
       "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
       "typeVersion": 2.2,
       "position": [
-        1280,
+        1420,
         820
       ],
       "id": "c1c29dd4-df7c-412d-8c92-3f264f36a6ab",
       "name": "1m"
-    },
-    {
-      "parameters": {
-        "workflowId": {
-          "__rl": true,
-          "value": "qDAGcWgNvxcmmxrt",
-          "mode": "list",
-          "cachedResultName": "4h"
-        },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {},
-          "matchingColumns": [],
-          "schema": [],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
-        }
-      },
-      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
-      "typeVersion": 2.2,
-      "position": [
-        1780,
-        820
-      ],
-      "id": "2638b91b-16ae-4455-935a-8c3a58aeb4a4",
-      "name": "4h"
-    },
-    {
-      "parameters": {
-        "workflowId": {
-          "__rl": true,
-          "value": "VPdU5qkivv5rB2Y0",
-          "mode": "list",
-          "cachedResultName": "6h"
-        },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {},
-          "matchingColumns": [],
-          "schema": [],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
-        }
-      },
-      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
-      "typeVersion": 2.2,
-      "position": [
-        1900,
-        820
-      ],
-      "id": "2e93f870-56f7-47a0-866d-e326d82b5473",
-      "name": "6h"
     },
     {
       "parameters": {
@@ -290,63 +238,11 @@
       "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
       "typeVersion": 2.2,
       "position": [
-        2000,
+        1940,
         820
       ],
       "id": "65f0c789-d788-4979-a907-9f16d96b36fa",
       "name": "1D"
-    },
-    {
-      "parameters": {
-        "workflowId": {
-          "__rl": true,
-          "value": "i1Py6o2O0bH0utaH",
-          "mode": "list",
-          "cachedResultName": "1W"
-        },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {},
-          "matchingColumns": [],
-          "schema": [],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
-        }
-      },
-      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
-      "typeVersion": 2.2,
-      "position": [
-        2100,
-        820
-      ],
-      "id": "db80fc7d-a6d9-40a7-acf8-54a066c7c1e6",
-      "name": "1W"
-    },
-    {
-      "parameters": {
-        "workflowId": {
-          "__rl": true,
-          "value": "eYN3ktA56GoLxPfU",
-          "mode": "list",
-          "cachedResultName": "1M"
-        },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {},
-          "matchingColumns": [],
-          "schema": [],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
-        }
-      },
-      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
-      "typeVersion": 2.2,
-      "position": [
-        2200,
-        820
-      ],
-      "id": "8a602da7-d46e-4be5-bd3d-9527c2d0c0cb",
-      "name": "1M"
     },
     {
       "parameters": {
@@ -482,7 +378,7 @@
       "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
       "typeVersion": 2.2,
       "position": [
-        1480,
+        1620,
         820
       ],
       "id": "205deff6-d9bc-44f9-bb45-0f76dfe937a8",
@@ -817,51 +713,7 @@
         ]
       ]
     },
-    "4h": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "6h": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "1D": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "1W": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "1M": {
       "ai_tool": [
         [
           {
@@ -1030,7 +882,7 @@
     "callerPolicy": "workflowsFromSameOwner",
     "executionOrder": "v1"
   },
-  "versionId": "4fa7ee33-dccf-4a25-b2ae-21d2dc27a4c2",
+  "versionId": "fb36210f-42fe-4479-a8b8-b965b6060bc2",
   "meta": {
     "templateId": "2569",
     "templateCredsSetupCompleted": true,
