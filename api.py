@@ -101,6 +101,9 @@ def cancel(acct_id, order_id):
     return resp
 
 def search_pos(acct_id):
+    if acct_id is None:
+        logging.error("search_pos called with acct_id=None! This is a bug in the caller.")
+        raise ValueError("search_pos called with acct_id=None")
     logging.error(f"[DEBUG] search_pos called with acct_id={acct_id!r} ({type(acct_id)})")
     pos = post("/api/Position/searchOpen", {"accountId": acct_id}).get("positions", [])
     logging.debug("Open positions for %s: %s", acct_id, pos)
