@@ -1,8 +1,7 @@
-#strategies.py
+# strategies.py
 
 import time
 from datetime import datetime, timedelta
-from flask import jsonify
 
 from api import (
     get_contract, search_pos, flatten_contract, place_market,
@@ -17,7 +16,6 @@ STOP_LOSS_POINTS = config.get('STOP_LOSS_POINTS', 10.0)
 TP_POINTS = config.get('TP_POINTS', [2.5, 5.0, 10.0])
 CT = config['CT']
 
-
 def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
     cid = get_contract(sym)
     side = 0 if sig == "BUY" else 1
@@ -25,12 +23,12 @@ def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
     pos = [p for p in search_pos(acct_id) if p["contractId"] == cid]
 
     if any((side == 0 and p["type"] == 1) or (side == 1 and p["type"] == 2) for p in pos):
-        return jsonify(status="ok", strategy="bracket", message="skip same"), 200
+        return  # skip same
 
     if any((side == 0 and p["type"] == 2) or (side == 1 and p["type"] == 1) for p in pos):
         success = flatten_contract(acct_id, cid, timeout=10)
         if not success:
-            return jsonify(status="error", message="Could not flatten contract—old orders/positions remain."), 500
+            return  # Could not flatten contract
 
     ent = place_market(acct_id, cid, side, size)
     oid = ent["orderId"]
@@ -49,7 +47,7 @@ def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
         time.sleep(1)
 
     if price is None:
-        return jsonify(status="error", message="No fill price available"), 500
+        return  # No fill price
 
     slp = price - STOP_LOSS_POINTS if side==0 else price + STOP_LOSS_POINTS
     sl  = place_stop(acct_id, cid, exit_side, size, slp)
@@ -66,7 +64,6 @@ def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
         r = place_limit(acct_id, cid, exit_side, amt, px)
         tp_ids.append(r["orderId"])
 
-    # --- Save trade meta for SignalR logging ---
     track_trade(
         acct_id=acct_id,
         cid=cid,
@@ -85,7 +82,7 @@ def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
     )
 
     check_for_phantom_orders(acct_id, cid)
-    return jsonify(status="ok", strategy="bracket", entry=ent), 200
+    # No HTTP return; just end
 
 def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
     cid = get_contract(sym)
@@ -93,11 +90,11 @@ def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
     exit_side = 1 - side
     pos = [p for p in search_pos(acct_id) if p["contractId"] == cid]
     if any((side == 0 and p["type"] == 1) or (side == 1 and p["type"] == 2) for p in pos):
-        return jsonify(status="ok", strategy="brackmod", message="skip same"), 200
+        return  # skip same
     if any((side == 0 and p["type"] == 2) or (side == 1 and p["type"] == 1) for p in pos):
         success = flatten_contract(acct_id, cid, timeout=10)
         if not success:
-            return jsonify(status="error", message="Could not flatten contract—old orders/positions remain."), 500
+            return  # Could not flatten contract
 
     ent = place_market(acct_id, cid, side, size)
     oid = ent["orderId"]
@@ -114,7 +111,7 @@ def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
             break
         time.sleep(1)
     if price is None:
-        return jsonify(status="error", message="No fill price available"), 500
+        return  # No fill price
 
     STOP_LOSS_POINTS = 5.75
     slp = price - STOP_LOSS_POINTS if side == 0 else price + STOP_LOSS_POINTS
@@ -128,7 +125,6 @@ def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
         r = place_limit(acct_id, cid, exit_side, amt, px)
         tp_ids.append(r["orderId"])
 
-    # --- Track trade meta for event-driven logging ---
     track_trade(
         acct_id=acct_id,
         cid=cid,
@@ -147,7 +143,7 @@ def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
     )
 
     check_for_phantom_orders(acct_id, cid)
-    return jsonify(status="ok", strategy="brackmod", entry=ent), 200
+    # No HTTP return; just end
 
 def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
     cid = get_contract(sym)
@@ -177,7 +173,7 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
                 "message": "already at target position"
             }
         )
-        return jsonify(status="ok", strategy="pivot", message="already at target position"), 200
+        return  # already at target position
 
     for o in search_open(acct_id):
         if o["contractId"] == cid and o["type"] == 4:
@@ -227,5 +223,4 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
     )
 
     check_for_phantom_orders(acct_id, cid)
-    return jsonify(status="ok", strategy="pivot", message="position set", trades=trade_log), 200
-
+    # No HTTP return; just end
