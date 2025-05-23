@@ -21,17 +21,13 @@ CT = pytz.timezone("America/Chicago")
 
 # ─── API Functions ────────────────────────────────────
 def post(path, payload):
-    logging.error("🔥 POST WRAPPER CALLED 🔥")
-    # Always wrap unless "request" is already the only key
-    if not (isinstance(payload, dict) and "request" in payload and len(payload) == 1):
-        payload = {"request": payload}
-    # Now always type-cast accountId
-    if "request" in payload and "accountId" in payload["request"]:
+    logging.error("🔥 POST WRAPPER CALLED (GATEWAY) 🔥")
+    # For Gateway API: do NOT wrap!
+    if "accountId" in payload and payload["accountId"] is not None:
         try:
-            payload["request"]["accountId"] = int(payload["request"]["accountId"])
+            payload["accountId"] = int(payload["accountId"])
         except Exception as e:
-            logging.error(f"Failed to cast nested accountId to int: {payload['request']['accountId']} - {e}")
-
+            logging.error(f"Failed to cast accountId to int: {payload['accountId']} - {e}")
     ensure_token()
     url = f"{PX_BASE}{path}"
     logging.debug("POST %s payload=%s", url, payload)
@@ -54,6 +50,7 @@ def post(path, payload):
     data = resp.json()
     logging.debug("Response JSON: %s", data)
     return data
+
 
 
 
