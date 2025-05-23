@@ -42,6 +42,8 @@ def post(path, payload):
     ensure_token()
     url = f"{PX_BASE}{path}"
     logging.debug("POST %s payload=%s", url, payload)
+    logging.error(f"OUTGOING PAYLOAD for {path}: {json.dumps(payload)}")
+
     resp = session.post(
         url,
         json=payload,
