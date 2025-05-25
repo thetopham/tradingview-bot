@@ -121,7 +121,7 @@ class SignalRTradingListener(threading.Thread):
             })
             .configure_logging(logging.INFO)
             .with_automatic_reconnect({
-                "type": "intervals",
+                "type": "interval",
                 "intervals": [0, 2, 5, 10, 30, 60],  # Retry intervals
                 "keep_alive_interval": 30,  # Increased from 10
                 "reconnect_interval": 10    # Increased from 5
