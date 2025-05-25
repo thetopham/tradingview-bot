@@ -328,9 +328,12 @@ market_regime_analyzer = MarketRegime()
 def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None, cache_minutes: int = 2) -> Dict:
     """
     Fetch multi-timeframe analysis, using Supabase cache if recent.
-    Fixed to use proper cache table and handle n8n calls correctly.
+    Fixed to use proper cache table and handle n8n calls concurrently.
     """
     import datetime
+    import concurrent.futures
+    import threading
+    
     now = datetime.datetime.now(datetime.timezone.utc)
     supabase_client = get_supabase_client()
 
@@ -362,7 +365,9 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
     
     timeframe_data = {}
     
-    # First, try to get recent individual timeframe analyses from the database
+    # Step 1: Check database cache for all timeframes first
+    timeframes_needing_fetch = []
+    
     for tf in timeframes:
         try:
             result = supabase_client.table('latest_chart_analysis') \
@@ -394,41 +399,57 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
                                 # Ensure we have a dictionary
                                 if isinstance(parsed_data, dict):
                                     timeframe_data[tf] = parsed_data
+                                    logging.info(f"Using cached {tf} analysis from database")
+                                    continue
                                 else:
                                     logging.warning(f"Invalid {tf} data structure: {type(parsed_data)}, skipping cache")
-                                    continue
-                                logging.info(f"Using cached {tf} analysis from database")
-                                continue
                     except Exception as e:
                         logging.warning(f"Error parsing {tf} timestamp: {e}")
             
-            # If no cache or cache too old, make fresh n8n call
-            logging.info(f"Fetching fresh {tf} analysis from n8n")
+            # If we get here, we need to fetch fresh data
+            timeframes_needing_fetch.append(tf)
             
-            # Construct correct webhook URL - use the individual timeframe workflow webhooks
-            webhook_url = f"{n8n_base_url}/webhook/{tf}"
-            
-            response = session.post(webhook_url, json={}, timeout=30)
-            response.raise_for_status()
-            
-            # Handle response
-            if response.text.strip():
-                try:
-                    data = response.json()
-                    if isinstance(data, str):
-                        data = json.loads(data)
-                    timeframe_data[tf] = data
-                    logging.info(f"Successfully fetched {tf} analysis")
-                except json.JSONDecodeError as e:
-                    logging.error(f"Failed to parse {tf} JSON response: {e}")
-                    timeframe_data[tf] = {}
-            else:
-                logging.error(f"Empty response from {tf} webhook")
-                timeframe_data[tf] = {}
-                
         except Exception as e:
-            logging.error(f"Failed to fetch {tf} analysis: {e}")
-            timeframe_data[tf] = {}
+            logging.error(f"Failed to check cache for {tf}: {e}")
+            timeframes_needing_fetch.append(tf)
+
+    # Step 2: Make concurrent n8n calls for timeframes that need fresh data
+    if timeframes_needing_fetch:
+        logging.info(f"Fetching fresh analysis from n8n for: {timeframes_needing_fetch}")
+        
+        def fetch_timeframe(tf):
+            """Fetch a single timeframe from n8n"""
+            try:
+                webhook_url = f"{n8n_base_url}/webhook/{tf}"
+                response = session.post(webhook_url, json={}, timeout=30)
+                response.raise_for_status()
+                
+                if response.text.strip():
+                    try:
+                        data = response.json()
+                        if isinstance(data, str):
+                            data = json.loads(data)
+                        logging.info(f"Successfully fetched {tf} analysis")
+                        return tf, data
+                    except json.JSONDecodeError as e:
+                        logging.error(f"Failed to parse {tf} JSON response: {e}")
+                        return tf, {}
+                else:
+                    logging.error(f"Empty response from {tf} webhook")
+                    return tf, {}
+                    
+            except Exception as e:
+                logging.error(f"Failed to fetch {tf} analysis: {e}")
+                return tf, {}
+        
+        # Make all n8n calls concurrently
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_tf = {executor.submit(fetch_timeframe, tf): tf for tf in timeframes_needing_fetch}
+            
+            for future in concurrent.futures.as_completed(future_to_tf):
+                tf, data = future.result()
+                if data:
+                    timeframe_data[tf] = data
 
     # Analyze regime with whatever data we have
     regime_analysis = market_regime_analyzer.analyze_regime(timeframe_data)
