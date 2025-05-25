@@ -427,7 +427,7 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
             """Fetch a single timeframe from n8n"""
             try:
                 webhook_url = f"{n8n_base_url}/webhook/{tf}"
-                response = session.post(webhook_url, json={}, timeout=30)
+                response = session.post(webhook_url, json={}, timeout=60)
                 response.raise_for_status()
                 
                 if response.text.strip():
