@@ -571,15 +571,19 @@ def get_market_conditions_summary() -> Dict:
         market_analysis = fetch_multi_timeframe_analysis(n8n_base_url)
         regime = market_analysis['regime_analysis']
         
+        # Handle missing trend_details gracefully
+        trend_details = regime.get('trend_details', {})
+        volatility_details = regime.get('volatility_details', {})
+        
         summary = {
             'timestamp': datetime.now(CT).isoformat(),
-            'regime': regime['primary_regime'],
-            'confidence': regime['confidence'],
-            'trade_recommended': regime['trade_recommendation'],
-            'risk_level': regime['risk_level'],
-            'key_factors': regime['supporting_factors'][:3],  # Top 3 factors
-            'trend_alignment': regime['trend_details']['alignment_score'],
-            'volatility': regime['volatility_details']['volatility_regime']
+            'regime': regime.get('primary_regime', 'unknown'),
+            'confidence': regime.get('confidence', 0),
+            'trade_recommended': regime.get('trade_recommendation', False),
+            'risk_level': regime.get('risk_level', 'high'),
+            'key_factors': regime.get('supporting_factors', ['Error in analysis'])[:3],  # Top 3 factors
+            'trend_alignment': trend_details.get('alignment_score', 0),
+            'volatility': volatility_details.get('volatility_regime', 'unknown')
         }
         
         logging.info(f"Market Conditions: {summary}")
