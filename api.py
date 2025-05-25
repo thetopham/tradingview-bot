@@ -608,7 +608,7 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
 
 def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url):
     """
-    Enhanced AI trade decision that includes market regime analysis and chart URLs
+    Enhanced AI trade decision that includes market regime analysis, chart URLs, and position context
     """
     try:
         # Extract base URL properly
@@ -624,6 +624,29 @@ def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url)
         regime = market_analysis['regime_analysis']
         regime_rules = market_regime_analyzer.get_regime_trading_rules(regime['primary_regime'])
         chart_urls = market_analysis.get('chart_urls', {})
+        
+        # Get account ID for position context
+        acct_id = ACCOUNTS.get(account.lower())
+        if acct_id:
+            # Get position context
+            from position_manager import PositionManager
+            pm = PositionManager(ACCOUNTS)
+            cid = get_contract(sym)
+            position_context = pm.get_position_context_for_ai(acct_id, cid)
+            
+            # Check if account can trade
+            if not position_context['account_metrics']['can_trade']:
+                logging.warning(f"Account {account} cannot trade due to risk limits")
+                return {
+                    "strategy": strat,
+                    "signal": "HOLD",
+                    "account": account,
+                    "reason": f"Account risk limits exceeded: {', '.join(position_context['warnings'])}",
+                    "regime": regime['primary_regime'],
+                    "error": False
+                }
+        else:
+            position_context = None
         
         # Check if trading is recommended in this regime
         if not regime['trade_recommendation']:
@@ -649,7 +672,7 @@ def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url)
                 "error": False
             }
         
-        # Prepare enhanced payload for AI with chart URLs for archival
+        # Prepare enhanced payload for AI with chart URLs for archival and position context
         payload = {
             "account": account,
             "strategy": strat,
@@ -671,7 +694,7 @@ def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url)
                 tf: data.get('signal', 'HOLD') 
                 for tf, data in market_analysis['timeframe_data'].items()
             },
-            "chart_urls": chart_urls,  # NEW: Include chart URLs for archival
+            "chart_urls": chart_urls,  # Include chart URLs for archival
             "support": {
                 tf: data.get('support', []) 
                 for tf, data in market_analysis['timeframe_data'].items()
@@ -681,6 +704,31 @@ def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url)
                 for tf, data in market_analysis['timeframe_data'].items()
             }
         }
+        
+        # Add position context if available
+        if position_context:
+            payload["position_context"] = position_context
+            
+            # Add specific position-aware rules
+            if position_context['current_position']['has_position']:
+                current_side = position_context['current_position']['side']
+                
+                # Warn about counter-trend trades
+                if (current_side == 'LONG' and sig == 'SELL') or (current_side == 'SHORT' and sig == 'BUY'):
+                    payload['position_warning'] = f"Signal would reverse current {current_side} position"
+                
+                # Suggest position size based on current exposure
+                if position_context['current_position']['size'] >= 3:
+                    payload['suggested_size'] = 0  # No new positions
+                elif position_context['account_metrics']['risk_level'] == 'high':
+                    payload['suggested_size'] = 1  # Minimum size
+                else:
+                    payload['suggested_size'] = size
+        
+        # Add autonomous trade flag if present
+        if hasattr(strat, 'get') and strat.get('autonomous'):
+            payload['autonomous'] = True
+            payload['initiated_by'] = strat.get('initiated_by', 'unknown')
         
         resp = session.post(ai_url, json=payload, timeout=240)
         resp.raise_for_status()
@@ -702,9 +750,13 @@ def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url)
         data['regime'] = regime['primary_regime']
         data['regime_confidence'] = regime['confidence']
         
-        # Apply position sizing based on regime
+        # Apply position sizing based on regime and position context
         if 'size' in data and regime_rules['max_position_size'] > 0:
             data['size'] = min(data['size'], regime_rules['max_position_size'])
+            
+            # Further adjust based on position context
+            if position_context and 'suggested_size' in payload:
+                data['size'] = min(data['size'], payload['suggested_size'])
         
         return data
         
@@ -717,6 +769,49 @@ def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url)
             "reason": f"AI error: {str(e)}",
             "regime": "unknown",
             "error": True
+        }
+
+
+# New endpoint function to add to api.py
+def get_all_positions_summary() -> Dict:
+    """
+    Get a summary of all positions across all accounts
+    """
+    try:
+        from position_manager import PositionManager
+        pm = PositionManager(ACCOUNTS)
+        
+        summary = {
+            'accounts': {},
+            'total_positions': 0,
+            'total_pnl': 0,
+            'timestamp': datetime.now(CT).isoformat()
+        }
+        
+        cid = get_contract("CON.F.US.MES.M25")
+        
+        for account_name, acct_id in ACCOUNTS.items():
+            position_state = pm.get_position_state(acct_id, cid)
+            account_state = pm.get_account_state(acct_id)
+            
+            summary['accounts'][account_name] = {
+                'position': position_state,
+                'account_metrics': account_state
+            }
+            
+            if position_state['has_position']:
+                summary['total_positions'] += 1
+                summary['total_pnl'] += position_state['current_pnl']
+        
+        return summary
+        
+    except Exception as e:
+        logging.error(f"Error getting positions summary: {e}")
+        return {
+            'error': str(e),
+            'accounts': {},
+            'total_positions': 0,
+            'total_pnl': 0
         }
 
 def get_market_conditions_summary() -> Dict:
