@@ -340,15 +340,15 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
         .limit(1) \
         .execute()
     if recent.data:
-    rec = recent.data[0]
-    timestamp_str = rec.get('timestamp')
-    # Only parse if timestamp_str is not None or empty
-    timestamp = parser.parse(timestamp_str) if timestamp_str else None
-    if timestamp is not None and (now - timestamp).total_seconds() < cache_minutes * 60:
-        logging.info("Using cached regime analysis from Supabase.")
-        return rec['snapshot']
-    elif timestamp is None:
-        logging.warning(f"No valid timestamp in Supabase record: {rec}")
+        rec = recent.data[0]
+        timestamp_str = rec.get('timestamp')
+        # Only parse if timestamp_str is not None or empty
+        timestamp = parser.parse(timestamp_str) if timestamp_str else None
+        if timestamp is not None and (now - timestamp).total_seconds() < cache_minutes * 60:
+            logging.info("Using cached regime analysis from Supabase.")
+            return rec['snapshot']
+        elif timestamp is None:
+            logging.warning(f"No valid timestamp in Supabase record: {rec}")
 
     # If no recent cache, fetch fresh
     if timeframes is None:
