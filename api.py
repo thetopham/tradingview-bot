@@ -314,52 +314,56 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
 # Create global market regime analyzer
 market_regime_analyzer = MarketRegime()
 
-def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None) -> Dict:
+def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None, cache_minutes: int = 2) -> Dict:
     """
-    Fetch chart analysis from multiple timeframes via n8n
-    
-    Args:
-        n8n_base_url: Base URL for n8n instance
-        timeframes: List of timeframes to fetch (default: ['1m', '5m', '15m', '30m', '1h'])
-    
-    Returns:
-        Dict with timeframe data and regime analysis
+    Fetch multi-timeframe analysis, using Supabase cache if recent.
     """
+    import datetime
+    now = datetime.datetime.now(datetime.timezone.utc)
+    supabase_client = get_supabase_client()  # Implement this to return your client
+
+    # Try cache first
+    recent = supabase_client.table('latest_chart_analysis') \
+        .select('*') \
+        .order('timestamp', desc=True) \
+        .limit(1) \
+        .execute()
+    if recent.data:
+        rec = recent.data[0]
+        snapshot_time = rec['timestamp']
+        # Parse and check age
+        if (now - snapshot_time).total_seconds() < cache_minutes * 60:
+            logging.info("Using cached regime analysis from Supabase.")
+            return rec['snapshot']
+
+    # If no recent cache, fetch fresh
     if timeframes is None:
         timeframes = ['1m', '5m', '15m', '30m', '1h']
-    
     timeframe_data = {}
-    
     for tf in timeframes:
         try:
-            # Construct n8n webhook URL for each timeframe
             webhook_url = f"{n8n_base_url}/webhook/{tf}"
-            
-            # Call n8n workflow for chart analysis
             response = session.post(webhook_url, json={}, timeout=30)
             response.raise_for_status()
-            
-            # Parse response
             data = response.json()
             if isinstance(data, str):
-                # Sometimes n8n returns stringified JSON
                 data = json.loads(data)
-            
             timeframe_data[tf] = data
-            logging.info(f"Fetched {tf} analysis: signal={data.get('signal')}, trend={data.get('trend')}")
-            
         except Exception as e:
             logging.error(f"Failed to fetch {tf} analysis: {e}")
             timeframe_data[tf] = {}
-    
-    # Analyze market regime
     regime_analysis = market_regime_analyzer.analyze_regime(timeframe_data)
-    
-    return {
+    snapshot = {
         'timeframe_data': timeframe_data,
         'regime_analysis': regime_analysis,
-        'timestamp': datetime.now(CT).isoformat()
+        'timestamp': now.isoformat()
     }
+
+    # Save snapshot to Supabase
+    supabase_client.table('latest_chart_analysis').insert({'snapshot': snapshot, 'timestamp': now}).execute()
+
+    return snapshot
+
 
 def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url):
     """
