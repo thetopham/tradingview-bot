@@ -47,6 +47,28 @@ def post(path, payload):
     return data
 
 
+#Parameters -- /api/Order/place
+#Name	Type	Description	Required	Nullable
+#accountId	integer	The account ID.	Required	false
+#contractId	string	The contract ID.	Required	false
+#type	integer	The order type:
+#1 = Limit
+#2 = Market
+#4 = Stop
+#5 = TrailingStop
+#6 = JoinBid
+#7 = JoinAsk	Required	false
+#side	integer	The side of the order:
+#0 = Bid (buy)
+#1 = Ask (sell)	Required	false
+#size	integer	The size of the order.	Required	false
+#limitPrice	decimal	The limit price for the order, if applicable.	Optional	true
+#stopPrice	decimal	The stop price for the order, if applicable.	Optional	true
+#trailPrice	decimal	The trail price for the order, if applicable.	Optional	true
+#customTag	string	An optional custom tag for the order.	Optional	true
+#linkedOrderId	integer	The linked order id.	Optional	true
+
+
 def place_market(acct_id, cid, side, size):
     logging.info("Placing market order acct=%s cid=%s side=%s size=%s", acct_id, cid, side, size)
     return post("/api/Order/place", {
@@ -68,32 +90,111 @@ def place_stop(acct_id, cid, side, size, px):
         "type": 4, "side": side, "size": size, "stopPrice": px
     })
 
+# example of /api/Order/searchOpen return data
+#{
+#    "orders": [
+#        {
+#            "id": 26970,
+#            "accountId": 212,
+#            "contractId": "CON.F.US.EP.M25",
+#            "creationTimestamp": "2025-04-21T19:45:52.105808+00:00",
+#            "updateTimestamp": "2025-04-21T19:45:52.105808+00:00",
+#            "status": 1,
+#            "type": 4,
+#            "side": 1,
+#            "size": 1,
+#            "limitPrice": null,
+#            "stopPrice": 5138.000000000
+#        }
+#    ],
+#    "success": true,
+#    "errorCode": 0,
+#    "errorMessage": null
+#}
 def search_open(acct_id):
     orders = post("/api/Order/searchOpen", {"accountId": acct_id}).get("orders", [])
     logging.debug("Open orders for %s: %s", acct_id, orders)
     return orders
 
+#requires accountid and orderid
 def cancel(acct_id, order_id):
     resp = post("/api/Order/cancel", {"accountId": acct_id, "orderId": order_id})
     if not resp.get("success", True):
         logging.warning("Cancel reported failure: %s", resp)
     return resp
 
+#example of /api/Position/searchOpen return data
+#{
+#    "positions": [
+#        {
+#            "id": 6124,
+#            "accountId": 536,
+#            "contractId": "CON.F.US.GMET.J25",
+#            "creationTimestamp": "2025-04-21T19:52:32.175721+00:00",
+#            "type": 1,
+#            "size": 2,
+#            "averagePrice": 1575.750000000
+#        }
+#    ],
+#    "success": true,
+#    "errorCode": 0,
+#    "errorMessage": null
+#}
 def search_pos(acct_id):
     pos = post("/api/Position/searchOpen", {"accountId": acct_id}).get("positions", [])
     logging.debug("Open positions for %s: %s", acct_id, pos)
     return pos
 
+
+
+
+#requires accountid and contractid
 def close_pos(acct_id, cid):
     resp = post("/api/Position/closeContract", {"accountId": acct_id, "contractId": cid})
     if not resp.get("success", True):
         logging.warning("Close position reported failure: %s", resp)
     return resp
 
+#requires accountid and starttimestamp, optional endtimestamp
+#example of /api/trade/search return data
+#{
+#    "trades": [
+#        {
+#            "id": 8604,
+#            "accountId": 203,
+#            "contractId": "CON.F.US.EP.H25",
+#            "creationTimestamp": "2025-01-21T16:13:52.523293+00:00",
+#            "price": 6065.250000000,
+#            "profitAndLoss": 50.000000000,
+#            "fees": 1.4000,
+#            "side": 1,
+#            "size": 1,
+#            "voided": false,
+#            "orderId": 14328
+#        },
+#        {
+#            "id": 8603,
+#            "accountId": 203,
+#            "contractId": "CON.F.US.EP.H25",
+#            "creationTimestamp": "2025-01-21T16:13:04.142302+00:00",
+#            "price": 6064.250000000,
+#            "profitAndLoss": null,    //a null value indicates a half-turn trade
+#            "fees": 1.4000,
+#            "side": 0,
+#            "size": 1,
+#            "voided": false,
+#            "orderId": 14326
+#        }
+#    ],
+#    "success": true,
+#    "errorCode": 0,
+#    "errorMessage": null
+#}
 def search_trades(acct_id, since):
     trades = post("/api/Trade/search", {"accountId": acct_id, "startTimestamp": since.isoformat()}).get("trades", [])
     return trades
 
+#custom flatten function
 def flatten_contract(acct_id, cid, timeout=10):
     logging.info("Flattening contract %s for acct %s", cid, acct_id)
     end = time.time() + timeout
@@ -128,6 +229,7 @@ def flatten_contract(acct_id, cid, timeout=10):
     logging.error("Flatten timeout: %s still has %d orders, %d positions", cid, len(rem_orders), len(rem_pos))
     return False
 
+#custom cancel stops function
 def cancel_all_stops(acct_id, cid):
     for o in search_open(acct_id):
         if o["contractId"] == cid and o["type"] == 4:
@@ -181,7 +283,7 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url):
             "error": True
         }
 
-
+#custom phantom order function
 def check_for_phantom_orders(acct_id, cid):
   
     # 1. Check for open position(s)
@@ -207,7 +309,7 @@ def check_for_phantom_orders(acct_id, cid):
 
 
 
-
+#log results to supabase, important to collect results and compare against ai decision logic/hypothesis
 def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta=None):
     import json
     import time
@@ -324,6 +426,7 @@ def get_supabase_client() -> Client:
 
 # Create global market regime analyzer
 market_regime_analyzer = MarketRegime()
+
 
 def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None, cache_minutes: int = 2) -> Dict:
     """
