@@ -15,6 +15,7 @@ from typing import Dict, List
 
 session = requests.Session()
 config = load_config()
+ACCOUNTS = config['ACCOUNTS'] 
 OVERRIDE_CONTRACT_ID = config['OVERRIDE_CONTRACT_ID']
 PX_BASE = config['PX_BASE']
 SUPABASE_URL = config['SUPABASE_URL']
@@ -500,7 +501,7 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
                     try:
                         timestamp = parser.parse(timestamp_str)
                         # Use cached data if less than 5 minutes old
-                        if (now - timestamp).total_seconds() < 5 * 60:
+                        if not force_refresh and (now - timestamp).total_seconds() < 5 * 60:
                             snapshot_data = record.get('snapshot')
                             if snapshot_data:
                                 if isinstance(snapshot_data, str):
@@ -819,7 +820,7 @@ def get_all_positions_summary() -> Dict:
             'total_pnl': 0
         }
 
-def get_market_conditions_summary() -> Dict:
+def get_market_conditions_summary(force_refresh: bool = False) -> Dict:
     """
     Get a summary of current market conditions for logging
     """
@@ -831,7 +832,7 @@ def get_market_conditions_summary() -> Dict:
         else:
             n8n_base_url = n8n_ai_url.replace('/webhook', '')
         
-        market_analysis = fetch_multi_timeframe_analysis(n8n_base_url)
+        market_analysis = fetch_multi_timeframe_analysis(n8n_base_url, force_refresh=force_refresh)  # Pass it here
         
         # Handle the case where market_analysis might be a list or have unexpected structure
         if isinstance(market_analysis, list):
