@@ -353,7 +353,13 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
                     timestamp = parser.parse(timestamp_str)
                     if (now - timestamp).total_seconds() < cache_minutes * 60:
                         logging.info("Using cached regime analysis from Supabase.")
-                        return json.loads(rec['analysis_data'])
+                        cached_data = json.loads(rec['analysis_data'])
+                        
+                        # Validate cached data structure
+                        if isinstance(cached_data, dict) and 'regime_analysis' in cached_data:
+                            return cached_data
+                        else:
+                            logging.warning(f"Invalid cached data structure, fetching fresh data")
                 except Exception as e:
                     logging.warning(f"Error parsing cached timestamp: {e}")
     except Exception as e:
@@ -433,8 +439,18 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
                 if response.text.strip():
                     try:
                         data = response.json()
+                        
+                        # Handle different response formats
                         if isinstance(data, str):
                             data = json.loads(data)
+                        elif isinstance(data, list):
+                            # n8n might return array of items, take first
+                            if data:
+                                data = data[0]
+                            else:
+                                logging.error(f"Empty array response from {tf} webhook")
+                                return tf, {}
+                        
                         logging.info(f"Successfully fetched {tf} analysis")
                         return tf, data
                     except json.JSONDecodeError as e:
@@ -463,6 +479,7 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
                     }
 
     # Analyze regime with whatever data we have
+    logging.info(f"Analyzing regime with {len(timeframe_data)} timeframes of data")
     regime_analysis = market_regime_analyzer.analyze_regime(timeframe_data)
     
     # Create combined snapshot with URLs
@@ -612,7 +629,23 @@ def get_market_conditions_summary() -> Dict:
             n8n_base_url = n8n_ai_url.replace('/webhook', '')
         
         market_analysis = fetch_multi_timeframe_analysis(n8n_base_url)
-        regime = market_analysis['regime_analysis']
+        
+        # Handle the case where market_analysis might be a list or have unexpected structure
+        if isinstance(market_analysis, list):
+            # If it's a list, try to get the first item
+            if market_analysis:
+                market_analysis = market_analysis[0]
+            else:
+                raise ValueError("Empty market analysis list")
+                
+        # Ensure we have a dict
+        if not isinstance(market_analysis, dict):
+            raise ValueError(f"Unexpected market_analysis type: {type(market_analysis)}")
+        
+        # Get regime analysis, handle missing key
+        regime = market_analysis.get('regime_analysis', {})
+        if not regime:
+            raise ValueError("No regime_analysis in market data")
         
         # Handle missing trend_details gracefully
         trend_details = regime.get('trend_details', {})
