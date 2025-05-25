@@ -328,7 +328,7 @@ market_regime_analyzer = MarketRegime()
 def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None, cache_minutes: int = 2) -> Dict:
     """
     Fetch multi-timeframe analysis, using Supabase cache if recent.
-    Fixed to use proper cache table and handle n8n calls concurrently.
+    Enhanced to collect chart URLs for archival.
     """
     import datetime
     import concurrent.futures
@@ -364,6 +364,7 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
         timeframes = ['1m', '5m', '15m', '30m', '1h']
     
     timeframe_data = {}
+    chart_urls = {}  # NEW: Collect URLs for archival
     
     # Step 1: Check database cache for all timeframes first
     timeframes_needing_fetch = []
@@ -399,6 +400,11 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
                                 # Ensure we have a dictionary
                                 if isinstance(parsed_data, dict):
                                     timeframe_data[tf] = parsed_data
+                                    # Extract URL from cached data
+                                    chart_urls[tf] = {
+                                        "url": parsed_data.get("url"),
+                                        "chart_time": parsed_data.get("chart_time")
+                                    }
                                     logging.info(f"Using cached {tf} analysis from database")
                                     continue
                                 else:
@@ -421,7 +427,7 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
             """Fetch a single timeframe from n8n"""
             try:
                 webhook_url = f"{n8n_base_url}/webhook/{tf}"
-                response = session.post(webhook_url, json={}, timeout=60)
+                response = session.post(webhook_url, json={}, timeout=30)
                 response.raise_for_status()
                 
                 if response.text.strip():
@@ -450,14 +456,20 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
                 tf, data = future.result()
                 if data:
                     timeframe_data[tf] = data
+                    # Collect URL for archival
+                    chart_urls[tf] = {
+                        "url": data.get("url"),
+                        "chart_time": data.get("chart_time")
+                    }
 
     # Analyze regime with whatever data we have
     regime_analysis = market_regime_analyzer.analyze_regime(timeframe_data)
     
-    # Create combined snapshot
+    # Create combined snapshot with URLs
     snapshot = {
         'timeframe_data': timeframe_data,
         'regime_analysis': regime_analysis,
+        'chart_urls': chart_urls,  # NEW: Include URLs for archival
         'timestamp': now.isoformat()
     }
 
@@ -476,7 +488,7 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
 
 def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url):
     """
-    Enhanced AI trade decision that includes market regime analysis
+    Enhanced AI trade decision that includes market regime analysis and chart URLs
     """
     try:
         # Extract base URL properly
@@ -486,11 +498,12 @@ def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url)
             # Fallback: assume the URL structure
             n8n_base_url = ai_url.replace('/webhook', '')
         
-        # Get market regime analysis
+        # Get market regime analysis with chart URLs
         market_analysis = fetch_multi_timeframe_analysis(n8n_base_url)
         
         regime = market_analysis['regime_analysis']
         regime_rules = market_regime_analyzer.get_regime_trading_rules(regime['primary_regime'])
+        chart_urls = market_analysis.get('chart_urls', {})
         
         # Check if trading is recommended in this regime
         if not regime['trade_recommendation']:
@@ -516,7 +529,7 @@ def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url)
                 "error": False
             }
         
-        # Prepare enhanced payload for AI
+        # Prepare enhanced payload for AI with chart URLs for archival
         payload = {
             "account": account,
             "strategy": strat,
@@ -536,6 +549,15 @@ def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url)
             "regime_rules": regime_rules,
             "timeframe_signals": {
                 tf: data.get('signal', 'HOLD') 
+                for tf, data in market_analysis['timeframe_data'].items()
+            },
+            "chart_urls": chart_urls,  # NEW: Include chart URLs for archival
+            "support": {
+                tf: data.get('support', []) 
+                for tf, data in market_analysis['timeframe_data'].items()
+            },
+            "resistance": {
+                tf: data.get('resistance', []) 
                 for tf, data in market_analysis['timeframe_data'].items()
             }
         }
