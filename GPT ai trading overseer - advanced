@@ -1,5 +1,5 @@
 {
-  "name": "ai trading overseer - advanced slow",
+  "name": "GPT ai trading overseer - advanced",
   "nodes": [
     {
       "parameters": {
@@ -37,7 +37,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={\n  \"strategy\": \"brackmod\",\n  \"signal\": \"{{ $('Code').item.json.signal }}\",\n  \"timestamp\": \"{{ $('Code').item.json.timestamp }}\",\n  \"symbol\": \"{{ $('Code').item.json.symbol }}\",\n  \"account\": \"{{ $('Code').item.json.account }}\",\n  \"size\": {{ $('Code').item.json.size }},\n  \"ai_decision_id\": \"{{ $json.ai_decision_id }}\"\n}\n",
+        "responseBody": "={\n  \"strategy\": \"{{ $('Code').item.json.strategy }}\",\n  \"signal\": \"{{ $('Code').item.json.signal }}\",\n  \"timestamp\": \"{{ $('Code').item.json.timestamp }}\",\n  \"symbol\": \"{{ $('Code').item.json.symbol }}\",\n  \"account\": \"{{ $('Code').item.json.account }}\",\n  \"size\": {{ $('Code').item.json.size }},\n  \"ai_decision_id\": \"{{ $json.ai_decision_id }}\"\n}\n",
         "options": {}
       },
       "type": "n8n-nodes-base.respondToWebhook",
@@ -52,7 +52,7 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "=Today is {{ $now }}.\n\nYou are the lead day trading analyst for the Micro E-mini S&P 500 (MES).\n\nYou have received structured chart analysis JSON reports from multiple timeframes (tools available: 1m, 5m, 15m, 30m, 1h, 1D).\nEach report contains:\n- trade signal (BUY, SELL, HOLD),\n- trend,\n- rationale,\n- key support and resistance levels,\n- indicator states,\n- price action summary,\n- and other chart features.\n\n**Indicators referenced:**\n- ATR Crayon Candles: Green = bullish, Red = bearish\n- FSVZO\n- Phobos momentum\n- Fisher: Red H/R = hidden/regular bearish divergence; Green H/R = hidden/regular bullish divergence\n\n**Task:**  \n- Parse all JSON reports and extract signal, trend, rationale, support/resistance, momentum, and other key fields for each timeframe.\n- Determine the best overall trade signal for MES using the **brackmod** strategy, based on confluence (agreement) of signals, support/resistance alignment, and overall market regime.\n- If signals disagree, favor higher timeframes or signal with stronger supporting evidence.\n- Provide a concise reason referencing the most relevant timeframes, indicator evidence, and any major support/resistance levels affecting the decision.\n\nStrategy Options:\n\n- brackmod: A scalping strategy for small, quick profits in choppy/range markets. 2.5 and 5 pt TPs, 10pt SL.\n- pivot: A trend-following strategy for larger moves after breakouts from consolidation or S/R levels. Uses trailing stops and partial scaling.\n\n**Respond with valid JSON only** (no extra text, no triple backticks):\n\n{\n  \"strategy\": \"<brackmod|pivot>\",\n  \"signal\": \"BUY|SELL|HOLD\",\n  \"alert\": \"{{ $json.body.alert }}\",\n  \"timestamp\": \"{{ $now }}\",\n  \"entrylimit\": <float>,\n  \"tp1\": <float>,\n  \"tp2\": <float>,\n  \"tp3\": <float>,\n  \"sl\": <float>,\n  \"symbol\": \"CON.F.US.MES.M25\",\n  \"account\": \"{{ $json.body.account }}\",\n  \"size\": 3,\n  \"reason\": \"<Concise justification referencing the most important timeframes, S/R, and indicator signals>\",\n  \"trend\": {\n    \"5m\": \"<up|down|sideways|unknown>\",\n    \"15m\": \"<up|down|sideways|unknown>\",\n    \"1h\": \"<up|down|sideways|unknown>\"\n  },\n  \"urls\": {\n    \"5m\": \"<5m chart URL>\",\n    \"15m\": \"<15m chart URL>\",\n    \"1h\": \"<1h chart URL>\"\n  },\n  \"support\": {\n    \"5m\": [<float>, ...],\n    \"15m\": [<float>, ...],\n    \"1h\": [<float>, ...]\n  },\n  \"resistance\": {\n    \"5m\": [<float>, ...],\n    \"15m\": [<float>, ...],\n    \"1h\": [<float>, ...]\n  }\n}\n",
+        "text": "=Today is {{ $now }}.\n\nYou are the lead day trading analyst for the Micro E-mini S&P 500 (MES).\n\nYou have received structured chart analysis JSON reports from multiple timeframes (tools available: 1m, 5m, 15m, 30m, 1h, 1D).\nEach report contains:\n- trade signal (BUY, SELL, HOLD),\n- trend,\n- rationale,\n- key support and resistance levels,\n- indicator states,\n- price action summary,\n- and other chart features.\n\n**REGIME COORDINATION RULES:**\n1. If a majority of timeframes show \"strong_trend\", ONLY trade with the trend.\n2. If 1m shows divergence but 5m+ in strong trend = IGNORE 1m.\n3. If 15m+ shows divergence after extended move = RESPECT it.\n4. Count trend trades today - if 3+ losses trying to catch reversal = STOP fighting trend.\n\n**POSITION SIZING BY REGIME:**\n- Strong trend continuation: Full size (3).\n- Weak trend reversal: Reduced size (2).\n- First counter-trend attempt: Minimum size (1).\n- Range trades at extremes: Full size (3).\n\n**Indicators referenced:**\n- ATR Crayon Candles: Green = bullish, Red = bearish\n- FSVZO\n- Phobos momentum\n- Fisher: Red H/R = hidden/regular bearish divergence; Green H/R = hidden/regular bullish divergence\n\n**Task:**  \n- Parse all JSON reports and extract signal, trend, rationale, support/resistance, momentum, and other key fields for each timeframe.\n- Determine the best overall trade signal for MES using the available strategies, based on confluence (agreement) of signals, support/resistance alignment, and overall market regime.\n- If signals disagree, favor higher timeframes **only if lower timeframes confirm with momentum and price action**. Do NOT continue to buy in an uptrend if lower timeframes show loss of momentum, bearish divergence, or topping price structure.\n- If higher timeframes are trending up but the 5m/15m show bearish momentum (e.g., Phobos momentum turns red, FSVZO crosses below zero, Fisher shows bearish divergence), or price forms lower highs/lows, avoid new longs—prefer HOLD, or SELL if evidence is strong.\n- Only buy if **both** trend and momentum are aligned up on higher and lower timeframes.\n- If trend is up but lower timeframes are mixed, stand aside (HOLD) or only take low-risk scalps at clear support.\n- After an extended trend, if volume drops, ATR contracts, or price stalls, avoid new trades or take partial profits.\n- In choppy or sideways regimes, favor brackmod for scalps, only take bracket or pivot if breakout with strong volume and confirmation.\n- Avoid new trades late in the session or in thin liquidity.\n- Reference volume, ATR, and price structure in your rationale.\n- Choose \"size\" dynamically for each trade, based on the POSITION SIZING BY REGIME rules above.\n- In your \"reason\" and \"regime_notes\", always justify your signal, strategy, and size by referencing specific regime rules or coordination guidelines from above.\n- If a rule requires you to avoid a trade (e.g., too many failed reversals today, or lower timeframe divergence in a strong trend), return \"signal\": \"HOLD\" and explain clearly.\n- Your \"reason\", \"regime_notes\", and \"sizing_rationale\" **must reference the specific regime or sizing rules used from above. If no trade is recommended, clearly cite which rule blocked the trade (e.g., reversal losses filter, lower TF divergence, etc.).”\n\n**Strategy Options:**\n- bracket: bracket orders strategy. 2.5, 5, 10 pt TPs, 10pt SL.\n- brackmod: mod of bracket scalping strategy for small, quick profits in choppy/range markets. 2 contracts at 2.5 and 5 pt TPs, 10pt SL.\n- pivot: trend-following strategy for larger moves after breakouts from consolidation or S/R levels. Uses trailing stops and partial scaling.\n\n**Respond with valid JSON only** (no extra text, no triple backticks):\n\n{\n  \"strategy\": \"<bracket|brackmod|pivot>\",\n  \"signal\": \"BUY|SELL|HOLD\",\n  \"alert\": \"{{ $json.body.alert }}\",\n  \"timestamp\": \"{{ $now }}\",\n  \"entrylimit\": <float>,\n  \"tp1\": <float>,\n  \"tp2\": <float>,\n  \"tp3\": <float>,\n  \"sl\": <float>,\n  \"symbol\": \"CON.F.US.MES.M25\",\n  \"account\": \"{{ $json.body.account }}\",\n  \"size\": <1|2|3>,\n  \"reason\": \"<Concise justification referencing the most important timeframes, S/R, and indicator signals. Explicitly mention if higher timeframe trend is not confirmed by lower timeframe momentum or price action.>\",\n  \"regime_notes\": \"<brief summary of which rules triggered and why>\",\n  \"sizing_rationale\": \"<explain chosen size>\",\n  \"trend\": {\n    \"5m\": \"<up|down|sideways|unknown>\",\n    \"15m\": \"<up|down|sideways|unknown>\",\n    \"1h\": \"<up|down|sideways|unknown>\"\n  },\n  \"urls\": {\n    \"5m\": {\n      \"url\": \"<5m chart URL>\",\n      \"chart_time\": \"<5m chart_time>\"\n    },\n    \"15m\": {\n      \"url\": \"<15m chart URL>\",\n      \"chart_time\": \"<15m chart_time>\"\n    },\n    \"1h\": {\n      \"url\": \"<1h chart URL>\",\n      \"chart_time\": \"<1h chart_time>\"\n    }\n  },\n  \"support\": {\n    \"5m\": [<float>, ...],\n    \"15m\": [<float>, ...],\n    \"1h\": [<float>, ...]\n  },\n  \"resistance\": {\n    \"5m\": [<float>, ...],\n    \"15m\": [<float>, ...],\n    \"1h\": [<float>, ...]\n  }\n}\n",
         "options": {}
       },
       "type": "@n8n/n8n-nodes-langchain.agent",
@@ -68,9 +68,9 @@
       "parameters": {
         "model": {
           "__rl": true,
-          "value": "gpt-4o",
+          "value": "gpt-4.1",
           "mode": "list",
-          "cachedResultName": "gpt-4o"
+          "cachedResultName": "gpt-4.1"
         },
         "options": {}
       },
@@ -516,7 +516,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Handles both object and possible stringified JSON (defensive!)\nlet urls = $json.urls;\nif (typeof urls === 'string') {\n  urls = JSON.parse(urls);\n}\n\nconst id = $json.ai_decision_id || $json.timestamp || 'unknown_id';\nconst out = [];\nfor (const tf in urls) {\n  const url = urls[tf];\n  if (typeof url === \"string\" && url.startsWith(\"http\")) {\n    out.push({\n      json: {\n        timeframe: tf,\n        url,\n        id\n      }\n    });\n  }\n}\nreturn out;\n"
+        "jsCode": "let urls = $json.urls;\nif (typeof urls === 'string') {\n  urls = JSON.parse(urls);\n}\n\nconst id = $json.ai_decision_id || $json.timestamp || 'unknown_id';\nconst out = [];\nfor (const tf in urls) {\n  const entry = urls[tf];\n  // Check that entry is an object with url and chart_time fields\n  if (entry && typeof entry === \"object\" && typeof entry.url === \"string\") {\n    out.push({\n      json: {\n        timeframe: tf,\n        url: entry.url,\n        chart_time: entry.chart_time,\n        id\n      }\n    });\n  }\n}\nreturn out;\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -548,6 +548,12 @@
               "name": "id",
               "value": "={{ $('Code1').item.json.id }}",
               "type": "number"
+            },
+            {
+              "id": "b5c9f6f5-0d42-4303-9716-9c88bf061b12",
+              "name": "chart_time",
+              "value": "={{ $('Code1').item.json.chart_time }}",
+              "type": "string"
             }
           ]
         },
@@ -569,7 +575,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3820,
+        3840,
         460
       ],
       "id": "722d306f-8abe-4986-ad23-e9457b7f5c85",
@@ -598,6 +604,58 @@
       ],
       "id": "291bd60d-94b0-4218-9482-12f34185d6ff",
       "name": "Supabase1",
+      "retryOnFail": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "items.forEach(item => {\n  if (item.json.chart_time) {\n    // Replace T with space\n    let time = item.json.chart_time.replace('T', ' ');\n    // Remove timezone if present (matches +00:00 or -06:00 or Z at the end)\n    time = time.replace(/([+-]\\d{2}:\\d{2}|Z)$/, '');\n    // Trim any spaces at the end\n    item.json.chart_time = time.trim();\n  }\n});\nreturn items;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3840,
+        660
+      ],
+      "id": "2f8212c2-eb7d-4361-bb26-0e4dab5c2ee1",
+      "name": "Code3"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "chart_analysis",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "chart_time",
+              "condition": "eq",
+              "keyValue": "={{ $json.chart_time }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "url",
+              "fieldValue": "={{ $json.url }}\n"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        4040,
+        660
+      ],
+      "id": "e00c3a60-f7da-4bb0-ab00-c92720163985",
+      "name": "updates chart_analysis urls",
       "retryOnFail": true,
       "credentials": {
         "supabaseApi": {
@@ -861,6 +919,11 @@
             "node": "Code2",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Code3",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -875,14 +938,30 @@
           }
         ]
       ]
+    },
+    "Supabase1": {
+      "main": [
+        []
+      ]
+    },
+    "Code3": {
+      "main": [
+        [
+          {
+            "node": "updates chart_analysis urls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
-  "active": true,
+  "active": false,
   "settings": {
     "callerPolicy": "workflowsFromSameOwner",
     "executionOrder": "v1"
   },
-  "versionId": "fb36210f-42fe-4479-a8b8-b965b6060bc2",
+  "versionId": "d71b3436-c457-41d3-8f81-0e63fb7349c2",
   "meta": {
     "templateId": "2569",
     "templateCredsSetupCompleted": true,
