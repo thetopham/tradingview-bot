@@ -28,6 +28,35 @@ def start_scheduler(app):
     
     # Original 5-minute cron job
     def cron_job():
+        """Runs 5 seconds after each 5-min candle close to fetch fresh charts"""
+        logging.info("[APScheduler] Fetching fresh charts after candle close")
+    
+        # Force a complete cache refresh
+        from api import fetch_multi_timeframe_analysis, get_supabase_client
+    
+        try:
+            # Clear any existing cache first
+            supabase = get_supabase_client()
+            cutoff = (datetime.utcnow() - timedelta(seconds=30)).isoformat()
+            supabase.table('market_regime_cache').delete().lt('timestamp', cutoff).execute()
+        
+            # Get n8n base URL
+            n8n_base_url = config.get('N8N_AI_URL', '').split('/webhook/')[0]
+        
+            # Force fetch fresh charts from n8n (this will update the cache)
+            market_analysis = fetch_multi_timeframe_analysis(
+                n8n_base_url,
+                timeframes=['1m', '5m', '15m', '30m', '1h'],
+                cache_minutes=0,  # Don't use cache
+                force_refresh=True  # Force fresh fetch
+            )
+        
+            logging.info(f"[APScheduler] Fresh charts fetched and cached at {datetime.now(CT)}")
+        
+        except Exception as e:
+            logging.error(f"[APScheduler] Chart fetch failed: {e}")
+    
+        # Then run the normal webhook
         data = {
             "secret": WEBHOOK_SECRET,
             "strategy": "",
@@ -35,13 +64,13 @@ def start_scheduler(app):
             "signal": "",
             "symbol": "CON.F.US.MES.M25",
             "size": 3,
-            "alert": f"APScheduler 5m"
+            "alert": f"APScheduler 5m - candle close"
         }
         try:
             response = requests.post(f'http://localhost:{TV_PORT}/webhook', json=data)
-            logging.info(f"[APScheduler] HTTP POST call: {response.status_code} {response.text}")
+            logging.info(f"[APScheduler] Webhook call: {response.status_code}")
         except Exception as e:
-            logging.error(f"[APScheduler] HTTP POST failed: {e}")
+            logging.error(f"[APScheduler] Webhook failed: {e}")
     
     # Market analysis job - runs every 15 minutes
     def market_analysis_job():
