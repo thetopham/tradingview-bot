@@ -7,14 +7,24 @@ import logging
 import requests
 from config import load_config
 from api import get_market_conditions_summary
+from position_manager import PositionManager
+from strategies import run_bracket
 
 config = load_config()
 WEBHOOK_SECRET = config['WEBHOOK_SECRET']
 CT = pytz.timezone("America/Chicago")
 TV_PORT = config['TV_PORT']
+ACCOUNTS = config['ACCOUNTS']
+
+# Global position manager instance
+position_manager = None
 
 def start_scheduler(app):
+    global position_manager
     scheduler = BackgroundScheduler()
+    
+    # Initialize position manager
+    position_manager = PositionManager(ACCOUNTS)
     
     # Original 5-minute cron job
     def cron_job():
@@ -57,6 +67,80 @@ def start_scheduler(app):
         except Exception as e:
             logging.error(f"[Market Analysis] Error: {e}")
     
+    # Position management job - runs every 2 minutes
+    def position_management_job():
+        """Manage existing positions and look for opportunities"""
+        try:
+            logging.info("🔄 Running position management check...")
+            
+            from api import get_contract
+            cid = get_contract("CON.F.US.MES.M25")
+            
+            for account_name, acct_id in ACCOUNTS.items():
+                try:
+                    # Get position state
+                    position_state = position_manager.get_position_state(acct_id, cid)
+                    
+                    # If we have a position, manage it
+                    if position_state['has_position']:
+                        logging.info(f"Managing position for {account_name}: "
+                                   f"{position_state['size']} contracts, "
+                                   f"P&L: ${position_state['current_pnl']:.2f}")
+                        
+                        result = position_manager.manage_position(acct_id, cid, position_state)
+                        if result['action'] != 'none':
+                            logging.info(f"Position action taken: {result}")
+                    
+                    # If no position, check for opportunities (only during market hours)
+                    else:
+                        from auth import in_get_flat
+                        from datetime import datetime
+                        
+                        now = datetime.now(CT)
+                        if not in_get_flat(now):
+                            opportunity = position_manager.scan_for_opportunities(acct_id, account_name)
+                            if opportunity:
+                                logging.info(f"🎯 Autonomous trade opportunity detected for {account_name}")
+                                # Execute the trade
+                                from threading import Thread
+                                Thread(target=execute_autonomous_trade, args=(opportunity,)).start()
+                                
+                except Exception as e:
+                    logging.error(f"[Position Management] Error for {account_name}: {e}")
+                    
+        except Exception as e:
+            logging.error(f"[Position Management] General error: {e}")
+    
+    # Account health check - runs every 30 minutes
+    def account_health_check():
+        """Monitor account health and risk metrics"""
+        try:
+            logging.info("🏥 Running account health check...")
+            
+            for account_name, acct_id in ACCOUNTS.items():
+                try:
+                    account_state = position_manager.get_account_state(acct_id)
+                    
+                    # Log account metrics
+                    logging.info(f"Account {account_name}: "
+                               f"Daily P&L: ${account_state['daily_pnl']:.2f} | "
+                               f"Win Rate: {account_state['win_rate']:.1%} | "
+                               f"Risk: {account_state['risk_level']} | "
+                               f"Can Trade: {account_state['can_trade']}")
+                    
+                    # Warnings
+                    if not account_state['can_trade']:
+                        logging.warning(f"⛔ Account {account_name} CANNOT TRADE - Risk limits hit")
+                    
+                    if account_state['risk_level'] == 'high':
+                        logging.warning(f"⚠️ Account {account_name} at HIGH RISK")
+                        
+                except Exception as e:
+                    logging.error(f"[Account Health] Error for {account_name}: {e}")
+                    
+        except Exception as e:
+            logging.error(f"[Account Health] General error: {e}")
+    
     # Pre-session analysis jobs
     def pre_session_analysis(session_name):
         """Run analysis before each major session"""
@@ -87,6 +171,12 @@ def start_scheduler(app):
                 else:
                     logging.info(f"✅ {session_name} session conditions look favorable "
                                f"for {summary['regime']} regime")
+                    
+                # Check account readiness
+                for account_name, acct_id in ACCOUNTS.items():
+                    account_state = position_manager.get_account_state(acct_id)
+                    if not account_state['can_trade']:
+                        logging.warning(f"Account {account_name} not ready for {session_name} session")
                                
         except Exception as e:
             logging.error(f"[Pre-session Analysis] Error: {e}")
@@ -104,6 +194,23 @@ def start_scheduler(app):
         market_analysis_job,
         CronTrigger(minute='0,15,30,45', second=30, timezone=CT),
         id='market_analysis',
+        replace_existing=True
+    )
+    
+    # Position management every 2 minutes (offset from main cron)
+    scheduler.add_job(
+        position_management_job,
+        CronTrigger(minute='1,3,6,8,11,13,16,18,21,23,26,28,31,33,36,38,41,43,46,48,51,53,56,58', 
+                   second=0, timezone=CT),
+        id='position_management',
+        replace_existing=True
+    )
+    
+    # Account health check every 30 minutes
+    scheduler.add_job(
+        account_health_check,
+        CronTrigger(minute='0,30', second=45, timezone=CT),
+        id='account_health',
         replace_existing=True
     )
     
@@ -133,6 +240,60 @@ def start_scheduler(app):
     )
     
     scheduler.start()
-    logging.info("[APScheduler] Scheduler started with market monitoring jobs")
+    logging.info("[APScheduler] Scheduler started with market monitoring and position management jobs")
     
     return scheduler
+
+
+def execute_autonomous_trade(trade_decision):
+    """Execute an autonomous trade decision"""
+    try:
+        from api import get_contract, ai_trade_decision_with_regime
+        
+        acct_id = ACCOUNTS.get(trade_decision['account'])
+        if not acct_id:
+            logging.error(f"Unknown account: {trade_decision['account']}")
+            return
+        
+        # Get AI validation for autonomous trade
+        ai_endpoints = {
+            "epsilon": config['N8N_AI_URL'],
+            "beta": config['N8N_AI_URL'],
+        }
+        
+        ai_url = ai_endpoints.get(trade_decision['account'])
+        if ai_url:
+            # Add autonomous flag to help AI understand context
+            trade_decision['autonomous'] = True
+            trade_decision['initiated_by'] = 'position_manager'
+            
+            ai_decision = ai_trade_decision_with_regime(
+                trade_decision['account'],
+                trade_decision['strategy'],
+                trade_decision['signal'],
+                trade_decision['symbol'],
+                trade_decision['size'],
+                trade_decision['alert'],
+                ai_url
+            )
+            
+            if ai_decision.get("signal", "").upper() not in ("BUY", "SELL"):
+                logging.info(f"AI blocked autonomous trade: {ai_decision.get('reason', 'No reason')}")
+                return
+            
+            # Execute the trade
+            run_bracket(
+                acct_id,
+                trade_decision['symbol'],
+                ai_decision['signal'],
+                ai_decision['size'],
+                ai_decision['alert'],
+                ai_decision.get('ai_decision_id')
+            )
+            
+            logging.info(f"✅ Autonomous trade executed: {ai_decision['signal']} {ai_decision['size']} contracts")
+        else:
+            logging.error(f"No AI endpoint for account {trade_decision['account']}")
+            
+    except Exception as e:
+        logging.error(f"Error executing autonomous trade: {e}")
