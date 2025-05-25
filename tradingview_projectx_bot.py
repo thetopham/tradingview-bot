@@ -145,14 +145,16 @@ def handle_webhook_logic(data):
             logging.info("In get-flat window, no trades processed")
             return
         
-        # Get current market session
+       # Get current market session
         session_name, session_info = get_current_session(now)
         logging.info(f"Current session: {session_name} - {session_info['characteristics']}")
         
         # Apply session-based rules
         if session_name == 'NY_LUNCH':
-            logging.info("Skipping trade during NY lunch session (choppy market)")
-            return
+            logging.info("NY lunch session - reducing position size and requiring higher confidence")
+            # Don't return here - let the trade continue but the AI will adjust
+            # The regime analysis will likely show "choppy" during lunch
+            # which will naturally reduce position sizes
         
         if session_name == 'OFF_HOURS':
             logging.info("Market closed, skipping trade")
@@ -198,6 +200,10 @@ def handle_webhook_logic(data):
                 if regime in ['choppy', 'breakout']:
                     size = max(1, size - 1)
                     logging.info(f"Reduced position size to {size} for NY morning + {regime} regime")
+            elif session_name == 'NY_LUNCH':  # <-- ADD THIS
+                # Lunch session - always reduce size by 1
+                size = max(1, size - 1)
+                logging.info(f"Reduced position size to {size} for NY lunch session")
             elif session_name == 'ASIAN':
                 # Low volatility session - might increase size for trending markets
                 if regime in ['trending_up', 'trending_down'] and regime_confidence > 80:
