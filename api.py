@@ -10,6 +10,7 @@ from auth import ensure_token, get_token
 from config import load_config
 from dateutil import parser
 from market_regime import MarketRegime
+from supabase import create_client, Client
 
 session = requests.Session()
 config = load_config()
@@ -307,6 +308,15 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
 
     except Exception as e:
         logging.error(f"[log_trade_results_to_supabase] Outer error: {e}")
+
+
+
+def get_supabase_client() -> Client:
+    url = SUPABASE_URL
+    key = SUPABASE_KEY
+    supabase: Client = create_client(url, key)
+    return supabase
+
 
 
 #regime updates
