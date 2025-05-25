@@ -1,5 +1,5 @@
 {
-  "name": "GPT ai trading overseer - advanced",
+  "name": "GPT ai trading overseer - regime",
   "nodes": [
     {
       "parameters": {
@@ -8,7 +8,7 @@
         "width": 507,
         "color": 7
       },
-      "id": "958982e0-c63a-4927-9d1f-eda677989faa",
+      "id": "6a2649d3-45e0-42d2-a662-88f631426dac",
       "name": "Sticky Note5",
       "type": "n8n-nodes-base.stickyNote",
       "position": [
@@ -20,19 +20,19 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "5c793395-f218-4a49-a620-51d297f2dbfb",
+        "path": "regime",
         "responseMode": "responseNode",
         "options": {}
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
-        1000,
+        940,
         360
       ],
-      "id": "c6e63068-d807-40c3-b1d9-64502f60b566",
+      "id": "cbe7ef33-d1d7-4f3a-a929-cea67ee4bc55",
       "name": "Webhook",
-      "webhookId": "5c793395-f218-4a49-a620-51d297f2dbfb"
+      "webhookId": "f8e1bc5e-0693-42d3-bb80-67d44a13255c"
     },
     {
       "parameters": {
@@ -43,26 +43,11 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.2,
       "position": [
-        2920,
+        3360,
         180
       ],
-      "id": "f89a2afa-400c-4bd2-bed3-ebf2aa1989da",
+      "id": "d0bbf29e-e049-4231-881d-8ec8b34bbc32",
       "name": "Respond to Webhook"
-    },
-    {
-      "parameters": {
-        "promptType": "define",
-        "text": "=Today is {{ $now }}.\n\nYou are the lead day trading analyst for the Micro E-mini S&P 500 (MES).\n\nYou have received structured chart analysis JSON reports from multiple timeframes (tools available: 1m, 5m, 15m, 30m, 1h, 1D).\nEach report contains:\n- trade signal (BUY, SELL, HOLD),\n- trend,\n- rationale,\n- key support and resistance levels,\n- indicator states,\n- price action summary,\n- and other chart features.\n\n**REGIME COORDINATION RULES:**\n1. If a majority of timeframes show \"strong_trend\", ONLY trade with the trend.\n2. If 1m shows divergence but 5m+ in strong trend = IGNORE 1m.\n3. If 15m+ shows divergence after extended move = RESPECT it.\n4. Count trend trades today - if 3+ losses trying to catch reversal = STOP fighting trend.\n\n**POSITION SIZING BY REGIME:**\n- Strong trend continuation: Full size (3).\n- Weak trend reversal: Reduced size (2).\n- First counter-trend attempt: Minimum size (1).\n- Range trades at extremes: Full size (3).\n\n**Indicators referenced:**\n- ATR Crayon Candles: Green = bullish, Red = bearish\n- FSVZO\n- Phobos momentum\n- Fisher: Red H/R = hidden/regular bearish divergence; Green H/R = hidden/regular bullish divergence\n\n**Task:**  \n- Parse all JSON reports and extract signal, trend, rationale, support/resistance, momentum, and other key fields for each timeframe.\n- Determine the best overall trade signal for MES using the available strategies, based on confluence (agreement) of signals, support/resistance alignment, and overall market regime.\n- If signals disagree, favor higher timeframes **only if lower timeframes confirm with momentum and price action**. Do NOT continue to buy in an uptrend if lower timeframes show loss of momentum, bearish divergence, or topping price structure.\n- If higher timeframes are trending up but the 5m/15m show bearish momentum (e.g., Phobos momentum turns red, FSVZO crosses below zero, Fisher shows bearish divergence), or price forms lower highs/lows, avoid new longs—prefer HOLD, or SELL if evidence is strong.\n- Only buy if **both** trend and momentum are aligned up on higher and lower timeframes.\n- If trend is up but lower timeframes are mixed, stand aside (HOLD) or only take low-risk scalps at clear support.\n- After an extended trend, if volume drops, ATR contracts, or price stalls, avoid new trades or take partial profits.\n- In choppy or sideways regimes, favor brackmod for scalps, only take bracket or pivot if breakout with strong volume and confirmation.\n- Avoid new trades late in the session or in thin liquidity.\n- Reference volume, ATR, and price structure in your rationale.\n- Choose \"size\" dynamically for each trade, based on the POSITION SIZING BY REGIME rules above.\n- In your \"reason\" and \"regime_notes\", always justify your signal, strategy, and size by referencing specific regime rules or coordination guidelines from above.\n- If a rule requires you to avoid a trade (e.g., too many failed reversals today, or lower timeframe divergence in a strong trend), return \"signal\": \"HOLD\" and explain clearly.\n- Your \"reason\", \"regime_notes\", and \"sizing_rationale\" **must reference the specific regime or sizing rules used from above. If no trade is recommended, clearly cite which rule blocked the trade (e.g., reversal losses filter, lower TF divergence, etc.).”\n\n**Strategy Options:**\n- bracket: bracket orders strategy. 2.5, 5, 10 pt TPs, 10pt SL.\n- brackmod: mod of bracket scalping strategy for small, quick profits in choppy/range markets. 2 contracts at 2.5 and 5 pt TPs, 10pt SL.\n- pivot: trend-following strategy for larger moves after breakouts from consolidation or S/R levels. Uses trailing stops and partial scaling.\n\n**Respond with valid JSON only** (no extra text, no triple backticks):\n\n{\n  \"strategy\": \"<bracket|brackmod|pivot>\",\n  \"signal\": \"BUY|SELL|HOLD\",\n  \"alert\": \"{{ $json.body.alert }}\",\n  \"timestamp\": \"{{ $now }}\",\n  \"entrylimit\": <float>,\n  \"tp1\": <float>,\n  \"tp2\": <float>,\n  \"tp3\": <float>,\n  \"sl\": <float>,\n  \"symbol\": \"CON.F.US.MES.M25\",\n  \"account\": \"{{ $json.body.account }}\",\n  \"size\": <1|2|3>,\n  \"reason\": \"<Concise justification referencing the most important timeframes, S/R, and indicator signals. Explicitly mention if higher timeframe trend is not confirmed by lower timeframe momentum or price action.>\",\n  \"regime_notes\": \"<brief summary of which rules triggered and why>\",\n  \"sizing_rationale\": \"<explain chosen size>\",\n  \"trend\": {\n    \"5m\": \"<up|down|sideways|unknown>\",\n    \"15m\": \"<up|down|sideways|unknown>\",\n    \"1h\": \"<up|down|sideways|unknown>\"\n  },\n  \"urls\": {\n    \"5m\": {\n      \"url\": \"<5m chart URL>\",\n      \"chart_time\": \"<5m chart_time>\"\n    },\n    \"15m\": {\n      \"url\": \"<15m chart URL>\",\n      \"chart_time\": \"<15m chart_time>\"\n    },\n    \"1h\": {\n      \"url\": \"<1h chart URL>\",\n      \"chart_time\": \"<1h chart_time>\"\n    }\n  },\n  \"support\": {\n    \"5m\": [<float>, ...],\n    \"15m\": [<float>, ...],\n    \"1h\": [<float>, ...]\n  },\n  \"resistance\": {\n    \"5m\": [<float>, ...],\n    \"15m\": [<float>, ...],\n    \"1h\": [<float>, ...]\n  }\n}\n",
-        "options": {}
-      },
-      "type": "@n8n/n8n-nodes-langchain.agent",
-      "typeVersion": 1.9,
-      "position": [
-        1620,
-        360
-      ],
-      "id": "7d85dcad-a3b2-41bb-b796-59da100ce19f",
-      "name": "AI Agent"
     },
     {
       "parameters": {
@@ -77,10 +62,10 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.2,
       "position": [
-        1280,
-        820
+        2060,
+        700
       ],
-      "id": "71ab7622-50e7-44e8-bec3-c21a9036eab7",
+      "id": "886b4e0d-3e1f-4c65-9058-76557fe20ba1",
       "name": "OpenAI Chat Model1",
       "credentials": {
         "openAiApi": {
@@ -90,159 +75,15 @@
       }
     },
     {
-      "parameters": {
-        "workflowId": {
-          "__rl": true,
-          "value": "7g4qjNktNsBh7U9Q",
-          "mode": "list",
-          "cachedResultName": "5m"
-        },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {},
-          "matchingColumns": [],
-          "schema": [],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
-        }
-      },
-      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
-      "typeVersion": 2.2,
-      "position": [
-        1520,
-        820
-      ],
-      "id": "599e7c39-df3d-4213-90b9-dc2a03c71914",
-      "name": "5m"
-    },
-    {
-      "parameters": {
-        "workflowId": {
-          "__rl": true,
-          "value": "rxR7U0MjxtZBOjwm",
-          "mode": "list",
-          "cachedResultName": "1h"
-        },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {},
-          "matchingColumns": [],
-          "schema": [],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
-        }
-      },
-      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
-      "typeVersion": 2.2,
-      "position": [
-        1840,
-        820
-      ],
-      "id": "55f7479f-067b-4c40-b5d8-68a3d018ceb1",
-      "name": "1h"
-    },
-    {
-      "parameters": {
-        "url": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('URL', ``, 'string') }}",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequestTool",
-      "typeVersion": 4.2,
-      "position": [
-        2060,
-        820
-      ],
-      "id": "b44fb7eb-8fb3-4ea1-86bd-f82dc08e8539",
-      "name": "HTTP Request1"
-    },
-    {
       "parameters": {},
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        1000,
+        940,
         540
       ],
-      "id": "4dbe96dc-5b1f-43b7-b1f4-8e481f02b866",
+      "id": "4ed97c80-2123-404b-b7fe-e63f606b7472",
       "name": "When clicking ‘Test workflow’"
-    },
-    {
-      "parameters": {
-        "workflowId": {
-          "__rl": true,
-          "value": "KWlHcm2igwb0181Y",
-          "mode": "list",
-          "cachedResultName": "30m"
-        },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {},
-          "matchingColumns": [],
-          "schema": [],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
-        }
-      },
-      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
-      "typeVersion": 2.2,
-      "position": [
-        1720,
-        820
-      ],
-      "id": "0681e2d1-b4e0-459c-836b-4798199772d2",
-      "name": "30m"
-    },
-    {
-      "parameters": {
-        "workflowId": {
-          "__rl": true,
-          "value": "BKwZ2BR9J6CjMVDk",
-          "mode": "list",
-          "cachedResultName": "1m"
-        },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {},
-          "matchingColumns": [],
-          "schema": [],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
-        }
-      },
-      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
-      "typeVersion": 2.2,
-      "position": [
-        1420,
-        820
-      ],
-      "id": "c1c29dd4-df7c-412d-8c92-3f264f36a6ab",
-      "name": "1m"
-    },
-    {
-      "parameters": {
-        "workflowId": {
-          "__rl": true,
-          "value": "9nwRDbDa2ShB5VRQ",
-          "mode": "list",
-          "cachedResultName": "1D"
-        },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {},
-          "matchingColumns": [],
-          "schema": [],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
-        }
-      },
-      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
-      "typeVersion": 2.2,
-      "position": [
-        1940,
-        820
-      ],
-      "id": "65f0c789-d788-4979-a907-9f16d96b36fa",
-      "name": "1D"
     },
     {
       "parameters": {
@@ -252,10 +93,10 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        2440,
+        2880,
         180
       ],
-      "id": "38b120b7-e069-46ce-be3b-12cbb9bcfd7d",
+      "id": "27a52fa0-c481-4b31-8988-bef414dfbf03",
       "name": "Supabase",
       "credentials": {
         "supabaseApi": {
@@ -266,15 +107,15 @@
     },
     {
       "parameters": {
-        "jsCode": "return [ JSON.parse($input.first().json.output) ];\n"
+        "jsCode": "let raw = $input.first().json.text;\n\n// Strip code block markers, leading/trailing quotes, and whitespace\nraw = raw.trim()\n    .replace(/^```json\\s*/i, '')\n    .replace(/^```\\s*/i, '')\n    .replace(/```$/i, '')\n    .replace(/^'|'$/g, '');\n\nreturn [ JSON.parse(raw) ];\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2160,
+        2600,
         180
       ],
-      "id": "9552e115-39a4-40b5-89bc-c7d8789f08b9",
+      "id": "79fce8f0-64c1-43c1-8400-5a21e1526198",
       "name": "Code"
     },
     {
@@ -284,10 +125,10 @@
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.1,
       "position": [
-        1000,
+        940,
         160
       ],
-      "id": "7175017c-5db1-44f8-ba90-2dc8cec1bd73",
+      "id": "ac8a2908-2e0d-43ac-b7e6-d590a55fcb8d",
       "name": "When Executed by Another Workflow"
     },
     {
@@ -307,10 +148,10 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        2700,
+        3140,
         180
       ],
-      "id": "361e00ff-17c1-49bf-81db-a4eca20f0e6e",
+      "id": "8396e1bd-457a-4dfc-baf6-aa89bf7d8c2a",
       "name": "Edit Fields"
     },
     {
@@ -324,7 +165,7 @@
         980,
         1100
       ],
-      "id": "2ef0dfb4-a850-4a59-9be2-d2ed99cf1f87",
+      "id": "7436ceb3-c148-4d4e-90b2-b4cb2dd2dd7f",
       "name": "Google Gemini Chat Model",
       "credentials": {
         "googlePalmApi": {
@@ -332,57 +173,6 @@
           "name": "Google Gemini(PaLM) Api account"
         }
       }
-    },
-    {
-      "parameters": {
-        "model": {
-          "__rl": true,
-          "mode": "list",
-          "value": "claude-3-7-sonnet-20250219",
-          "cachedResultName": "Claude 3.7 Sonnet"
-        },
-        "options": {}
-      },
-      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
-      "typeVersion": 1.3,
-      "position": [
-        1120,
-        1100
-      ],
-      "id": "f553b4e3-1e96-43dd-b003-d316d5ab644c",
-      "name": "Anthropic Chat Model",
-      "credentials": {
-        "anthropicApi": {
-          "id": "SYGdKwRCUXN1yoB4",
-          "name": "Anthropic account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "workflowId": {
-          "__rl": true,
-          "value": "DKUSLysNqZjX9PA5",
-          "mode": "list",
-          "cachedResultName": "15m"
-        },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {},
-          "matchingColumns": [],
-          "schema": [],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
-        }
-      },
-      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
-      "typeVersion": 2.2,
-      "position": [
-        1620,
-        820
-      ],
-      "id": "205deff6-d9bc-44f9-bb45-0f76dfe937a8",
-      "name": "15m"
     },
     {
       "parameters": {
@@ -399,10 +189,10 @@
       "type": "n8n-nodes-base.googleCloudStorage",
       "typeVersion": 1,
       "position": [
-        3440,
+        3880,
         460
       ],
-      "id": "933c1e6f-0248-4095-b5e3-b17edc679b97",
+      "id": "6a38771d-824f-44b7-8ecc-0741f79e6361",
       "retryOnFail": true,
       "credentials": {
         "googleCloudStorageOAuth2Api": {
@@ -483,10 +273,10 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        2500,
+        2940,
         480
       ],
-      "id": "2bdc5eca-8af8-4733-a913-fa5099c7d972",
+      "id": "6def145f-e4a5-4977-bcea-8c0f99c1892c",
       "name": "Edit Fields1"
     },
     {
@@ -494,10 +284,10 @@
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.1,
       "position": [
-        2760,
+        3200,
         460
       ],
-      "id": "ff7164a6-5575-4cf2-8b52-2fd3c3f100d0",
+      "id": "f082f5c4-36fe-4755-994e-3ccee62f8550",
       "name": "Merge"
     },
     {
@@ -508,23 +298,23 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3200,
+        3640,
         460
       ],
-      "id": "593fd1dd-37f2-4bfa-abb9-cb16f4b44a1d",
+      "id": "4aaf4901-b12e-4528-a65b-b8da5c8f7028",
       "name": "HTTP Request"
     },
     {
       "parameters": {
-        "jsCode": "let urls = $json.urls;\nif (typeof urls === 'string') {\n  urls = JSON.parse(urls);\n}\n\nconst id = $json.ai_decision_id || $json.timestamp || 'unknown_id';\nconst out = [];\nfor (const tf in urls) {\n  const entry = urls[tf];\n  // Check that entry is an object with url and chart_time fields\n  if (entry && typeof entry === \"object\" && typeof entry.url === \"string\") {\n    out.push({\n      json: {\n        timeframe: tf,\n        url: entry.url,\n        chart_time: entry.chart_time,\n        id\n      }\n    });\n  }\n}\nreturn out;\n"
+        "jsCode": "// NEW: Use URLs from regime analysis payload instead of tool calls\nlet urls = $json.body.chart_urls;\nif (typeof urls === 'string') {\n  urls = JSON.parse(urls);\n}\n\nconst id = $json.ai_decision_id || $json.timestamp || 'unknown_id';\nconst out = [];\n\nfor (const tf in urls) {\n  const entry = urls[tf];\n  if (entry && typeof entry === \"object\" && typeof entry.url === \"string\") {\n    out.push({\n      json: {\n        timeframe: tf,\n        url: entry.url,\n        chart_time: entry.chart_time,\n        id\n      }\n    });\n  }\n}\nreturn out;"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2960,
+        3400,
         460
       ],
-      "id": "3fb7407c-7cf0-42d1-b00e-b5bb02cb572a",
+      "id": "f0f13d73-0a22-4261-ab97-86beb45db488",
       "name": "Code1"
     },
     {
@@ -562,10 +352,10 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        3640,
+        4080,
         460
       ],
-      "id": "5e2c4f5e-7cd3-457e-84cd-2a8ba7a67813",
+      "id": "4bd02cf0-397e-4c9e-8dbe-76643e0dc4c7",
       "name": "Edit Fields2"
     },
     {
@@ -575,10 +365,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3840,
+        4280,
         460
       ],
-      "id": "722d306f-8abe-4986-ad23-e9457b7f5c85",
+      "id": "7db6b6d0-332d-4e6e-9972-93e5358c82ca",
       "name": "Code2"
     },
     {
@@ -599,10 +389,10 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        4040,
+        4480,
         460
       ],
-      "id": "291bd60d-94b0-4218-9482-12f34185d6ff",
+      "id": "98036dae-0bff-48a7-baa4-64f211154d1c",
       "name": "Supabase1",
       "retryOnFail": true,
       "credentials": {
@@ -619,10 +409,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3840,
+        4280,
         660
       ],
-      "id": "2f8212c2-eb7d-4361-bb26-0e4dab5c2ee1",
+      "id": "d1855a69-0b4f-4abb-ae9e-80acc20798b2",
       "name": "Code3"
     },
     {
@@ -651,10 +441,10 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        4040,
+        4480,
         660
       ],
-      "id": "e00c3a60-f7da-4bb0-ab00-c92720163985",
+      "id": "589a2285-76e6-4dea-ae42-45c6d0968a79",
       "name": "updates chart_analysis urls",
       "retryOnFail": true,
       "credentials": {
@@ -663,6 +453,93 @@
           "name": "Supabase account"
         }
       }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Today is {{ $now }}.\n\nYou are the lead trading analyst for MES. You have received comprehensive market analysis data from the regime detection system.\n\n**REGIME ANALYSIS PROVIDED:**\n- Overall Regime: {{ $json.body.market_analysis.regime }}\n- Confidence: {{ $json.body.market_analysis.confidence }}%\n- Risk Level: {{ $json.body.market_analysis.risk_level }}\n- Supporting Factors: {{ $json.body.market_analysis.supporting_factors }}\n\n**TIMEFRAME ALIGNMENT:**\n- Trend Alignment Score: {{ $json.body.market_analysis.trend_details.alignment_score }}%\n- Primary Trend: {{ $json.body.market_analysis.trend_details.primary_trend }}\n- Has Conflicts: {{ $json.body.market_analysis.trend_details.has_conflict }}\n\n**INDIVIDUAL TIMEFRAME SIGNALS:**\n{{ $json.body.timeframe_signals }}\n\n**DECISION HIERARCHY:**\n\n1. **SAFETY FIRST - HOLD IF:**\n   - Confidence < 60% OR Risk Level = \"high\"\n   - Trend alignment < 50% (conflicting timeframes)\n   - Majority of timeframes show \"HOLD\"\n\n2. **STRONG SIGNALS - SIZE 3:**\n   - Confidence > 80% AND trend alignment > 70%\n   - Strong regime (trending_up/trending_down) with momentum support\n   - Clear support/resistance entry point\n\n3. **MODERATE SIGNALS - SIZE 2:**\n   - Confidence 60-80% OR trend alignment 50-70%\n   - Some timeframe conflicts but higher TFs aligned\n   - Moderate regime strength\n\n4. **WEAK SIGNALS - SIZE 1:**\n   - Confidence 50-60% AND uncertain conditions\n   - First counter-trend attempt or range trade\n\n**STRATEGY SELECTION:**\n- bracket: Default for trending markets\n- brackmod: Use for choppy/range regimes only\n- pivot: Strong breakouts with volume (not available in current data)\n\n**YOUR TASK:**\n1. Review the 5m chart image to validate current price action\n2. Use the provided regime analysis (DO NOT make additional timeframe calls)\n3. Make final trading decision based on hierarchy above\n4. Use the chart URLs provided for archival process\n\n**Respond with valid JSON only** (no extra text):\n\n{\n  \"strategy\": \"bracket|brackmod\",\n  \"signal\": \"BUY|SELL|HOLD\",\n  \"alert\": \"{{ $json.body.alert }}\",\n  \"timestamp\": \"{{ $now }}\",\n  \"entrylimit\": <float|null>,\n  \"tp1\": <float|null>,\n  \"tp2\": <float|null>,\n  \"tp3\": <float|null>,\n  \"sl\": <float|null>,\n  \"symbol\": \"CON.F.US.MES.M25\",\n  \"account\": \"{{ $json.body.account }}\",\n  \"size\": <1|2|3>,\n  \"reason\": \"Decision based on regime analysis: [regime] with [confidence]% confidence. [Specific rationale]\",\n  \"regime_notes\": \"Applied hierarchy rule [1|2|3|4]: [why this rule triggered]\",\n  \"sizing_rationale\": \"Size [1|2|3] based on confidence and trend alignment scores\",\n  \"trend\": {\n    \"5m\": \"{{ $json.body.market_analysis.trend_details.trends_by_timeframe['5m'] || 'unknown' }}\",\n    \"15m\": \"{{ $json.body.market_analysis.trend_details.trends_by_timeframe['15m'] || 'unknown' }}\",\n    \"1h\": \"{{ $json.body.market_analysis.trend_details.trends_by_timeframe['1h'] || 'unknown' }}\"\n  },\n  \"urls\": {{ $json.body.chart_urls }},\n  \"support\": {{ $json.body.support }},\n  \"resistance\": {{ $json.body.resistance }}\n}",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "messageType": "imageBinary"
+            }
+          ]
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [
+        2140,
+        360
+      ],
+      "id": "32635b42-c9fa-4dce-ba1a-eee35ee1cff9",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.snapshot.url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1840,
+        360
+      ],
+      "id": "a979d541-26b6-4545-b963-14229db12375",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "latest_chart_analysis",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "timeframe",
+              "keyValue": "5m"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1300,
+        360
+      ],
+      "id": "f77218ec-0c78-4e22-8991-6030c5c42d7b",
+      "name": "Supabase2",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c97ade3a-bb11-4da6-898d-ccac750a3903",
+              "name": "snapshot.url",
+              "value": "={{ $json.snapshot.url }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1560,
+        360
+      ],
+      "id": "5cd9b2d2-e31a-4929-bfc9-9d638808c04c",
+      "name": "Edit Fields3"
     }
   ],
   "pinData": {},
@@ -671,7 +548,7 @@
       "main": [
         [
           {
-            "node": "AI Agent",
+            "node": "Supabase2",
             "type": "main",
             "index": 0
           }
@@ -687,41 +564,8 @@
       "ai_languageModel": [
         [
           {
-            "node": "AI Agent",
+            "node": "Basic LLM Chain",
             "type": "ai_languageModel",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "5m": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "1h": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "HTTP Request1": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent",
-            "type": "ai_tool",
             "index": 0
           }
         ]
@@ -731,52 +575,8 @@
       "main": [
         [
           {
-            "node": "AI Agent",
+            "node": "Supabase2",
             "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "AI Agent": {
-      "main": [
-        [
-          {
-            "node": "Code",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "30m": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "1m": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "1D": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent",
-            "type": "ai_tool",
             "index": 0
           }
         ]
@@ -802,7 +602,7 @@
       "main": [
         [
           {
-            "node": "AI Agent",
+            "node": "Supabase2",
             "type": "main",
             "index": 0
           }
@@ -839,22 +639,6 @@
     "Google Gemini Chat Model": {
       "ai_languageModel": [
         []
-      ]
-    },
-    "Anthropic Chat Model": {
-      "ai_languageModel": [
-        []
-      ]
-    },
-    "15m": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
       ]
     },
     "Edit Fields1": {
@@ -954,19 +738,63 @@
           }
         ]
       ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase2": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields3": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
-  "active": false,
+  "active": true,
   "settings": {
     "callerPolicy": "workflowsFromSameOwner",
     "executionOrder": "v1"
   },
-  "versionId": "d71b3436-c457-41d3-8f81-0e63fb7349c2",
+  "versionId": "cd4e34b8-4124-420b-9632-55cb14240395",
   "meta": {
     "templateId": "2569",
     "templateCredsSetupCompleted": true,
     "instanceId": "9783a33f8d5600da0ff08d35d1dc9051c104e0a37fceb74a2ffe1557dcda02bc"
   },
-  "id": "Gn0m54Noac1vvmqN",
+  "id": "8YmLYQcDjKXJ0pAK",
   "tags": []
 }
