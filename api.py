@@ -341,9 +341,9 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
         .execute()
     if recent.data:
         rec = recent.data[0]
-        snapshot_time = rec['timestamp']
+        timestamp = rec['timestamp']
         # Parse and check age
-        if (now - snapshot_time).total_seconds() < cache_minutes * 60:
+        if (now - timestamp).total_seconds() < cache_minutes * 60:
             logging.info("Using cached regime analysis from Supabase.")
             return rec['snapshot']
 
