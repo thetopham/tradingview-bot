@@ -12,7 +12,7 @@ orders_state = {}
 positions_state = {}
 trade_meta = {}
 
-def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, order_id, alert, account, symbol, sl_id=None, tp_ids=None, trades=None):
+def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, order_id, alert, account, symbol, sl_id=None, tp_ids=None, trades=None, regime=None):
     meta = {
         "entry_time": entry_time,
         "ai_decision_id": ai_decision_id,
@@ -26,8 +26,9 @@ def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, o
         "account": account,
         "symbol": symbol,
         "trades": trades,
+        "regime": regime,  # Add regime to metadata
     }
-    logging.info(f"[track_trade] Called with ai_decision_id={ai_decision_id}, meta={meta}")
+    logging.info(f"[track_trade] Called with ai_decision_id={ai_decision_id}, regime={regime}, meta={meta}")
     trade_meta[(acct_id, cid)] = meta
 
 class SignalRTradingListener(threading.Thread):
