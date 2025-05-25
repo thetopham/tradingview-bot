@@ -374,7 +374,8 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
     }
 
     # Save snapshot to Supabase
-    supabase_client.table('latest_chart_analysis').insert({'snapshot': snapshot, 'timestamp': now}).execute()
+    supabase_client.table('latest_chart_analysis').insert({'snapshot': snapshot, 'timestamp': now.isoformat()}).execute()
+
 
     return snapshot
 
