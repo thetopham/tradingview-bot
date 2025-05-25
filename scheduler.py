@@ -46,6 +46,7 @@ def start_scheduler(app):
     # Market analysis job - runs every 15 minutes
     def market_analysis_job():
         try:
+            from api import get_market_conditions_summary
             summary = get_market_conditions_summary()
             
             # Log warnings for dangerous market conditions
