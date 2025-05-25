@@ -246,7 +246,7 @@ def start_scheduler(app):
 
 
 def execute_autonomous_trade(trade_decision):
-    """Execute an autonomous trade decision"""
+    """Execute an autonomous trade decision - ALWAYS goes through AI for decision ID"""
     try:
         from api import get_contract, ai_trade_decision_with_regime
         
@@ -267,6 +267,7 @@ def execute_autonomous_trade(trade_decision):
             trade_decision['autonomous'] = True
             trade_decision['initiated_by'] = 'position_manager'
             
+            # CRITICAL: This goes through n8n which assigns ai_decision_id
             ai_decision = ai_trade_decision_with_regime(
                 trade_decision['account'],
                 trade_decision['strategy'],
@@ -277,21 +278,28 @@ def execute_autonomous_trade(trade_decision):
                 ai_url
             )
             
+            # AI decision will have ai_decision_id from n8n workflow
+            ai_decision_id = ai_decision.get('ai_decision_id')
+            
             if ai_decision.get("signal", "").upper() not in ("BUY", "SELL"):
                 logging.info(f"AI blocked autonomous trade: {ai_decision.get('reason', 'No reason')}")
+                # Log the rejection
+                if ai_decision_id:
+                    logging.info(f"AI rejection logged with ai_decision_id: {ai_decision_id}")
                 return
             
-            # Execute the trade
+            # Execute the trade WITH the ai_decision_id
             run_bracket(
                 acct_id,
                 trade_decision['symbol'],
                 ai_decision['signal'],
                 ai_decision['size'],
                 ai_decision['alert'],
-                ai_decision.get('ai_decision_id')
+                ai_decision_id  # This links the trade to the AI hypothesis
             )
             
-            logging.info(f"✅ Autonomous trade executed: {ai_decision['signal']} {ai_decision['size']} contracts")
+            logging.info(f"✅ Autonomous trade executed: {ai_decision['signal']} "
+                       f"{ai_decision['size']} contracts - ai_decision_id: {ai_decision_id}")
         else:
             logging.error(f"No AI endpoint for account {trade_decision['account']}")
             
