@@ -328,54 +328,117 @@ market_regime_analyzer = MarketRegime()
 def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None, cache_minutes: int = 2) -> Dict:
     """
     Fetch multi-timeframe analysis, using Supabase cache if recent.
+    Fixed to use proper cache table and handle n8n calls correctly.
     """
     import datetime
     now = datetime.datetime.now(datetime.timezone.utc)
-    supabase_client = get_supabase_client()  # Implement this to return your client
+    supabase_client = get_supabase_client()
 
-    # Try cache first
-    recent = supabase_client.table('latest_chart_analysis') \
-        .select('*') \
-        .order('timestamp', desc=True) \
-        .limit(1) \
-        .execute()
-    if recent.data:
-        rec = recent.data[0]
-        timestamp_str = rec.get('timestamp')
-        # Only parse if timestamp_str is not None or empty
-        timestamp = parser.parse(timestamp_str) if timestamp_str else None
-        if timestamp is not None and (now - timestamp).total_seconds() < cache_minutes * 60:
-            logging.info("Using cached regime analysis from Supabase.")
-            return rec['snapshot']
-        elif timestamp is None:
-            logging.warning(f"No valid timestamp in Supabase record: {rec}")
+    # Try cache first - use a separate table for regime analysis
+    try:
+        recent = supabase_client.table('market_regime_cache') \
+            .select('*') \
+            .order('timestamp', desc=True) \
+            .limit(1) \
+            .execute()
+        
+        if recent.data:
+            rec = recent.data[0]
+            timestamp_str = rec.get('timestamp')
+            if timestamp_str:
+                try:
+                    timestamp = parser.parse(timestamp_str)
+                    if (now - timestamp).total_seconds() < cache_minutes * 60:
+                        logging.info("Using cached regime analysis from Supabase.")
+                        return json.loads(rec['analysis_data'])
+                except Exception as e:
+                    logging.warning(f"Error parsing cached timestamp: {e}")
+    except Exception as e:
+        logging.info(f"No cache table or cache retrieval failed: {e}")
 
-    # If no recent cache, fetch fresh
+    # If no recent cache, try to get individual timeframe data from latest_chart_analysis
     if timeframes is None:
         timeframes = ['1m', '5m', '15m', '30m', '1h']
+    
     timeframe_data = {}
+    
+    # First, try to get recent individual timeframe analyses from the database
     for tf in timeframes:
         try:
+            result = supabase_client.table('latest_chart_analysis') \
+                .select('*') \
+                .eq('symbol', 'MES') \
+                .eq('timeframe', tf) \
+                .order('timestamp', desc=True) \
+                .limit(1) \
+                .execute()
+            
+            if result.data:
+                record = result.data[0]
+                timestamp_str = record.get('timestamp')
+                if timestamp_str:
+                    try:
+                        timestamp = parser.parse(timestamp_str)
+                        # Use cached data if less than 5 minutes old
+                        if (now - timestamp).total_seconds() < 5 * 60:
+                            snapshot_data = record.get('snapshot')
+                            if snapshot_data:
+                                if isinstance(snapshot_data, str):
+                                    timeframe_data[tf] = json.loads(snapshot_data)
+                                else:
+                                    timeframe_data[tf] = snapshot_data
+                                logging.info(f"Using cached {tf} analysis from database")
+                                continue
+                    except Exception as e:
+                        logging.warning(f"Error parsing {tf} timestamp: {e}")
+            
+            # If no cache or cache too old, make fresh n8n call
+            logging.info(f"Fetching fresh {tf} analysis from n8n")
+            
+            # Construct correct webhook URL - use the individual timeframe workflow webhooks
             webhook_url = f"{n8n_base_url}/webhook/{tf}"
+            
             response = session.post(webhook_url, json={}, timeout=30)
             response.raise_for_status()
-            data = response.json()
-            if isinstance(data, str):
-                data = json.loads(data)
-            timeframe_data[tf] = data
+            
+            # Handle response
+            if response.text.strip():
+                try:
+                    data = response.json()
+                    if isinstance(data, str):
+                        data = json.loads(data)
+                    timeframe_data[tf] = data
+                    logging.info(f"Successfully fetched {tf} analysis")
+                except json.JSONDecodeError as e:
+                    logging.error(f"Failed to parse {tf} JSON response: {e}")
+                    timeframe_data[tf] = {}
+            else:
+                logging.error(f"Empty response from {tf} webhook")
+                timeframe_data[tf] = {}
+                
         except Exception as e:
             logging.error(f"Failed to fetch {tf} analysis: {e}")
             timeframe_data[tf] = {}
+
+    # Analyze regime with whatever data we have
     regime_analysis = market_regime_analyzer.analyze_regime(timeframe_data)
+    
+    # Create combined snapshot
     snapshot = {
         'timeframe_data': timeframe_data,
         'regime_analysis': regime_analysis,
         'timestamp': now.isoformat()
     }
 
-    # Save snapshot to Supabase
-    supabase_client.table('latest_chart_analysis').insert({'snapshot': snapshot, 'timestamp': now.isoformat()}).execute()
-
+    # Save regime analysis to cache (separate table)
+    try:
+        supabase_client.table('market_regime_cache').insert({
+            'analysis_data': json.dumps(snapshot),
+            'timestamp': now.isoformat()
+        }).execute()
+        logging.info("Saved regime analysis to cache")
+    except Exception as e:
+        logging.error(f"Failed to save regime cache: {e}")
 
     return snapshot
 
@@ -384,62 +447,68 @@ def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url)
     """
     Enhanced AI trade decision that includes market regime analysis
     """
-    # First, get market regime analysis
-    n8n_base_url = ai_url.split('/webhook/')[0]  # Extract base URL
-    market_analysis = fetch_multi_timeframe_analysis(n8n_base_url)
-    
-    regime = market_analysis['regime_analysis']
-    regime_rules = market_regime_analyzer.get_regime_trading_rules(regime['primary_regime'])
-    
-    # Check if trading is recommended in this regime
-    if not regime['trade_recommendation']:
-        logging.warning(f"Trading not recommended in {regime['primary_regime']} regime. Blocking trade.")
-        return {
-            "strategy": strat,
-            "signal": "HOLD",
-            "account": account,
-            "reason": f"Market regime ({regime['primary_regime']}) not suitable for trading. {', '.join(regime['supporting_factors'])}",
-            "regime": regime['primary_regime'],
-            "error": False
-        }
-    
-    # Check if signal aligns with regime
-    if regime_rules['avoid_signal'] == 'BOTH' or (regime_rules['avoid_signal'] and sig == regime_rules['avoid_signal']):
-        logging.warning(f"Signal {sig} conflicts with {regime['primary_regime']} regime preferences")
-        return {
-            "strategy": strat,
-            "signal": "HOLD",
-            "account": account,
-            "reason": f"{sig} signal not recommended in {regime['primary_regime']} regime",
-            "regime": regime['primary_regime'],
-            "error": False
-        }
-    
-    # Prepare enhanced payload for AI
-    payload = {
-        "account": account,
-        "strategy": strat,
-        "signal": sig,
-        "symbol": sym,
-        "size": size,
-        "alert": alert,
-        "market_analysis": {
-            "regime": regime['primary_regime'],
-            "confidence": regime['confidence'],
-            "supporting_factors": regime['supporting_factors'],
-            "risk_level": regime['risk_level'],
-            "trend_details": regime['trend_details'],
-            "volatility_details": regime['volatility_details'],
-            "momentum_details": regime['momentum_details']
-        },
-        "regime_rules": regime_rules,
-        "timeframe_signals": {
-            tf: data.get('signal', 'HOLD') 
-            for tf, data in market_analysis['timeframe_data'].items()
-        }
-    }
-    
     try:
+        # Extract base URL properly
+        if '/webhook/' in ai_url:
+            n8n_base_url = ai_url.split('/webhook/')[0]
+        else:
+            # Fallback: assume the URL structure
+            n8n_base_url = ai_url.replace('/webhook', '')
+        
+        # Get market regime analysis
+        market_analysis = fetch_multi_timeframe_analysis(n8n_base_url)
+        
+        regime = market_analysis['regime_analysis']
+        regime_rules = market_regime_analyzer.get_regime_trading_rules(regime['primary_regime'])
+        
+        # Check if trading is recommended in this regime
+        if not regime['trade_recommendation']:
+            logging.warning(f"Trading not recommended in {regime['primary_regime']} regime. Blocking trade.")
+            return {
+                "strategy": strat,
+                "signal": "HOLD",
+                "account": account,
+                "reason": f"Market regime ({regime['primary_regime']}) not suitable for trading. {', '.join(regime['supporting_factors'])}",
+                "regime": regime['primary_regime'],
+                "error": False
+            }
+        
+        # Check if signal aligns with regime
+        if regime_rules['avoid_signal'] == 'BOTH' or (regime_rules['avoid_signal'] and sig == regime_rules['avoid_signal']):
+            logging.warning(f"Signal {sig} conflicts with {regime['primary_regime']} regime preferences")
+            return {
+                "strategy": strat,
+                "signal": "HOLD",
+                "account": account,
+                "reason": f"{sig} signal not recommended in {regime['primary_regime']} regime",
+                "regime": regime['primary_regime'],
+                "error": False
+            }
+        
+        # Prepare enhanced payload for AI
+        payload = {
+            "account": account,
+            "strategy": strat,
+            "signal": sig,
+            "symbol": sym,
+            "size": size,
+            "alert": alert,
+            "market_analysis": {
+                "regime": regime['primary_regime'],
+                "confidence": regime['confidence'],
+                "supporting_factors": regime['supporting_factors'],
+                "risk_level": regime['risk_level'],
+                "trend_details": regime['trend_details'],
+                "volatility_details": regime['volatility_details'],
+                "momentum_details": regime['momentum_details']
+            },
+            "regime_rules": regime_rules,
+            "timeframe_signals": {
+                tf: data.get('signal', 'HOLD') 
+                for tf, data in market_analysis['timeframe_data'].items()
+            }
+        }
+        
         resp = session.post(ai_url, json=payload, timeout=240)
         resp.raise_for_status()
         
@@ -473,7 +542,7 @@ def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url)
             "signal": "HOLD",
             "account": account,
             "reason": f"AI error: {str(e)}",
-            "regime": regime['primary_regime'],
+            "regime": "unknown",
             "error": True
         }
 
@@ -481,24 +550,40 @@ def get_market_conditions_summary() -> Dict:
     """
     Get a summary of current market conditions for logging
     """
-    # This could be called periodically to log market state
-    market_analysis = fetch_multi_timeframe_analysis(config.get('N8N_AI_URL', '').split('/webhook/')[0])
-    regime = market_analysis['regime_analysis']
-    
-    summary = {
-        'timestamp': datetime.now(CT).isoformat(),
-        'regime': regime['primary_regime'],
-        'confidence': regime['confidence'],
-        'trade_recommended': regime['trade_recommendation'],
-        'risk_level': regime['risk_level'],
-        'key_factors': regime['supporting_factors'][:3],  # Top 3 factors
-        'trend_alignment': regime['trend_details']['alignment_score'],
-        'volatility': regime['volatility_details']['volatility_regime']
-    }
-    
-    logging.info(f"Market Conditions: {summary}")
-    return summary
-
-
-
-
+    try:
+        # Extract base URL from config
+        n8n_ai_url = config.get('N8N_AI_URL', '')
+        if '/webhook/' in n8n_ai_url:
+            n8n_base_url = n8n_ai_url.split('/webhook/')[0]
+        else:
+            n8n_base_url = n8n_ai_url.replace('/webhook', '')
+        
+        market_analysis = fetch_multi_timeframe_analysis(n8n_base_url)
+        regime = market_analysis['regime_analysis']
+        
+        summary = {
+            'timestamp': datetime.now(CT).isoformat(),
+            'regime': regime['primary_regime'],
+            'confidence': regime['confidence'],
+            'trade_recommended': regime['trade_recommendation'],
+            'risk_level': regime['risk_level'],
+            'key_factors': regime['supporting_factors'][:3],  # Top 3 factors
+            'trend_alignment': regime['trend_details']['alignment_score'],
+            'volatility': regime['volatility_details']['volatility_regime']
+        }
+        
+        logging.info(f"Market Conditions: {summary}")
+        return summary
+        
+    except Exception as e:
+        logging.error(f"Error getting market conditions: {e}")
+        return {
+            'timestamp': datetime.now(CT).isoformat(),
+            'regime': 'unknown',
+            'confidence': 0,
+            'trade_recommended': False,
+            'risk_level': 'high',
+            'key_factors': ['Error in analysis'],
+            'trend_alignment': 0,
+            'volatility': 'unknown'
+        }
