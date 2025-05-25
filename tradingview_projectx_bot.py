@@ -115,6 +115,177 @@ def tv_webhook():
     Thread(target=handle_webhook_logic, args=(data,)).start()
     return jsonify(status="accepted", msg="Processing started"), 202
 
+# Add these endpoints to tradingview_projectx_bot.py after the existing routes
+
+@app.route("/positions", methods=["GET"])
+def get_positions():
+    """Get current positions across all accounts"""
+    try:
+        from api import get_all_positions_summary
+        summary = get_all_positions_summary()
+        return jsonify(summary), 200
+    except Exception as e:
+        logging.error(f"Error getting positions: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/positions/<account>", methods=["GET"])
+def get_account_positions(account):
+    """Get positions for a specific account"""
+    try:
+        from position_manager import PositionManager
+        from api import get_contract
+        
+        acct_id = ACCOUNTS.get(account.lower())
+        if not acct_id:
+            return jsonify({"error": f"Unknown account: {account}"}), 404
+        
+        pm = PositionManager(ACCOUNTS)
+        cid = get_contract("CON.F.US.MES.M25")
+        
+        position_state = pm.get_position_state(acct_id, cid)
+        account_state = pm.get_account_state(acct_id)
+        
+        return jsonify({
+            "account": account,
+            "position": position_state,
+            "account_metrics": account_state,
+            "timestamp": datetime.now(CT).isoformat()
+        }), 200
+        
+    except Exception as e:
+        logging.error(f"Error getting account positions: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/positions/<account>/manage", methods=["POST"])
+def manage_position(account):
+    """Manually trigger position management for an account"""
+    try:
+        data = request.get_json()
+        if data.get("secret") != WEBHOOK_SECRET:
+            return jsonify(error="unauthorized"), 403
+        
+        from position_manager import PositionManager
+        from api import get_contract
+        
+        acct_id = ACCOUNTS.get(account.lower())
+        if not acct_id:
+            return jsonify({"error": f"Unknown account: {account}"}), 404
+        
+        pm = PositionManager(ACCOUNTS)
+        cid = get_contract("CON.F.US.MES.M25")
+        
+        position_state = pm.get_position_state(acct_id, cid)
+        result = pm.manage_position(acct_id, cid, position_state)
+        
+        return jsonify({
+            "account": account,
+            "result": result,
+            "timestamp": datetime.now(CT).isoformat()
+        }), 200
+        
+    except Exception as e:
+        logging.error(f"Error managing position: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/scan", methods=["POST"])
+def scan_opportunities():
+    """Manually trigger opportunity scan"""
+    try:
+        data = request.get_json()
+        if data.get("secret") != WEBHOOK_SECRET:
+            return jsonify(error="unauthorized"), 403
+        
+        from position_manager import PositionManager
+        
+        pm = PositionManager(ACCOUNTS)
+        opportunities = []
+        
+        for account_name, acct_id in ACCOUNTS.items():
+            opportunity = pm.scan_for_opportunities(acct_id, account_name)
+            if opportunity:
+                opportunities.append(opportunity)
+        
+        return jsonify({
+            "opportunities": opportunities,
+            "count": len(opportunities),
+            "timestamp": datetime.now(CT).isoformat()
+        }), 200
+        
+    except Exception as e:
+        logging.error(f"Error scanning opportunities: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/account/<account>/health", methods=["GET"])
+def get_account_health(account):
+    """Get account health metrics"""
+    try:
+        from position_manager import PositionManager
+        
+        acct_id = ACCOUNTS.get(account.lower())
+        if not acct_id:
+            return jsonify({"error": f"Unknown account: {account}"}), 404
+        
+        pm = PositionManager(ACCOUNTS)
+        account_state = pm.get_account_state(acct_id)
+        
+        # Add risk thresholds for context
+        account_state['thresholds'] = {
+            'max_daily_loss': pm.max_daily_loss,
+            'profit_target': pm.profit_target,
+            'max_consecutive_losses': pm.max_consecutive_losses
+        }
+        
+        return jsonify({
+            "account": account,
+            "health": account_state,
+            "timestamp": datetime.now(CT).isoformat()
+        }), 200
+        
+    except Exception as e:
+        logging.error(f"Error getting account health: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/market", methods=["GET"])
+def get_market_status():
+    """Get current market conditions and regime"""
+    try:
+        summary = get_market_conditions_summary()
+        
+        # Add session info
+        session_name, session_info = get_current_session()
+        summary['session'] = {
+            'name': session_name,
+            'characteristics': session_info.get('characteristics', 'Unknown')
+        }
+        
+        return jsonify(summary), 200
+        
+    except Exception as e:
+        logging.error(f"Error getting market status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/autonomous/toggle", methods=["POST"])
+def toggle_autonomous():
+    """Toggle autonomous trading on/off"""
+    try:
+        data = request.get_json()
+        if data.get("secret") != WEBHOOK_SECRET:
+            return jsonify(error="unauthorized"), 403
+        
+        enabled = data.get("enabled", True)
+        
+        # This would need to be implemented with a global flag
+        # For now, just return status
+        return jsonify({
+            "autonomous_trading": enabled,
+            "message": "Autonomous trading " + ("enabled" if enabled else "disabled"),
+            "timestamp": datetime.now(CT).isoformat()
+        }), 200
+        
+    except Exception as e:
+        logging.error(f"Error toggling autonomous: {e}")
+        return jsonify({"error": str(e)}), 500
+
 def handle_webhook_logic(data):
     try:
         strat = data.get("strategy", "bracket").lower()
