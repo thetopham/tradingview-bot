@@ -37,6 +37,38 @@ class PositionManager:
         self.trailing_stop_activation = config.get('TRAILING_STOP_ACTIVATION', 10.0)  # points
         self.trailing_stop_distance = config.get('TRAILING_STOP_DISTANCE', 5.0)  # points
         
+        # Initialize Supabase client for logging
+        from api import get_supabase_client
+        self.supabase = get_supabase_client()
+    
+    def _log_position_modification(self, acct_id: int, cid: str, action: str, 
+                                  size: int, reason: str, original_ai_decision_id: str,
+                                  order_id: str = None):
+        """Log position modifications to maintain audit trail"""
+        try:
+            payload = {
+                'account_id': acct_id,
+                'contract_id': cid,
+                'action': action,
+                'size': size,
+                'reason': reason,
+                'original_ai_decision_id': str(original_ai_decision_id) if original_ai_decision_id else None,
+                'order_id': str(order_id) if order_id else None,
+                'timestamp': datetime.now(datetime.timezone.utc).isoformat()
+            }
+            
+            self.supabase.table('position_modifications').insert(payload).execute()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to log position modification: {e}")
+            # Fallback to file logging
+            try:
+                with open("/tmp/position_modifications.jsonl", "a") as f:
+                    import json
+                    f.write(json.dumps(payload) + "\n")
+            except:
+                pass
+        
     def get_position_state(self, acct_id: int, cid: str) -> Dict:
         """
         Get comprehensive position state including P&L, entry price, current stops/targets
@@ -216,8 +248,26 @@ class PositionManager:
         if position_state['duration_minutes'] > 120:  # 2 hours
             market_conditions = get_market_conditions_summary()
             if market_conditions['regime'] == 'choppy':
-                self.logger.info(f"Closing stale position in choppy market")
+                # Get original metadata before flattening
+                from signalr_listener import trade_meta
+                original_meta = trade_meta.get((acct_id, cid), {})
+                
+                self.logger.info(f"Closing stale position in choppy market - ai_decision_id: {original_meta.get('ai_decision_id')}")
+                
+                # Log the time-based exit
+                if original_meta:
+                    self._log_position_modification(
+                        acct_id=acct_id,
+                        cid=cid,
+                        action='time_exit',
+                        size=position_state['size'],
+                        reason=f'Stale position ({position_state["duration_minutes"]} min) in choppy market',
+                        original_ai_decision_id=original_meta.get('ai_decision_id')
+                    )
+                
                 flatten_contract(acct_id, cid, timeout=10)
+                # Note: flatten_contract will trigger position close event
+                # which calls log_trade_results_to_supabase with ai_decision_id
                 return {'action': 'flatten', 'reason': 'Stale position in choppy market'}
         
         # 4. Check if we should add to winning position
@@ -239,6 +289,10 @@ class PositionManager:
         if not current_stops:
             return {'adjusted': False, 'reason': 'No stop orders found'}
         
+        # Get original AI decision metadata
+        from signalr_listener import trade_meta
+        original_meta = trade_meta.get((acct_id, cid), {})
+        
         # Cancel existing stops and place new ones
         for stop in current_stops:
             cancel(acct_id, stop['id'])
@@ -251,9 +305,22 @@ class PositionManager:
             
         # Place new stop
         stop_side = 1 if position_state['side'] == 'LONG' else 0
-        place_stop(acct_id, cid, stop_side, position_state['size'], new_stop_price)
+        new_stop = place_stop(acct_id, cid, stop_side, position_state['size'], new_stop_price)
         
-        self.logger.info(f"Adjusted trailing stop to {new_stop_price}")
+        self.logger.info(f"Adjusted trailing stop to {new_stop_price} - ai_decision_id: {original_meta.get('ai_decision_id')}")
+        
+        # Log the trailing stop adjustment
+        if original_meta:
+            self._log_position_modification(
+                acct_id=acct_id,
+                cid=cid,
+                action='trailing_stop',
+                size=position_state['size'],
+                reason=f'Trailing stop adjusted from profit level ${position_state["current_pnl"]}',
+                original_ai_decision_id=original_meta.get('ai_decision_id'),
+                order_id=new_stop.get('orderId')
+            )
+        
         return {
             'adjusted': True,
             'new_stop': new_stop_price,
@@ -266,9 +333,27 @@ class PositionManager:
         
         # Place market order to scale out
         exit_side = 1 if position_state['side'] == 'LONG' else 0
-        place_market(acct_id, cid, exit_side, scale_size)
+        order = place_market(acct_id, cid, exit_side, scale_size)
         
-        self.logger.info(f"Scaled out {scale_size} contracts at profit")
+        # Log the scale-out action to maintain audit trail
+        # This links back to the original position's ai_decision_id
+        from signalr_listener import trade_meta
+        original_meta = trade_meta.get((acct_id, cid), {})
+        
+        if original_meta:
+            self.logger.info(f"Scaled out {scale_size} contracts at profit - linked to ai_decision_id: {original_meta.get('ai_decision_id')}")
+            
+            # Log position modification to Supabase
+            self._log_position_modification(
+                acct_id=acct_id,
+                cid=cid,
+                action='scale_out',
+                size=scale_size,
+                reason=f'Profit target reached: ${position_state["current_pnl"]}',
+                original_ai_decision_id=original_meta.get('ai_decision_id'),
+                order_id=order.get('orderId')
+            )
+        
         return {
             'scaled': True,
             'size': scale_size,
@@ -276,7 +361,7 @@ class PositionManager:
         }
     
     def _consider_adding_to_position(self, acct_id: int, cid: str, position_state: Dict) -> Dict:
-        """Consider adding to a winning position"""
+        """Consider adding to a winning position - requires AI approval"""
         # Check market conditions first
         market_conditions = get_market_conditions_summary()
         
@@ -286,21 +371,74 @@ class PositionManager:
         if market_conditions['regime'] not in ['trending_up', 'trending_down']:
             return {'added': False, 'reason': 'Not in trending market'}
         
-        # Add 1 contract
-        side = 0 if position_state['side'] == 'LONG' else 1
-        place_market(acct_id, cid, side, 1)
+        # Get original position metadata
+        from signalr_listener import trade_meta
+        original_meta = trade_meta.get((acct_id, cid), {})
         
-        # Add protective stop
-        stop_side = 1 - side
-        stop_price = (position_state['entry_price'] - 5.0 if side == 0 
-                     else position_state['entry_price'] + 5.0)
-        place_stop(acct_id, cid, stop_side, 1, stop_price)
+        # IMPORTANT: Adding to position requires AI decision for new hypothesis
+        # This ensures every size increase is logged with reasoning
+        from api import ai_trade_decision_with_regime
         
-        self.logger.info(f"Added to position in {market_conditions['regime']} market")
+        # Determine account name
+        account_name = None
+        for name, id in self.accounts.items():
+            if id == acct_id:
+                account_name = name
+                break
+        
+        if not account_name:
+            return {'added': False, 'reason': 'Could not determine account name'}
+        
+        # Build add-on trade decision
+        add_signal = 'BUY' if position_state['side'] == 'LONG' else 'SELL'
+        ai_url = config.get('N8N_AI_URL')  # Use default AI endpoint
+        
+        # Get AI approval for adding to position
+        add_decision = {
+            'account': account_name,
+            'strategy': 'bracket',
+            'signal': add_signal,
+            'symbol': 'CON.F.US.MES.M25',
+            'size': 1,
+            'alert': f"Add to winning position - P&L: ${position_state['current_pnl']:.2f}",
+            'autonomous': True,
+            'initiated_by': 'position_manager_addon',
+            'parent_ai_decision_id': original_meta.get('ai_decision_id')
+        }
+        
+        # Get AI decision (which will assign new ai_decision_id)
+        ai_decision = ai_trade_decision_with_regime(
+            add_decision['account'],
+            add_decision['strategy'],
+            add_decision['signal'],
+            add_decision['symbol'],
+            add_decision['size'],
+            add_decision['alert'],
+            ai_url
+        )
+        
+        if ai_decision.get("signal", "").upper() not in ("BUY", "SELL"):
+            self.logger.info(f"AI blocked position add: {ai_decision.get('reason')}")
+            return {'added': False, 'reason': ai_decision.get('reason', 'AI blocked')}
+        
+        # Execute the add with new ai_decision_id
+        from strategies import run_bracket
+        run_bracket(
+            acct_id,
+            'CON.F.US.MES.M25',
+            ai_decision['signal'],
+            ai_decision['size'],
+            ai_decision['alert'],
+            ai_decision.get('ai_decision_id')
+        )
+        
+        self.logger.info(f"Added to position in {market_conditions['regime']} market - new ai_decision_id: {ai_decision.get('ai_decision_id')}")
+        
         return {
             'added': True,
-            'size': 1,
-            'reason': 'Added to winning position in trending market'
+            'size': ai_decision['size'],
+            'reason': f"Added to winning position in {market_conditions['regime']} market",
+            'ai_decision_id': ai_decision.get('ai_decision_id')
         }
     
     def scan_for_opportunities(self, acct_id: int, account_name: str) -> Optional[Dict]:
