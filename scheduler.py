@@ -47,7 +47,7 @@ def start_scheduler(app):
     def market_analysis_job():
         try:
             from api import get_market_conditions_summary
-            summary = get_market_conditions_summary()
+            summary = get_market_conditions_summary(force_refresh=True) 
             
             # Log warnings for dangerous market conditions
             if summary['regime'] == 'choppy' and summary['confidence'] > 80:
@@ -147,7 +147,7 @@ def start_scheduler(app):
         """Run analysis before each major session"""
         try:
             logging.info(f"🔔 Pre-{session_name} session analysis starting...")
-            summary = get_market_conditions_summary()
+            summary = get_market_conditions_summary(force_refresh=True)
             
             session_recommendations = {
                 'LONDON': {
