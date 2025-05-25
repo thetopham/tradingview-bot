@@ -38,6 +38,10 @@ class MarketRegime:
             # Extract key metrics from each timeframe
             metrics = self._extract_metrics(timeframe_data)
             
+            # If no valid metrics, return safe defaults
+            if not metrics:
+                return self._get_fallback_regime("No valid timeframe data")
+            
             # Analyze trend alignment across timeframes
             trend_analysis = self._analyze_trend_alignment(metrics)
             
@@ -63,35 +67,75 @@ class MarketRegime:
             
         except Exception as e:
             self.logger.error(f"Error in regime analysis: {e}")
-            return {
-                'primary_regime': self.REGIME_CHOPPY,
-                'confidence': 0,
-                'supporting_factors': ['Error in analysis'],
-                'trade_recommendation': False,
-                'risk_level': 'high'
+            return self._get_fallback_regime(f"Analysis error: {str(e)}")
+    
+    def _get_fallback_regime(self, reason: str) -> Dict:
+        """Return safe fallback regime when analysis fails"""
+        return {
+            'primary_regime': self.REGIME_CHOPPY,
+            'confidence': 0,
+            'supporting_factors': [reason],
+            'trade_recommendation': False,
+            'risk_level': 'high',
+            'trend_details': {
+                'primary_trend': 'unknown',
+                'alignment_score': 0,
+                'is_aligned': False,
+                'has_conflict': True,
+                'trends_by_timeframe': {}
+            },
+            'volatility_details': {
+                'volatility_regime': 'unknown',
+                'range_percent': 0,
+                'is_expanding': False,
+                'is_contracting': False
+            },
+            'momentum_details': {
+                'average_momentum_score': 0,
+                'momentum_state': 'neutral',
+                'bullish_indicators': 0,
+                'bearish_indicators': 0,
+                'indicator_bias': 'neutral'
             }
+        }
     
     def _extract_metrics(self, timeframe_data: Dict[str, Dict]) -> Dict:
         """Extract key metrics from timeframe data"""
         metrics = {}
         
         for tf, data in timeframe_data.items():
-            if not data:
+            try:
+                if not data:
+                    continue
+                
+                # Handle case where data might be a list or other unexpected type
+                if isinstance(data, list):
+                    if data:
+                        data = data[0]  # Take first item if it's a list
+                    else:
+                        continue
+                
+                if not isinstance(data, dict):
+                    self.logger.warning(f"Unexpected data type for {tf}: {type(data)}, skipping")
+                    continue
+                
+                metrics[tf] = {
+                    'trend': data.get('trend_direction', data.get('trend', 'unknown')),
+                    'momentum': data.get('momentum', 'neutral'),
+                    'volatility': data.get('volatility', 'medium'),
+                    'signal': data.get('signal', 'HOLD'),
+                    'support': data.get('support', []),
+                    'resistance': data.get('resistance', []),
+                    'current_price': data.get('current_price', 0),
+                    'range_size': data.get('range_size', 0),
+                    'indicators': data.get('indicators', {}),
+                    'volume_trend': data.get('volume_trend', 'flat')
+                }
+                
+            except Exception as e:
+                self.logger.error(f"Error extracting metrics for {tf}: {e}")
                 continue
                 
-            metrics[tf] = {
-                'trend': data.get('trend', 'unknown'),
-                'momentum': data.get('momentum', 'neutral'),
-                'volatility': data.get('volatility', 'medium'),
-                'signal': data.get('signal', 'HOLD'),
-                'support': data.get('support', []),
-                'resistance': data.get('resistance', []),
-                'current_price': data.get('current_price', 0),
-                'range_size': data.get('range_size', 0),
-                'indicators': data.get('indicators', {}),
-                'volume_trend': data.get('volume_trend', 'flat')
-            }
-            
         return metrics
     
     def _analyze_trend_alignment(self, metrics: Dict) -> Dict:
@@ -115,9 +159,19 @@ class MarketRegime:
                     weighted_trends[trend] += weight
                 trends.append(trend)
         
+        if not trends:
+            return {
+                'primary_trend': 'unknown',
+                'alignment_score': 0,
+                'is_aligned': False,
+                'has_conflict': True,
+                'trends_by_timeframe': {}
+            }
+        
         # Determine primary trend
         primary_trend = max(weighted_trends, key=weighted_trends.get)
-        alignment_score = weighted_trends[primary_trend] / sum(weights.values()) * 100
+        total_weight = sum(weights[tf] for tf in weights if tf in metrics)
+        alignment_score = (weighted_trends[primary_trend] / total_weight * 100) if total_weight > 0 else 0
         
         # Check for trend conflicts
         unique_trends = set(trends)
@@ -146,6 +200,14 @@ class MarketRegime:
                 range_size = metrics[tf].get('range_size', 0)
                 if range_size > 0:
                     ranges.append(range_size)
+        
+        if not volatilities:
+            return {
+                'volatility_regime': 'unknown',
+                'range_percent': 0,
+                'is_expanding': False,
+                'is_contracting': False
+            }
         
         # Calculate average range as percentage of price
         if ranges and '15m' in metrics:
@@ -292,7 +354,7 @@ class MarketRegime:
                 
             # Check proximity to resistance (potential bullish breakout)
             for resistance in resistances:
-                if resistance > current_price:
+                if resistance and resistance > current_price:
                     distance_pct = ((resistance - current_price) / current_price) * 100
                     if distance_pct < 0.1:  # Within 0.1% of resistance
                         breakout_signals += 1
@@ -300,7 +362,7 @@ class MarketRegime:
                         
             # Check proximity to support (potential bearish breakout)
             for support in supports:
-                if support < current_price:
+                if support and support < current_price:
                     distance_pct = ((current_price - support) / current_price) * 100
                     if distance_pct < 0.1:  # Within 0.1% of support
                         breakout_signals += 1
