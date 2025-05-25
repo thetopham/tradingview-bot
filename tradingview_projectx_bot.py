@@ -43,7 +43,7 @@ AI_ENDPOINTS = {
 
 MARKET_SESSIONS = {
     'ASIAN': {
-        'start': dtime(19, 0),    # 7 PM CT
+        'start': dtime(17, 0),    # 5 PM CT
         'end': dtime(3, 0),       # 3 AM CT
         'characteristics': 'Lower volatility, trend continuation'
     },
