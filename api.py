@@ -428,7 +428,7 @@ def get_supabase_client() -> Client:
 market_regime_analyzer = MarketRegime()
 
 
-def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None, cache_minutes: int = 2) -> Dict:
+def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None, cache_minutes: int = 2, force_refresh: bool = True) -> Dict:
     """
     Fetch multi-timeframe analysis, using Supabase cache if recent.
     Enhanced to collect chart URLs for archival.
@@ -439,6 +439,9 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
     
     now = datetime.datetime.now(datetime.timezone.utc)
     supabase_client = get_supabase_client()
+
+    # Add debug logging
+    logging.info(f"[fetch_multi_timeframe_analysis] Called at {now}, cache_minutes={cache_minutes}")
 
     # Try cache first - use a separate table for regime analysis
     try:
@@ -454,7 +457,9 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
             if timestamp_str:
                 try:
                     timestamp = parser.parse(timestamp_str)
-                    if (now - timestamp).total_seconds() < cache_minutes * 60:
+                    age_seconds = (now - timestamp).total_seconds()
+                    logging.info(f"[fetch_multi_timeframe_analysis] Found cache aged {age_seconds}s")
+                    if not force_refresh and age_seconds < cache_minutes * 60:
                         logging.info("Using cached regime analysis from Supabase.")
                         cached_data = json.loads(rec['analysis_data'])
                         
@@ -619,7 +624,7 @@ def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url)
             n8n_base_url = ai_url.replace('/webhook', '')
         
         # Get market regime analysis with chart URLs
-        market_analysis = fetch_multi_timeframe_analysis(n8n_base_url)
+        market_analysis = fetch_multi_timeframe_analysis(n8n_base_url, force_refresh=True)
         
         regime = market_analysis['regime_analysis']
         regime_rules = market_regime_analyzer.get_regime_trading_rules(regime['primary_regime'])
