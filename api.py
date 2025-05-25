@@ -384,9 +384,19 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
                             snapshot_data = record.get('snapshot')
                             if snapshot_data:
                                 if isinstance(snapshot_data, str):
-                                    timeframe_data[tf] = json.loads(snapshot_data)
+                                    parsed_data = json.loads(snapshot_data)
+                                elif isinstance(snapshot_data, list):
+                                    # Handle case where snapshot is a list - take first item
+                                    parsed_data = snapshot_data[0] if snapshot_data else {}
                                 else:
-                                    timeframe_data[tf] = snapshot_data
+                                    parsed_data = snapshot_data
+                                
+                                # Ensure we have a dictionary
+                                if isinstance(parsed_data, dict):
+                                    timeframe_data[tf] = parsed_data
+                                else:
+                                    logging.warning(f"Invalid {tf} data structure: {type(parsed_data)}, skipping cache")
+                                    continue
                                 logging.info(f"Using cached {tf} analysis from database")
                                 continue
                     except Exception as e:
@@ -398,7 +408,7 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
             # Construct correct webhook URL - use the individual timeframe workflow webhooks
             webhook_url = f"{n8n_base_url}/webhook/{tf}"
             
-            response = session.post(webhook_url, json={}, timeout=60)
+            response = session.post(webhook_url, json={}, timeout=30)
             response.raise_for_status()
             
             # Handle response
