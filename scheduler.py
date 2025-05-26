@@ -73,27 +73,28 @@ def start_scheduler(app):
             logging.error(f"[APScheduler] Webhook failed: {e}")
     
     # Market analysis job - runs every 15 minutes
+    # Market analysis job - runs every 15 minutes
     def market_analysis_job():
         try:
             from api import get_market_conditions_summary
-            summary = get_market_conditions_summary(force_refresh=True) 
-            
+            summary = get_market_conditions_summary(force_refresh=False)  # Use cache, don't force refresh
+        
             # Log warnings for dangerous market conditions
             if summary['regime'] == 'choppy' and summary['confidence'] > 80:
                 logging.warning(f"⚠️ CHOPPY MARKET: Confidence {summary['confidence']}% - Trading not recommended")
-            
+        
             if summary['risk_level'] == 'high':
                 logging.warning(f"⚠️ HIGH RISK CONDITIONS: {summary['key_factors']}")
-                
+            
             if summary['trend_alignment'] < 30:
                 logging.warning(f"⚠️ POOR TREND ALIGNMENT: Only {summary['trend_alignment']}% aligned")
-                
+            
             # Log general market state
             logging.info(f"📊 Market Update: {summary['regime'].upper()} regime "
                         f"(conf: {summary['confidence']}%) | "
                         f"Risk: {summary['risk_level']} | "
                         f"Trade OK: {summary['trade_recommended']}")
-                        
+                    
         except Exception as e:
             logging.error(f"[Market Analysis] Error: {e}")
     
@@ -222,7 +223,7 @@ def start_scheduler(app):
     # Market analysis every 15 minutes
     scheduler.add_job(
         market_analysis_job,
-        CronTrigger(minute='0,15,30,45', second=30, timezone=CT),
+        CronTrigger(minute='1,16,31,46', second=0, timezone=CT),  # Changed from minute='0,15,30,45', second=30
         id='market_analysis',
         replace_existing=True
     )
