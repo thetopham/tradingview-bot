@@ -77,11 +77,7 @@ class SignalRTradingListener(threading.Thread):
                             if state and state.value != 1:  # Not connected
                                 logging.warning(f"Connection unhealthy (state={state}), reconnecting...")
                                 break
-                            # ADD THIS PART - Check if we haven't received events in a while
-                        if hasattr(self, 'last_event_time'):
-                            if time.time() - self.last_event_time > 60:  # No events for 60 seconds
-                                logging.warning("No SignalR events for 60s, forcing reconnect")
-                                break
+                            
                                 
             except Exception as e:
                 consecutive_failures += 1
@@ -142,10 +138,10 @@ class SignalRTradingListener(threading.Thread):
             return wrapped
         
         # Register handlers before starting
-        self.hub.on("GatewayUserAccount", self.event_handlers.get("on_account_update", self.default_handler))
-        self.hub.on("GatewayUserOrder", self.event_handlers.get("on_order_update", self.default_handler))
-        self.hub.on("GatewayUserPosition", self.event_handlers.get("on_position_update", self.default_handler))
-        self.hub.on("GatewayUserTrade", self.event_handlers.get("on_trade_update", self.default_handler))
+        self.hub.on("GatewayUserAccount", wrap_handler(self.event_handlers.get("on_account_update", self.default_handler)))
+        self.hub.on("GatewayUserOrder", wrap_handler(self.event_handlers.get("on_order_update", self.default_handler)))
+        self.hub.on("GatewayUserPosition", wrap_handler(self.event_handlers.get("on_position_update", self.default_handler)))
+        self.hub.on("GatewayUserTrade", wrap_handler(self.event_handlers.get("on_trade_update", self.default_handler)))
         
         self.hub.on_open(lambda: self.on_open())
         self.hub.on_close(lambda: self.handle_close())
@@ -194,7 +190,7 @@ class SignalRTradingListener(threading.Thread):
 
     def on_reconnected(self):
         logging.info("SignalR reconnected! Resubscribing to all events...")
-         self.last_event_time = time.time()
+        self.last_event_time = time.time()
         self.subscribe_all()
         self.sweep_and_cleanup_positions_and_stops()
 
