@@ -227,7 +227,7 @@ def start_scheduler(app):
     # Market analysis every 15 minutes
     scheduler.add_job(
         market_analysis_job,
-        CronTrigger(minute='1,16,31,46', second=0, timezone=CT),  # Changed from minute='0,15,30,45', second=30
+        CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=45, timezone=CT),  # Changed from minute='0,15,30,45', second=30
         id='market_analysis',
         replace_existing=True
     )
