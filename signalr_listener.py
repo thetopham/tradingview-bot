@@ -5,14 +5,16 @@ import logging
 from api import search_pos, log_trade_results_to_supabase, check_for_phantom_orders
 from datetime import datetime
 from signalrcore.hub_connection_builder import HubConnectionBuilder
+import pytz
 
+CT = pytz.timezone("America/Chicago")
 USER_HUB_URL_BASE = "wss://rtc.topstepx.com/hubs/user?access_token={}"
 
 orders_state = {}
 positions_state = {}
 trade_meta = {}
 
-def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, order_id, alert, account, symbol, sl_id=None, tp_ids=None, trades=None):
+def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, order_id, alert, account, symbol, sl_id=None, tp_ids=None, trades=None, regime=None):
     meta = {
         "entry_time": entry_time,
         "ai_decision_id": ai_decision_id,
@@ -26,8 +28,9 @@ def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, o
         "account": account,
         "symbol": symbol,
         "trades": trades,
+        "regime": regime,  # Add regime to metadata
     }
-    logging.info(f"[track_trade] Called with ai_decision_id={ai_decision_id}, meta={meta}")
+    logging.info(f"[track_trade] Called with ai_decision_id={ai_decision_id}, regime={regime}, meta={meta}")
     trade_meta[(acct_id, cid)] = meta
 
 class SignalRTradingListener(threading.Thread):
@@ -43,26 +46,45 @@ class SignalRTradingListener(threading.Thread):
         self.stop_event = threading.Event()
         self.reconnect_event = threading.Event()  # For forced reconnects
         self.last_token = None
+        self.last_event_time = time.time()
 
     def run(self):
+        consecutive_failures = 0
+        
         while not self.stop_event.is_set():
             try:
                 self.ensure_token_valid()
                 token = self.token_getter()
+                
                 if token != self.last_token:
                     self.last_token = token
+                    logging.info("Token changed, establishing new connection")
+                    
                 self.connect_signalr(token)
-                # Short sleep increments for fast reconnect on disconnect
-                for _ in range(3600):  # Up to an hour, check every second
-                    if self.stop_event.is_set() or self.reconnect_event.is_set():
+                consecutive_failures = 0  # Reset on success
+                
+                # Wait for disconnect/reconnect signal
+                while not self.stop_event.is_set():
+                    if self.reconnect_event.wait(timeout=1):
+                        self.reconnect_event.clear()
+                        logging.info("Reconnect event triggered")
                         break
-                    time.sleep(1)
-                # If reconnect_event was set, clear it for next loop
-                if self.reconnect_event.is_set():
-                    self.reconnect_event.clear()
+                        
+                    # Check connection health every 5 seconds
+                    if int(time.time()) % 5 == 0:
+                        if self.hub and hasattr(self.hub, 'transport'):
+                            state = getattr(self.hub.transport, 'state', None)
+                            if state and state.value != 1:  # Not connected
+                                logging.warning(f"Connection unhealthy (state={state}), reconnecting...")
+                                break
+                            
+                                
             except Exception as e:
-                logging.error(f"SignalRListener error: {e}", exc_info=True)
-                time.sleep(10)
+                consecutive_failures += 1
+                wait_time = min(60 * consecutive_failures, 300)  # Max 5 min
+                logging.error(f"SignalRListener error (attempt {consecutive_failures}): {e}", exc_info=True)
+                logging.info(f"Waiting {wait_time}s before retry...")
+                time.sleep(wait_time)
 
     def ensure_token_valid(self):
         with self.auth_lock:
@@ -75,40 +97,86 @@ class SignalRTradingListener(threading.Thread):
         if not token:
             logging.error("No token available for SignalR connection! Check authentication.")
             return
+        
         logging.info(f"Using token for SignalR (first 8): {token[:8]}...")
-
-        url = USER_HUB_URL_BASE.format(token)
+        
+        # Clean up any existing connection
         if self.hub:
-            self.hub.stop()
+            try:
+                self.hub.stop()
+                time.sleep(2)
+            except Exception as e:
+                logging.debug(f"Error stopping old hub: {e}")
+            self.hub = None
+        
+        url = USER_HUB_URL_BASE.format(token)
+        
+        # Build hub with better configuration
         self.hub = (
             HubConnectionBuilder()
             .with_url(url, options={
                 "access_token_factory": lambda: token,
-                "headers": {"Authorization": f"Bearer {token}"},
+                "headers": {
+                    "Authorization": f"Bearer {token}",
+                    "User-Agent": "TradingBot/1.0"
+                },
             })
             .configure_logging(logging.INFO)
             .with_automatic_reconnect({
-                "type": "raw",
-                "keep_alive_interval": 10,
-                "reconnect_interval": 5
+                "type": "interval",
+                "intervals": [0, 1, 2, 5, 10, 30],  # Retry intervals
+                "keep_alive_interval": 15,  # Increased from 10
+                "reconnect_interval": 5    # Increased from 5
             })
             .build()
         )
 
-        # Register event handlers
-        self.hub.on("GatewayUserAccount", self.event_handlers.get("on_account_update", self.default_handler))
-        self.hub.on("GatewayUserOrder", self.event_handlers.get("on_order_update", self.default_handler))
-        self.hub.on("GatewayUserPosition", self.event_handlers.get("on_position_update", self.default_handler))
-        self.hub.on("GatewayUserTrade", self.event_handlers.get("on_trade_update", self.default_handler))
-
+        def wrap_handler(handler):
+            def wrapped(*args, **kwargs):
+                self.last_event_time = time.time()
+                return handler(*args, **kwargs)
+            return wrapped
+        
+        # Register handlers before starting
+        self.hub.on("GatewayUserAccount", wrap_handler(self.event_handlers.get("on_account_update", self.default_handler)))
+        self.hub.on("GatewayUserOrder", wrap_handler(self.event_handlers.get("on_order_update", self.default_handler)))
+        self.hub.on("GatewayUserPosition", wrap_handler(self.event_handlers.get("on_position_update", self.default_handler)))
+        self.hub.on("GatewayUserTrade", wrap_handler(self.event_handlers.get("on_trade_update", self.default_handler)))
+        
         self.hub.on_open(lambda: self.on_open())
         self.hub.on_close(lambda: self.handle_close())
         self.hub.on_reconnect(self.on_reconnected)
         self.hub.on_error(lambda err: self.handle_error(err))
-        self.hub.start()
+        
+        # Start with retry logic
+        max_start_attempts = 3
+        for attempt in range(max_start_attempts):
+            try:
+                self.hub.start()
+                # Wait to verify connection
+                time.sleep(3)
+                
+                # Check if we're actually connected
+                if hasattr(self.hub, 'transport') and hasattr(self.hub.transport, 'state'):
+                    if self.hub.transport.state.value == 1:  # Connected
+                        logging.info("SignalR hub started successfully")
+                        self.last_event_time = time.time()
+                        return
+                    else:
+                        logging.warning(f"Hub state after start: {self.hub.transport.state}")
+                
+            except Exception as e:
+                logging.error(f"SignalR start attempt {attempt + 1}/{max_start_attempts} failed: {e}")
+                if attempt < max_start_attempts - 1:
+                    wait_time = (attempt + 1) * 5
+                    logging.info(f"Waiting {wait_time}s before retry...")
+                    time.sleep(wait_time)
+                else:
+                    raise
 
     def on_open(self):
         logging.info("SignalR connection established. Subscribing to all events.")
+        self.last_event_time = time.time()
         self.subscribe_all()
 
     def subscribe_all(self):
@@ -122,25 +190,52 @@ class SignalRTradingListener(threading.Thread):
 
     def on_reconnected(self):
         logging.info("SignalR reconnected! Resubscribing to all events...")
+        self.last_event_time = time.time()
         self.subscribe_all()
         self.sweep_and_cleanup_positions_and_stops()
 
     def default_handler(self, args):
+        self.last_event_time = time.time()
         logging.info(f"SignalR event: {args}")
 
     def handle_close(self):
-        logging.warning("SignalR connection closed! Forcing reconnect.")
-        # Force reconnect immediately
+        close_time = datetime.now(CT)
+        logging.warning(f"SignalR connection closed at {close_time}")
+        
+        # Check if this is a market hour boundary (common disconnect time)
+        if close_time.minute >= 25 and close_time.minute <= 30:
+            logging.info("Disconnect near hour boundary - waiting 90s for server reset")
+            time.sleep(90)
+        else:
+            # Normal reconnect delay
+            time.sleep(10)
+        
+        # Set reconnect flag
         self.reconnect_event.set()
         if self.hub:
-            self.hub.stop()
+            try:
+                self.hub.stop()
+            except:
+                pass
 
     def handle_error(self, err):
         logging.error(f"SignalR connection error: {err}")
-        # On error, trigger a forced reconnect
+        error_msg = str(err).lower()
+        
+        # Check for auth errors
+        if '401' in error_msg or 'unauthorized' in error_msg:
+            logging.error("Authentication error - forcing token refresh")
+            with self.auth_lock:
+                self.authenticate_func()
+        
+        # Don't reconnect immediately on errors
+        time.sleep(30)
         self.reconnect_event.set()
         if self.hub:
-            self.hub.stop()
+            try:
+                self.hub.stop()
+            except:
+                pass
 
     def stop(self):
         self.stop_event.set()
