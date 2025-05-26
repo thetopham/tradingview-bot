@@ -164,6 +164,7 @@ class SignalRTradingListener(threading.Thread):
                 if hasattr(self.hub, 'transport') and hasattr(self.hub.transport, 'state'):
                     if self.hub.transport.state.value == 1:  # Connected
                         logging.info("SignalR hub started successfully")
+                        self.last_event_time = time.time()
                         return
                     else:
                         logging.warning(f"Hub state after start: {self.hub.transport.state}")
@@ -179,6 +180,7 @@ class SignalRTradingListener(threading.Thread):
 
     def on_open(self):
         logging.info("SignalR connection established. Subscribing to all events.")
+        self.last_event_time = time.time()
         self.subscribe_all()
 
     def subscribe_all(self):
@@ -192,6 +194,7 @@ class SignalRTradingListener(threading.Thread):
 
     def on_reconnected(self):
         logging.info("SignalR reconnected! Resubscribing to all events...")
+         self.last_event_time = time.time()
         self.subscribe_all()
         self.sweep_and_cleanup_positions_and_stops()
 
