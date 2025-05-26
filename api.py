@@ -507,7 +507,12 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
                             if (now - timestamp).total_seconds() < 5 * 60:
                                 snapshot_data = record.get('snapshot')
                                 if snapshot_data:
-                                    # ... parsing logic ...
+                                    # Parse the JSON data
+                                    if isinstance(snapshot_data, str):
+                                        parsed_data = json.loads(snapshot_data)
+                                    else:
+                                        parsed_data = snapshot_data
+                                    
                                     timeframe_data[tf] = parsed_data
                                     chart_urls[tf] = {
                                         "url": parsed_data.get("url"),
@@ -524,7 +529,7 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
             except Exception as e:
                 logging.error(f"Failed to check cache for {tf}: {e}")
                 timeframes_needing_fetch.append(tf)
-
+    
     # Step 2: Make concurrent n8n calls for timeframes that need fresh data
     if timeframes_needing_fetch:
         logging.info(f"Fetching fresh analysis from n8n for: {timeframes_needing_fetch}")
