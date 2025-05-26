@@ -46,6 +46,7 @@ class SignalRTradingListener(threading.Thread):
         self.stop_event = threading.Event()
         self.reconnect_event = threading.Event()  # For forced reconnects
         self.last_token = None
+        self.last_event_time = time.time()
 
     def run(self):
         consecutive_failures = 0
@@ -69,12 +70,17 @@ class SignalRTradingListener(threading.Thread):
                         logging.info("Reconnect event triggered")
                         break
                         
-                    # Check connection health every 30 seconds
-                    if int(time.time()) % 30 == 0:
+                    # Check connection health every 5 seconds
+                    if int(time.time()) % 5 == 0:
                         if self.hub and hasattr(self.hub, 'transport'):
                             state = getattr(self.hub.transport, 'state', None)
                             if state and state.value != 1:  # Not connected
                                 logging.warning(f"Connection unhealthy (state={state}), reconnecting...")
+                                break
+                            # ADD THIS PART - Check if we haven't received events in a while
+                        if hasattr(self, 'last_event_time'):
+                            if time.time() - self.last_event_time > 60:  # No events for 60 seconds
+                                logging.warning("No SignalR events for 60s, forcing reconnect")
                                 break
                                 
             except Exception as e:
@@ -122,9 +128,9 @@ class SignalRTradingListener(threading.Thread):
             .configure_logging(logging.INFO)
             .with_automatic_reconnect({
                 "type": "interval",
-                "intervals": [0, 2, 5, 10, 30, 60],  # Retry intervals
-                "keep_alive_interval": 30,  # Increased from 10
-                "reconnect_interval": 10    # Increased from 5
+                "intervals": [0, 1, 2, 5, 10, 30],  # Retry intervals
+                "keep_alive_interval": 15,  # Increased from 10
+                "reconnect_interval": 5    # Increased from 5
             })
             .build()
         )
@@ -184,6 +190,7 @@ class SignalRTradingListener(threading.Thread):
         self.sweep_and_cleanup_positions_and_stops()
 
     def default_handler(self, args):
+        self.last_event_time = time.time()
         logging.info(f"SignalR event: {args}")
 
     def handle_close(self):
