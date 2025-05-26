@@ -472,8 +472,8 @@ class PositionManager:
             'reason': f"Added to winning position in {market_conditions['regime']} market",
             'ai_decision_id': ai_decision.get('ai_decision_id')
         }
-    
-    def scan_for_opportunities(self, acct_id: int, account_name: str) -> Optional[Dict]:
+     '''
+   def scan_for_opportunities(self, acct_id: int, account_name: str) -> Optional[Dict]:
         """
         Scan market conditions and initiate new trades autonomously
         Returns trade decision or None
@@ -535,7 +535,7 @@ class PositionManager:
         
         self.logger.info(f"Autonomous trade opportunity: {trade_decision}")
         return trade_decision
-    
+'''    
     def get_position_context_for_ai(self, acct_id: int, cid: str) -> Dict:
         """
         Get position context formatted for AI decision making - ENHANCED VERSION
