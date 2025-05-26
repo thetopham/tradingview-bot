@@ -221,7 +221,7 @@ def start_scheduler(app):
     def monitor_data_feed():
         """Monitor data feed health and log price updates"""
         try:
-            from api import get_current_market_price, get_spread_and_mid_price
+            from api import get_current_market_price, get_spread_and_mid_price, get_contract
         
             # Get current price
             price, source = get_current_market_price(max_age_seconds=60)
@@ -230,7 +230,7 @@ def start_scheduler(app):
                 # Get additional price info
                 price_info = get_spread_and_mid_price()
             
-                # Only log if there's an open position
+                # Only log if there's an open position or if market is open
                 has_positions = False
                 for account_name, acct_id in ACCOUNTS.items():
                     positions = position_manager.get_position_state(acct_id, get_contract("CON.F.US.MES.M25"))
@@ -238,15 +238,33 @@ def start_scheduler(app):
                         has_positions = True
                         break
             
-                if has_positions:
-                    logging.info(f"📊 Market Price: ${price:.2f} from {source} | "
-                               f"Range: {price_info.get('low', 'N/A')}-{price_info.get('high', 'N/A')} | "
-                               f"1m bar: {price_info.get('range', 0):.2f} pts")
-            else:
-                logging.warning("⚠️ No current market price available - data feed may be stale")
+                # Check if market is closed
+                is_market_closed = "market_closed" in source
             
-        except Exception as e:
-            logging.error(f"Data feed monitor error: {e}")
+                if has_positions or not is_market_closed:
+                    if is_market_closed:
+                        logging.info(f"📊 Last Market Price (CLOSED): ${price:.2f} from {source}")
+                    else:
+                        logging.info(f"📊 Market Price: ${price:.2f} from {source} | "
+                                   f"Range: {price_info.get('low', 'N/A')}-{price_info.get('high', 'N/A')} | "
+                                   f"1m bar: {price_info.get('range', 0):.2f} pts")
+            else:
+                # Only warn if market should be open
+                now = datetime.now(CT)
+                if not (now.weekday() == 5 or (now.weekday() == 6 and now.hour < 17) or 
+                       (now.weekday() == 4 and now.hour >= 16)):
+                    logging.warning("⚠️ No current market price available - data feed may be stale")
+            
+    except Exception as e:
+        logging.error(f"Data feed monitor error: {e}")
+
+ 
+    # Data feed monitor - runs every minute during market hours
+    scheduler.add_job(
+        monitor_data_feed,
+        CronTrigger(minute='*', second=15, timezone=CT),  # Every minute at :15 seconds
+        id='data_feed_monitor',
+        replace_existing=True
 
     
     # Schedule jobs
@@ -274,14 +292,7 @@ def start_scheduler(app):
         replace_existing=True
     )
 
-    # Data feed monitor - runs every minute during market hours
-    scheduler.add_job(
-        monitor_data_feed,
-        CronTrigger(minute='*', second=15, timezone=CT),  # Every minute at :15 seconds
-        id='data_feed_monitor',
-        replace_existing=True
-    )
-    
+       
     # Account health check every 30 minutes
     scheduler.add_job(
         account_health_check,
