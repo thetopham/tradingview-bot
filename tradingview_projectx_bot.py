@@ -157,8 +157,8 @@ def get_account_positions(account):
         return jsonify({"error": str(e)}), 500
 
 @app.route("/positions/<account>/manage", methods=["POST"])
-def manage_position(account):
-    """Manually trigger position management for an account"""
+def get_position_suggestions(account):
+    """Get AI suggestions for position management (no autonomous actions)"""
     try:
         data = request.get_json()
         if data.get("secret") != WEBHOOK_SECRET:
@@ -174,19 +174,22 @@ def manage_position(account):
         pm = PositionManager(ACCOUNTS)
         cid = get_contract("CON.F.US.MES.M25")
         
-        position_state = pm.get_position_state(acct_id, cid)
-        result = pm.manage_position(acct_id, cid, position_state)
+        # Get full context for AI
+        context = pm.get_position_context_for_ai(acct_id, cid)
         
+        # Instead of managing positions, return context and suggestions
         return jsonify({
             "account": account,
-            "result": result,
+            "context": context,
+            "message": "Position context provided - AI should make all trading decisions",
             "timestamp": datetime.now(CT).isoformat()
         }), 200
         
     except Exception as e:
-        logging.error(f"Error managing position: {e}")
+        logging.error(f"Error getting position suggestions: {e}")
         return jsonify({"error": str(e)}), 500
 
+'''
 @app.route("/scan", methods=["POST"])
 def scan_opportunities():
     """Manually trigger opportunity scan"""
@@ -214,7 +217,7 @@ def scan_opportunities():
     except Exception as e:
         logging.error(f"Error scanning opportunities: {e}")
         return jsonify({"error": str(e)}), 500
-
+'''
 @app.route("/account/<account>/health", methods=["GET"])
 def get_account_health(account):
     """Get account health metrics"""
@@ -263,7 +266,7 @@ def get_market_status():
     except Exception as e:
         logging.error(f"Error getting market status: {e}")
         return jsonify({"error": str(e)}), 500
-
+'''
 @app.route("/autonomous/toggle", methods=["POST"])
 def toggle_autonomous():
     """Toggle autonomous trading on/off"""
@@ -285,7 +288,7 @@ def toggle_autonomous():
     except Exception as e:
         logging.error(f"Error toggling autonomous: {e}")
         return jsonify({"error": str(e)}), 500
-
+'''
 @app.route("/positions/realtime", methods=["GET"])
 def get_realtime_positions():
     """Get real-time positions with current P&L across all accounts"""
@@ -356,6 +359,32 @@ def get_realtime_positions():
         
     except Exception as e:
         logging.error(f"Error getting real-time positions: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/position-context/<account>", methods=["GET"])
+def get_position_context(account):
+    """Get position context for AI decision making"""
+    try:
+        from position_manager import PositionManager
+        from api import get_contract
+        
+        acct_id = ACCOUNTS.get(account.lower())
+        if not acct_id:
+            return jsonify({"error": f"Unknown account: {account}"}), 404
+        
+        pm = PositionManager(ACCOUNTS)
+        cid = get_contract("CON.F.US.MES.M25")
+        
+        context = pm.get_position_context_for_ai(acct_id, cid)
+        
+        return jsonify({
+            "account": account,
+            "position_context": context,
+            "timestamp": datetime.now(CT).isoformat()
+        }), 200
+        
+    except Exception as e:
+        logging.error(f"Error getting position context: {e}")
         return jsonify({"error": str(e)}), 500
 
 def handle_webhook_logic(data):
