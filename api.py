@@ -714,7 +714,7 @@ def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url)
             n8n_base_url = ai_url.replace('/webhook', '')
         
         # Get market regime analysis with chart URLs
-        market_analysis = fetch_multi_timeframe_analysis(n8n_base_url, force_refresh=True)
+        market_analysis = fetch_multi_timeframe_analysis(n8n_base_url, force_refresh=False)
         
         regime = market_analysis['regime_analysis']
         regime_rules = market_regime_analyzer.get_regime_trading_rules(regime['primary_regime'])
