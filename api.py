@@ -429,6 +429,39 @@ def get_supabase_client() -> Client:
 market_regime_analyzer = MarketRegime()
 
 
+class RegimeTracker:
+    def __init__(self):
+        self.last_regime = None
+        self.regime_start_time = None
+        
+    def check_regime_change(self, new_regime: str, confidence: int) -> Optional[Dict]:
+        """Check if regime has changed significantly"""
+        if self.last_regime is None:
+            self.last_regime = new_regime
+            self.regime_start_time = datetime.now(CT)
+            return None
+            
+        if new_regime != self.last_regime and confidence > 70:
+            duration = (datetime.now(CT) - self.regime_start_time).total_seconds() / 60
+            change_info = {
+                'from': self.last_regime,
+                'to': new_regime,
+                'duration_minutes': duration,
+                'timestamp': datetime.now(CT).isoformat()
+            }
+            
+            self.last_regime = new_regime
+            self.regime_start_time = datetime.now(CT)
+            
+            # Log significant changes
+            logging.warning(f"🔄 REGIME CHANGE: {change_info['from']} → {change_info['to']} "
+                          f"(lasted {duration:.1f} minutes)")
+            
+            return change_info
+            
+        return None
+
+
 def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None, cache_minutes: int = 4, force_refresh: bool = False) -> Dict:
     """
     Fetch multi-timeframe analysis, using Supabase cache if recent.
