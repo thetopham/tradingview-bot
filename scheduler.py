@@ -43,7 +43,7 @@ def start_scheduler(app):
             # Force fetch fresh charts AND regime analysis
             market_analysis = fetch_multi_timeframe_analysis(
                 n8n_base_url,
-                timeframes=['1m', '5m', '15m', '30m', '1h'],
+                timeframes=['5m', '15m', '1h'], 
                 cache_minutes=0,  # Don't use cache
                 force_refresh=True  # Force fresh fetch
             )
