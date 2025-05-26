@@ -13,7 +13,7 @@ from config import load_config
 from dateutil import parser
 from market_regime import MarketRegime
 from supabase import create_client, Client
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 session = requests.Session()
 config = load_config()
