@@ -7,15 +7,16 @@ Handles webhooks, AI decisions, trade execution, and scheduled processing.
 """
 
 from datetime import time as dtime, timedelta
-from api import ai_trade_decision_with_regime, get_market_conditions_summary
 from market_regime import MarketRegime
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from logging_config import setup_logging
 from config import load_config
 from api import (
-    flatten_contract, get_contract, ai_trade_decision, cancel_all_stops, search_pos 
-    )
+    flatten_contract, get_contract, ai_trade_decision, cancel_all_stops, 
+    search_pos, get_supabase_client, search_trades, search_open,
+    get_market_conditions_summary, ai_trade_decision_with_regime
+)
 from strategies import run_bracket, run_brackmod, run_pivot
 from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token
@@ -24,6 +25,7 @@ from threading import Thread
 import threading
 from datetime import datetime
 import logging
+import json
 
 # --- Logging/Config/Globals ---
 setup_logging()
