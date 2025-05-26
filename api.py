@@ -4,8 +4,10 @@ import logging
 import json
 import time
 import pytz
+import threading
+import hashlib
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from auth import ensure_token, get_token
 from config import load_config
 from dateutil import parser
@@ -22,6 +24,9 @@ SUPABASE_URL = config['SUPABASE_URL']
 SUPABASE_KEY = config['SUPABASE_KEY']
 CT = pytz.timezone("America/Chicago")
 
+# Global lock for regime cache updates
+regime_cache_lock = threading.Lock()
+regime_cache_in_progress = {}
 
 
 # ─── API Functions ────────────────────────────────────
@@ -462,183 +467,238 @@ class RegimeTracker:
         return None
 
 
-def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None, cache_minutes: int = 4, force_refresh: bool = False) -> Dict:
+def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None, 
+                                 cache_minutes: int = 4, force_refresh: bool = False) -> Dict:
     """
-    Fetch multi-timeframe analysis, using Supabase cache if recent.
-    Enhanced to collect chart URLs for archival.
+    Fetch multi-timeframe analysis with proper concurrency control
     """
     import datetime
     import concurrent.futures
-    import threading
     
     now = datetime.datetime.now(datetime.timezone.utc)
     supabase_client = get_supabase_client()
-
-    logging.info(f"[fetch_multi_timeframe_analysis] Called at {now}, cache_minutes={cache_minutes}, force_refresh={force_refresh}")
-
+    
     if timeframes is None:
         timeframes = ['1m', '5m', '15m', '30m', '1h']
     
-    timeframe_data = {}
-    chart_urls = {}
+    # Create a unique key for this analysis request
+    request_key = hashlib.md5(f"{n8n_base_url}:{','.join(timeframes)}:{force_refresh}".encode()).hexdigest()
     
-    # Check force_refresh FIRST
-    if force_refresh:
-        logging.info("[fetch_multi_timeframe_analysis] Force refresh enabled - bypassing all caches")
-        timeframes_needing_fetch = timeframes
-    else:
-        # Normal cache checking logic
-        try:
-            recent = supabase_client.table('market_regime_cache') \
-                .select('*') \
-                .order('timestamp', desc=True) \
-                .limit(1) \
-                .execute()
+    # Check if another thread is already fetching this exact analysis
+    with regime_cache_lock:
+        if request_key in regime_cache_in_progress:
+            # Wait for the other thread to complete (with timeout)
+            start_wait = time.time()
+            while request_key in regime_cache_in_progress and (time.time() - start_wait) < 30:
+                time.sleep(0.1)
             
-            if recent.data:
-                rec = recent.data[0]
-                timestamp_str = rec.get('timestamp')
-                if timestamp_str:
-                    try:
-                        timestamp = parser.parse(timestamp_str)
-                        age_seconds = (now - timestamp).total_seconds()
-                        logging.info(f"[fetch_multi_timeframe_analysis] Found cache aged {age_seconds}s")
-                        if age_seconds < cache_minutes * 60:
-                            logging.info("Using cached regime analysis from Supabase.")
-                            cached_data = json.loads(rec['analysis_data'])
-                            
-                            # Validate cached data structure
-                            if isinstance(cached_data, dict) and 'regime_analysis' in cached_data:
-                                return cached_data
-                            else:
-                                logging.warning(f"Invalid cached data structure, fetching fresh data")
-                    except Exception as e:
-                        logging.warning(f"Error parsing cached timestamp: {e}")
-        except Exception as e:
-            logging.info(f"No cache table or cache retrieval failed: {e}")
+            # Try to get the result from cache now
+            if not force_refresh:
+                try:
+                    recent = supabase_client.table('market_regime_cache') \
+                        .select('*') \
+                        .order('timestamp', desc=True) \
+                        .limit(1) \
+                        .execute()
+                    
+                    if recent.data:
+                        rec = recent.data[0]
+                        timestamp_str = rec.get('timestamp')
+                        if timestamp_str:
+                            timestamp = parser.parse(timestamp_str)
+                            age_seconds = (now - timestamp).total_seconds()
+                            if age_seconds < 60:  # If less than 1 minute old, use it
+                                logging.info("Using very recent cached regime analysis")
+                                cached_data = json.loads(rec['analysis_data'])
+                                if isinstance(cached_data, dict) and 'regime_analysis' in cached_data:
+                                    return cached_data
+                except Exception as e:
+                    logging.warning(f"Error checking recent cache: {e}")
         
-        # If we get here and not force_refresh, check individual timeframe caches
-        timeframes_needing_fetch = []
+        # Mark that we're fetching this analysis
+        regime_cache_in_progress[request_key] = True
+    
+    try:
+        logging.info(f"[fetch_multi_timeframe_analysis] Called at {now}, cache_minutes={cache_minutes}, "
+                    f"force_refresh={force_refresh}, request_key={request_key[:8]}, "
+                    f"thread={threading.current_thread().name}")
         
-        for tf in timeframes:
+        timeframe_data = {}
+        chart_urls = {}
+        
+        # Check cache first (unless force_refresh)
+        if not force_refresh:
             try:
-                result = supabase_client.table('latest_chart_analysis') \
+                # Use a more specific query to avoid duplicates
+                recent = supabase_client.table('market_regime_cache') \
                     .select('*') \
-                    .eq('symbol', 'MES') \
-                    .eq('timeframe', tf) \
+                    .gte('timestamp', (now - datetime.timedelta(minutes=cache_minutes)).isoformat()) \
                     .order('timestamp', desc=True) \
                     .limit(1) \
                     .execute()
                 
-                if result.data:
-                    record = result.data[0]
-                    timestamp_str = record.get('timestamp')
-                    if timestamp_str:
-                        try:
-                            timestamp = parser.parse(timestamp_str)
-                            # Use cached data if less than 5 minutes old
-                            if (now - timestamp).total_seconds() < 5 * 60:
-                                snapshot_data = record.get('snapshot')
-                                if snapshot_data:
-                                    # Parse the JSON data
-                                    if isinstance(snapshot_data, str):
-                                        parsed_data = json.loads(snapshot_data)
-                                    else:
-                                        parsed_data = snapshot_data
-                                    
-                                    timeframe_data[tf] = parsed_data
-                                    chart_urls[tf] = {
-                                        "url": parsed_data.get("url"),
-                                        "chart_time": parsed_data.get("chart_time")
-                                    }
-                                    logging.info(f"Using cached {tf} analysis from database")
-                                    continue
-                        except Exception as e:
-                            logging.warning(f"Error parsing {tf} timestamp: {e}")
-                
-                # If we get here, we need to fetch fresh data
-                timeframes_needing_fetch.append(tf)
-                
-            except Exception as e:
-                logging.error(f"Failed to check cache for {tf}: {e}")
-                timeframes_needing_fetch.append(tf)
-    
-    # Step 2: Make concurrent n8n calls for timeframes that need fresh data
-    if timeframes_needing_fetch:
-        logging.info(f"Fetching fresh analysis from n8n for: {timeframes_needing_fetch}")
-        
-        def fetch_timeframe(tf):
-            """Fetch a single timeframe from n8n"""
-            try:
-                webhook_url = f"{n8n_base_url}/webhook/{tf}"
-                response = session.post(webhook_url, json={}, timeout=60)
-                response.raise_for_status()
-                
-                if response.text.strip():
-                    try:
-                        data = response.json()
-                        
-                        # Handle different response formats
-                        if isinstance(data, str):
-                            data = json.loads(data)
-                        elif isinstance(data, list):
-                            # n8n might return array of items, take first
-                            if data:
-                                data = data[0]
-                            else:
-                                logging.error(f"Empty array response from {tf} webhook")
-                                return tf, {}
-                        
-                        logging.info(f"Successfully fetched {tf} analysis")
-                        return tf, data
-                    except json.JSONDecodeError as e:
-                        logging.error(f"Failed to parse {tf} JSON response: {e}")
-                        return tf, {}
-                else:
-                    logging.error(f"Empty response from {tf} webhook")
-                    return tf, {}
+                if recent.data:
+                    rec = recent.data[0]
+                    logging.info("Using cached regime analysis from Supabase")
+                    cached_data = json.loads(rec['analysis_data'])
                     
+                    # Validate cached data structure
+                    if isinstance(cached_data, dict) and 'regime_analysis' in cached_data:
+                        return cached_data
+                    else:
+                        logging.warning("Invalid cached data structure, fetching fresh data")
             except Exception as e:
-                logging.error(f"Failed to fetch {tf} analysis: {e}")
-                return tf, {}
+                logging.info(f"Cache retrieval failed: {e}")
         
-        # Make all n8n calls concurrently
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_tf = {executor.submit(fetch_timeframe, tf): tf for tf in timeframes_needing_fetch}
-            
-            for future in concurrent.futures.as_completed(future_to_tf):
-                tf, data = future.result()
-                if data:
-                    timeframe_data[tf] = data
-                    # Collect URL for archival
-                    chart_urls[tf] = {
-                        "url": data.get("url"),
-                        "chart_time": data.get("chart_time")
-                    }
-
-    # Analyze regime with whatever data we have
-    logging.info(f"Analyzing regime with {len(timeframe_data)} timeframes of data")
-    regime_analysis = market_regime_analyzer.analyze_regime(timeframe_data)
+        # If we get here and not force_refresh, check individual timeframe caches
+        timeframes_needing_fetch = []
+        
+        if not force_refresh:
+            for tf in timeframes:
+                try:
+                    result = supabase_client.table('latest_chart_analysis') \
+                        .select('*') \
+                        .eq('symbol', 'MES') \
+                        .eq('timeframe', tf) \
+                        .order('timestamp', desc=True) \
+                        .limit(1) \
+                        .execute()
+                    
+                    if result.data:
+                        record = result.data[0]
+                        timestamp_str = record.get('timestamp')
+                        if timestamp_str:
+                            try:
+                                timestamp = parser.parse(timestamp_str)
+                                # Use cached data if less than 5 minutes old
+                                if (now - timestamp).total_seconds() < 5 * 60:
+                                    snapshot_data = record.get('snapshot')
+                                    if snapshot_data:
+                                        # Parse the JSON data
+                                        if isinstance(snapshot_data, str):
+                                            parsed_data = json.loads(snapshot_data)
+                                        else:
+                                            parsed_data = snapshot_data
+                                        
+                                        timeframe_data[tf] = parsed_data
+                                        chart_urls[tf] = {
+                                            "url": parsed_data.get("url"),
+                                            "chart_time": parsed_data.get("chart_time")
+                                        }
+                                        logging.info(f"Using cached {tf} analysis from database")
+                                        continue
+                            except Exception as e:
+                                logging.warning(f"Error parsing {tf} timestamp: {e}")
+                    
+                    # If we get here, we need to fetch fresh data
+                    timeframes_needing_fetch.append(tf)
+                    
+                except Exception as e:
+                    logging.error(f"Failed to check cache for {tf}: {e}")
+                    timeframes_needing_fetch.append(tf)
+        else:
+            timeframes_needing_fetch = timeframes
     
-    # Create combined snapshot with URLs
-    snapshot = {
-        'timeframe_data': timeframe_data,
-        'regime_analysis': regime_analysis,
-        'chart_urls': chart_urls,  # NEW: Include URLs for archival
-        'timestamp': now.isoformat()
-    }
+        # Step 2: Make concurrent n8n calls for timeframes that need fresh data
+        if timeframes_needing_fetch:
+            logging.info(f"Fetching fresh analysis from n8n for: {timeframes_needing_fetch}")
+            
+            def fetch_timeframe(tf):
+                """Fetch a single timeframe from n8n"""
+                try:
+                    webhook_url = f"{n8n_base_url}/webhook/{tf}"
+                    response = session.post(webhook_url, json={}, timeout=60)
+                    response.raise_for_status()
+                    
+                    if response.text.strip():
+                        try:
+                            data = response.json()
+                            
+                            # Handle different response formats
+                            if isinstance(data, str):
+                                data = json.loads(data)
+                            elif isinstance(data, list):
+                                # n8n might return array of items, take first
+                                if data:
+                                    data = data[0]
+                                else:
+                                    logging.error(f"Empty array response from {tf} webhook")
+                                    return tf, {}
+                            
+                            logging.info(f"Successfully fetched {tf} analysis")
+                            return tf, data
+                        except json.JSONDecodeError as e:
+                            logging.error(f"Failed to parse {tf} JSON response: {e}")
+                            return tf, {}
+                    else:
+                        logging.error(f"Empty response from {tf} webhook")
+                        return tf, {}
+                        
+                except Exception as e:
+                    logging.error(f"Failed to fetch {tf} analysis: {e}")
+                    return tf, {}
+            
+            # Make all n8n calls concurrently
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                future_to_tf = {executor.submit(fetch_timeframe, tf): tf for tf in timeframes_needing_fetch}
+                
+                for future in concurrent.futures.as_completed(future_to_tf):
+                    tf, data = future.result()
+                    if data:
+                        timeframe_data[tf] = data
+                        # Collect URL for archival
+                        chart_urls[tf] = {
+                            "url": data.get("url"),
+                            "chart_time": data.get("chart_time")
+                        }
 
-    # Save regime analysis to cache (separate table)
-    try:
-        supabase_client.table('market_regime_cache').insert({
-            'analysis_data': json.dumps(snapshot),
+        # Analyze regime with whatever data we have
+        logging.info(f"Analyzing regime with {len(timeframe_data)} timeframes of data")
+        regime_analysis = market_regime_analyzer.analyze_regime(timeframe_data)
+        
+        # Create combined snapshot with URLs
+        snapshot = {
+            'timeframe_data': timeframe_data,
+            'regime_analysis': regime_analysis,
+            'chart_urls': chart_urls,  # Include URLs for archival
             'timestamp': now.isoformat()
-        }).execute()
-        logging.info("Saved regime analysis to cache")
-    except Exception as e:
-        logging.error(f"Failed to save regime cache: {e}")
+        }
 
-    return snapshot
+        # Before saving to cache, clean up old entries
+        try:
+            # Delete entries older than 5 minutes to prevent accumulation
+            cutoff = (now - datetime.timedelta(minutes=5)).isoformat()
+            supabase_client.table('market_regime_cache') \
+                .delete() \
+                .lt('timestamp', cutoff) \
+                .execute()
+        except Exception as e:
+            logging.warning(f"Failed to clean old cache entries: {e}")
+
+        # Save regime analysis to cache with duplicate prevention
+        try:
+            # First, delete any entries from the last second to prevent near-duplicates
+            one_second_ago = (now - datetime.timedelta(seconds=1)).isoformat()
+            supabase_client.table('market_regime_cache') \
+                .delete() \
+                .gte('timestamp', one_second_ago) \
+                .execute()
+            
+            # Now insert the new entry
+            supabase_client.table('market_regime_cache').insert({
+                'analysis_data': json.dumps(snapshot),
+                'timestamp': now.isoformat()
+            }).execute()
+            logging.info("Saved regime analysis to cache")
+        except Exception as e:
+            logging.error(f"Failed to save regime cache: {e}")
+
+        return snapshot
+        
+    finally:
+        # Always clean up the in-progress marker
+        with regime_cache_lock:
+            regime_cache_in_progress.pop(request_key, None)
 
 
 def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url):
@@ -861,7 +921,7 @@ def get_market_conditions_summary(force_refresh: bool = False) -> Dict:
         else:
             n8n_base_url = n8n_ai_url.replace('/webhook', '')
         
-        market_analysis = fetch_multi_timeframe_analysis(n8n_base_url, force_refresh=force_refresh)  # Pass it here
+        market_analysis = fetch_multi_timeframe_analysis(n8n_base_url, force_refresh=force_refresh)
         
         # Handle the case where market_analysis might be a list or have unexpected structure
         if isinstance(market_analysis, list):
