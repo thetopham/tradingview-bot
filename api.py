@@ -429,7 +429,7 @@ def get_supabase_client() -> Client:
 market_regime_analyzer = MarketRegime()
 
 
-def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None, cache_minutes: int = 2, force_refresh: bool = False) -> Dict:
+def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None, cache_minutes: int = 4, force_refresh: bool = False) -> Dict:
     """
     Fetch multi-timeframe analysis, using Supabase cache if recent.
     Enhanced to collect chart URLs for archival.
