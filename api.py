@@ -479,7 +479,7 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
     supabase_client = get_supabase_client()
     
     if timeframes is None:
-        timeframes = ['1m', '5m', '15m', '30m', '1h']
+        timeframes = ['5m', '15m', '1h']
     
     # Create a unique key for this analysis request
     request_key = hashlib.md5(f"{n8n_base_url}:{','.join(timeframes)}:{force_refresh}".encode()).hexdigest()
