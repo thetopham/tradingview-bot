@@ -83,7 +83,7 @@ class PositionManager:
     
         try:
             from api import get_current_market_price
-            current_price, price_source = get_current_market_price(symbol="CON.F.US.MES.M25")
+            current_price, price_source = get_current_market_price(symbol="MES")
             
             if current_price and avg_price > 0:
                 contract_multiplier = 5  # MES multiplier
