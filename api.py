@@ -970,3 +970,143 @@ def get_market_conditions_summary(force_refresh: bool = False) -> Dict:
             'trend_alignment': 0,
             'volatility': 'unknown'
         }
+
+def get_current_market_price(symbol: str = "MES!!", max_age_seconds: int = 120) -> Tuple[Optional[float], Optional[str]]:
+    """
+    Get the current market price from the best available source.
+    
+    Args:
+        symbol: The symbol to get price for (default: MES!!)
+        max_age_seconds: Maximum age of data to consider valid (default: 120 seconds)
+        
+    Returns:
+        Tuple of (price, source) where source indicates where the price came from
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # First try real-time 1-minute data feed
+        try:
+            result = supabase.table('tv_datafeed') \
+                .select('c, ts') \
+                .eq('symbol', symbol) \
+                .eq('timeframe', 1) \
+                .order('ts', desc=True) \
+                .limit(1) \
+                .execute()
+            
+            if result.data:
+                record = result.data[0]
+                price = float(record.get('c'))
+                
+                # Check data freshness
+                from dateutil import parser
+                bar_time = parser.parse(record.get('ts'))
+                age_seconds = (datetime.now(datetime.timezone.utc) - bar_time).total_seconds()
+                
+                if age_seconds <= max_age_seconds:
+                    logging.debug(f"Current price from 1m feed: ${price} (age: {age_seconds:.0f}s)")
+                    return price, f"1m_feed_{int(age_seconds)}s_old"
+                else:
+                    logging.debug(f"1m data too old: {age_seconds:.0f}s")
+                    
+        except Exception as e:
+            logging.debug(f"Could not get 1m price: {e}")
+        
+        # Fallback to 5m chart analysis
+        try:
+            result = supabase.table('latest_chart_analysis') \
+                .select('snapshot, timestamp') \
+                .eq('symbol', 'MES') \
+                .eq('timeframe', '5m') \
+                .order('timestamp', desc=True) \
+                .limit(1) \
+                .execute()
+            
+            if result.data:
+                record = result.data[0]
+                
+                # Check age
+                timestamp = parser.parse(record.get('timestamp'))
+                age_seconds = (datetime.now(datetime.timezone.utc) - timestamp).total_seconds()
+                
+                if age_seconds <= 360:  # Accept up to 6 minutes old for chart data
+                    snapshot = record.get('snapshot')
+                    if isinstance(snapshot, str):
+                        snapshot = json.loads(snapshot)
+                    
+                    price = snapshot.get('current_price')
+                    if price:
+                        logging.debug(f"Current price from 5m chart: ${price} (age: {age_seconds:.0f}s)")
+                        return float(price), f"5m_chart_{int(age_seconds)}s_old"
+                        
+        except Exception as e:
+            logging.debug(f"Could not get chart price: {e}")
+        
+        # If all else fails, try to get from recent trades
+        try:
+            # This would require access to recent trade data
+            # For now, return None
+            pass
+        except:
+            pass
+            
+        logging.warning("Could not determine current market price from any source")
+        return None, None
+        
+    except Exception as e:
+        logging.error(f"Error getting current market price: {e}")
+        return None, None
+
+
+def get_spread_and_mid_price(symbol: str = "MES!!") -> Dict[str, Optional[float]]:
+    """
+    Get bid, ask, spread, and mid price from the data feed.
+    
+    Returns:
+        Dict with 'bid', 'ask', 'spread', 'mid' keys
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # Get the most recent bar
+        result = supabase.table('tv_datafeed') \
+            .select('o, h, l, c, ts') \
+            .eq('symbol', symbol) \
+            .eq('timeframe', 1) \
+            .order('ts', desc=True) \
+            .limit(1) \
+            .execute()
+        
+        if result.data:
+            bar = result.data[0]
+            # For futures, we can approximate:
+            # - High as resistance/ask area
+            # - Low as support/bid area  
+            # - Close as the last traded price
+            # - Mid as (high + low) / 2
+            
+            high = float(bar.get('h'))
+            low = float(bar.get('l'))
+            close = float(bar.get('c'))
+            
+            return {
+                'last': close,
+                'high': high,
+                'low': low,
+                'mid': (high + low) / 2,
+                'range': high - low,
+                'timestamp': bar.get('ts')
+            }
+            
+    except Exception as e:
+        logging.error(f"Error getting price levels: {e}")
+    
+    return {
+        'last': None,
+        'high': None,
+        'low': None,
+        'mid': None,
+        'range': None,
+        'timestamp': None
+    }
