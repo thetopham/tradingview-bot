@@ -55,14 +55,29 @@ def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
 
     tp_ids = []
     n = len(TP_POINTS)
-    base = size // n
-    rem = size - base * n
-    slices = [base] * n
-    slices[-1] += rem
+    
+    # Improved dynamic slice calculation
+    if size >= n:
+        # If size >= number of TPs, distribute evenly with remainder to last
+        base = size // n
+        rem = size - base * n
+        slices = [base] * n
+        if rem > 0:
+            # Distribute remainder more evenly, starting from last
+            for i in range(rem):
+                slices[-(i+1)] += 1
+    else:
+        # If size < number of TPs, prioritize closer TPs
+        slices = [0] * n
+        for i in range(size):
+            slices[i] = 1
+    
+    # Place TP orders only for non-zero amounts
     for pts, amt in zip(TP_POINTS, slices):
-        px = price + pts if side == 0 else price - pts
-        r = place_limit(acct_id, cid, exit_side, amt, px)
-        tp_ids.append(r["orderId"])
+        if amt > 0:
+            px = price + pts if side == 0 else price - pts
+            r = place_limit(acct_id, cid, exit_side, amt, px)
+            tp_ids.append(r["orderId"])
 
     track_trade(
         acct_id=acct_id,
@@ -117,13 +132,32 @@ def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
     slp = price - STOP_LOSS_POINTS if side == 0 else price + STOP_LOSS_POINTS
     sl = place_stop(acct_id, cid, exit_side, size, slp)
     sl_id = sl["orderId"]
+    
     TP_POINTS = [2.5, 5.0]
-    slices = [2, 1]
+    
+    # Dynamic slice calculation based on actual size
+    n = len(TP_POINTS)
+    if size >= n:
+        # If size >= number of TPs, distribute evenly with remainder to last
+        base = size // n
+        rem = size - base * n
+        slices = [base] * n
+        if rem > 0:
+            # Distribute remainder more evenly, starting from last
+            for i in range(rem):
+                slices[-(i+1)] += 1
+    else:
+        # If size < number of TPs, use 1 contract per TP up to size
+        slices = [0] * n
+        for i in range(size):
+            slices[i] = 1
+    
     tp_ids = []
     for pts, amt in zip(TP_POINTS, slices):
-        px = price + pts if side == 0 else price - pts
-        r = place_limit(acct_id, cid, exit_side, amt, px)
-        tp_ids.append(r["orderId"])
+        if amt > 0:  # Only place TP orders for non-zero amounts
+            px = price + pts if side == 0 else price - pts
+            r = place_limit(acct_id, cid, exit_side, amt, px)
+            tp_ids.append(r["orderId"])
 
     track_trade(
         acct_id=acct_id,
