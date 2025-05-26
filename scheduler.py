@@ -19,14 +19,14 @@ TV_PORT = config['TV_PORT']
 ACCOUNTS = config['ACCOUNTS']
 
 # Global position manager instance
-position_manager = None
+# position_manager = None
 
 def start_scheduler(app):
     global position_manager
     scheduler = BackgroundScheduler()
     
     # Initialize position manager
-    position_manager = PositionManager(ACCOUNTS)
+    # position_manager = PositionManager(ACCOUNTS)
     
     # Original 5-minute cron job
     def cron_job():
@@ -104,7 +104,7 @@ def start_scheduler(app):
         except Exception as e:
             logging.error(f"[Market Analysis] Error: {e}")
     
-    # Position management job - runs every 2 minutes
+    '''# Position management job - runs every 2 minutes
     def position_management_job():
         """Manage existing positions and look for opportunities"""
         try:
@@ -146,7 +146,7 @@ def start_scheduler(app):
                     logging.error(f"[Position Management] Error for {account_name}: {e}")
                     
         except Exception as e:
-            logging.error(f"[Position Management] General error: {e}")
+            logging.error(f"[Position Management] General error: {e}") '''
     
     # Account health check - runs every 30 minutes
     def account_health_check():
@@ -282,7 +282,7 @@ def start_scheduler(app):
         id='market_analysis',
         replace_existing=True
     )
-    
+    '''
     # Position management every 2 minutes (offset from main cron)
     scheduler.add_job(
         position_management_job,
@@ -291,7 +291,7 @@ def start_scheduler(app):
         id='position_management',
         replace_existing=True
     )
-
+'''
        
     # Account health check every 30 minutes
     scheduler.add_job(
@@ -331,7 +331,7 @@ def start_scheduler(app):
     
     return scheduler
 
-
+'''
 def execute_autonomous_trade(trade_decision):
     """Execute an autonomous trade decision - ALWAYS goes through AI for decision ID"""
     try:
@@ -392,3 +392,4 @@ def execute_autonomous_trade(trade_decision):
             
     except Exception as e:
         logging.error(f"Error executing autonomous trade: {e}")
+'''
