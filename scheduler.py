@@ -265,7 +265,7 @@ def start_scheduler(app):
         CronTrigger(minute='*', second=15, timezone=CT),  # Every minute at :15 seconds
         id='data_feed_monitor',
         replace_existing=True
-
+    )
     
     # Schedule jobs
     scheduler.add_job(
