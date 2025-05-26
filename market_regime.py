@@ -18,6 +18,59 @@ class MarketRegime:
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+        # ADD THESE NEW LINES FOR CACHING:
+        self._calculation_cache = {}
+        self._cache_expiry = 240  # 4 minutes
+        self._last_cache_cleanup = time.time()
+        
+    def _generate_cache_key(self, timeframe_data: Dict[str, Dict]) -> str:
+        """Generate a cache key based on input data"""
+        # Create a simplified version of the data for hashing
+        key_data = {}
+        for tf, data in timeframe_data.items():
+            if isinstance(data, dict):
+                key_data[tf] = {
+                    'trend': data.get('trend_direction', data.get('trend', 'unknown')),
+                    'signal': data.get('signal', 'HOLD'),
+                    'current_price': data.get('current_price', 0)
+                }
+        
+        # Create hash of the data
+        key_string = json.dumps(key_data, sort_keys=True)
+        return hashlib.md5(key_string.encode()).hexdigest()
+    
+    def _get_cached_result(self, cache_key: str) -> Optional[Dict]:
+        """Get cached result if still valid"""
+        # Clean up old cache entries periodically
+        if time.time() - self._last_cache_cleanup > 300:  # Every 5 minutes
+            self._cleanup_cache()
+            
+        if cache_key in self._calculation_cache:
+            entry = self._calculation_cache[cache_key]
+            if time.time() - entry['timestamp'] < self._cache_expiry:
+                return entry['result']
+            else:
+                # Remove expired entry
+                del self._calculation_cache[cache_key]
+        return None
+    
+    def _cache_result(self, cache_key: str, result: Dict):
+        """Cache the analysis result"""
+        self._calculation_cache[cache_key] = {
+            'result': result,
+            'timestamp': time.time()
+        }
+    
+    def _cleanup_cache(self):
+        """Remove expired cache entries"""
+        current_time = time.time()
+        expired_keys = [
+            key for key, entry in self._calculation_cache.items()
+            if current_time - entry['timestamp'] > self._cache_expiry
+        ]
+        for key in expired_keys:
+            del self._calculation_cache[key]
+        self._last_cache_cleanup = current_time
         
     def analyze_regime(self, timeframe_data: Dict[str, Dict]) -> Dict:
         """
@@ -35,6 +88,15 @@ class MarketRegime:
             - risk_level: Risk assessment (low/medium/high)
         """
         try:
+            # ADD CACHING CHECK:
+            cache_key = self._generate_cache_key(timeframe_data)
+            cached_result = self._get_cached_result(cache_key)
+            
+            if cached_result:
+                self.logger.debug(f"Using cached regime analysis (key: {cache_key[:8]}...)")
+                return cached_result
+            
+            # EXISTING ANALYSIS CODE continues here...
             # Extract key metrics from each timeframe
             metrics = self._extract_metrics(timeframe_data)
             
@@ -62,6 +124,9 @@ class MarketRegime:
             # Add trading recommendations based on regime
             regime_result['trade_recommendation'] = self._get_trade_recommendation(regime_result)
             regime_result['risk_level'] = self._assess_risk_level(regime_result, metrics)
+            
+            # CACHE THE RESULT before returning:
+            self._cache_result(cache_key, regime_result)
             
             return regime_result
             
