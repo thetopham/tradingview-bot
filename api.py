@@ -664,17 +664,7 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
             'timestamp': now.isoformat()
         }
 
-        # Before saving to cache, clean up old entries
-        try:
-            # Delete entries older than 5 minutes to prevent accumulation
-            cutoff = (now - datetime.timedelta(minutes=5)).isoformat()
-            supabase_client.table('market_regime_cache') \
-                .delete() \
-                .lt('timestamp', cutoff) \
-                .execute()
-        except Exception as e:
-            logging.warning(f"Failed to clean old cache entries: {e}")
-
+       
         # Save regime analysis to cache with duplicate prevention
         try:
             # First, delete any entries from the last second to prevent near-duplicates
