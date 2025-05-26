@@ -286,6 +286,78 @@ def toggle_autonomous():
         logging.error(f"Error toggling autonomous: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route("/positions/realtime", methods=["GET"])
+def get_realtime_positions():
+    """Get real-time positions with current P&L across all accounts"""
+    try:
+        from position_manager import PositionManager
+        from api import get_contract, get_current_market_price
+        
+        pm = PositionManager(ACCOUNTS)
+        cid = get_contract("CON.F.US.MES.M25")
+        
+        # Get current market price
+        current_price, price_source = get_current_market_price()
+        
+        results = {
+            'market_price': current_price,
+            'price_source': price_source,
+            'accounts': {},
+            'total_unrealized_pnl': 0,
+            'total_realized_pnl': 0,
+            'timestamp': datetime.now(CT).isoformat()
+        }
+        
+        for account_name, acct_id in ACCOUNTS.items():
+            position_state = pm.get_position_state(acct_id, cid)
+            
+            if position_state['has_position']:
+                account_info = {
+                    'position': {
+                        'size': position_state['size'],
+                        'side': position_state['side'],
+                        'entry_price': position_state['entry_price'],
+                        'current_price': position_state.get('current_price'),
+                        'unrealized_pnl': position_state.get('unrealized_pnl', 0),
+                        'realized_pnl': position_state.get('realized_pnl', 0),
+                        'total_pnl': position_state['current_pnl'],
+                        'duration_minutes': position_state['duration_minutes'],
+                        'stops': len(position_state['stop_orders']),
+                        'targets': len(position_state['limit_orders'])
+                    }
+                }
+                
+                # Add to totals
+                results['total_unrealized_pnl'] += position_state.get('unrealized_pnl', 0)
+                results['total_realized_pnl'] += position_state.get('realized_pnl', 0)
+            else:
+                account_info = {'position': None}
+            
+            # Add account state
+            account_state = pm.get_account_state(acct_id)
+            account_info['daily_stats'] = {
+                'daily_pnl': account_state['daily_pnl'],
+                'trades_today': account_state['trade_count'],
+                'win_rate': f"{account_state['win_rate']:.1%}",
+                'can_trade': account_state['can_trade'],
+                'risk_level': account_state['risk_level']
+            }
+            
+            results['accounts'][account_name] = account_info
+        
+        # Add summary
+        results['summary'] = {
+            'total_pnl': results['total_unrealized_pnl'] + results['total_realized_pnl'],
+            'positions_open': sum(1 for acc in results['accounts'].values() if acc['position']),
+            'market_status': 'OPEN' if not in_get_flat(datetime.now(CT)) else 'FLAT_WINDOW'
+        }
+        
+        return jsonify(results), 200
+        
+    except Exception as e:
+        logging.error(f"Error getting real-time positions: {e}")
+        return jsonify({"error": str(e)}), 500
+
 def handle_webhook_logic(data):
     try:
         strat = data.get("strategy", "bracket").lower()
