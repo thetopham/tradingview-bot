@@ -551,3 +551,210 @@ class PositionManager:
         context['warnings'] = warnings
         
         return context
+
+    def get_position_state(self, acct_id: int, cid: str) -> Dict:
+        """
+        Get comprehensive position state including P&L, entry price, current stops/targets
+        """
+        positions = [p for p in search_pos(acct_id) if p["contractId"] == cid]
+        open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
+    
+        if not positions:
+            return {
+                'has_position': False,
+                'size': 0,
+                'side': None,
+                'entry_price': None,
+                'current_pnl': 0,
+                'unrealized_pnl': 0,
+                'realized_pnl': 0,
+                'stop_orders': [],
+                'limit_orders': [],
+                'duration_minutes': 0
+            }
+    
+        # Calculate aggregate position
+        total_size = sum(p.get("size", 0) for p in positions)
+        avg_price = sum(p.get("averagePrice", 0) * p.get("size", 0) for p in positions) / total_size if total_size > 0 else 0
+    
+        # Determine side (1 = long, 2 = short)
+        position_type = positions[0].get("type") if positions else None
+        side = "LONG" if position_type == 1 else "SHORT" if position_type == 2 else None
+    
+        # Get position age
+        creation_time = positions[0].get("creationTimestamp")
+        if creation_time:
+            try:
+                from dateutil import parser
+                entry_time = parser.parse(creation_time)
+                duration = (datetime.now(datetime.timezone.utc) - entry_time).total_seconds() / 60
+            except:
+                duration = 0
+        else:
+            duration = 0
+        
+        # Categorize orders
+        stop_orders = [o for o in open_orders if o["type"] == 4 and o["status"] == 1]
+        limit_orders = [o for o in open_orders if o["type"] == 1 and o["status"] == 1]
+    
+        # Get recent trades for REALIZED P&L calculation
+        trades = search_trades(acct_id, datetime.now(CT) - timedelta(hours=24))
+        position_trades = [t for t in trades if t["contractId"] == cid and not t.get("voided", False)]
+        realized_pnl = sum(float(t.get("profitAndLoss") or 0) for t in position_trades if t.get("profitAndLoss") is not None)
+    
+        # NEW: Calculate UNREALIZED P&L
+        unrealized_pnl = 0
+        current_price = None
+        price_source = None
+    
+        # First try to get current price from real-time data feed (1-minute bars)
+        try:
+            from api import get_supabase_client
+            supabase = get_supabase_client()
+        
+            # Get the most recent 1-minute bar from tv_datafeed
+            result = supabase.table('tv_datafeed') \
+                .select('c, ts') \
+                .eq('symbol', 'MES!!') \
+                .eq('timeframe', 1) \
+                .order('ts', desc=True) \
+                .limit(1) \
+                .execute()
+        
+            if result.data:
+                record = result.data[0]
+                current_price = float(record.get('c'))  # Close price of the latest 1-minute bar
+                price_source = '1m_datafeed'
+            
+                # Check age of the data
+                from dateutil import parser
+                bar_time = parser.parse(record.get('ts'))
+                age_seconds = (datetime.now(datetime.timezone.utc) - bar_time).total_seconds()
+            
+                if age_seconds > 120:  # If data is older than 2 minutes, fall back to chart analysis
+                    self.logger.warning(f"1-minute data is {age_seconds:.0f}s old, falling back to chart analysis")
+                    current_price = None
+                    price_source = None
+                else:
+                    self.logger.debug(f"Using 1-minute price: {current_price} (age: {age_seconds:.0f}s)")
+                
+        except Exception as e:
+            self.logger.warning(f"Could not get price from tv_datafeed: {e}")
+    
+        # Fallback to chart analysis if real-time feed failed
+        if current_price is None:
+            try:
+                # Get the most recent 5m chart analysis
+                result = supabase.table('latest_chart_analysis') \
+                    .select('*') \
+                    .eq('symbol', 'MES') \
+                    .eq('timeframe', '5m') \
+                    .order('timestamp', desc=True) \
+                    .limit(1) \
+                    .execute()
+            
+                if result.data:
+                    record = result.data[0]
+                    snapshot_data = record.get('snapshot')
+                    if snapshot_data:
+                        if isinstance(snapshot_data, str):
+                            import json
+                            parsed_data = json.loads(snapshot_data)
+                        else:
+                            parsed_data = snapshot_data
+                        
+                        current_price = parsed_data.get('current_price')
+                        price_source = '5m_chart'
+                        self.logger.debug(f"Using chart analysis price: {current_price}")
+                        
+            except Exception as e:
+                self.logger.warning(f"Could not get price from chart analysis: {e}")
+    
+        # Calculate unrealized P&L if we have a price
+        if current_price and avg_price > 0:
+            # MES has a multiplier of $5 per point
+            contract_multiplier = 5
+        
+            if side == "LONG":
+                unrealized_pnl = (current_price - avg_price) * total_size * contract_multiplier
+            elif side == "SHORT":
+                unrealized_pnl = (avg_price - current_price) * total_size * contract_multiplier
+        
+            self.logger.info(f"Calculated unrealized P&L: ${unrealized_pnl:.2f} "
+                           f"(entry: {avg_price}, current: {current_price} from {price_source}, size: {total_size})")
+    
+        # Total P&L is realized + unrealized
+        total_pnl = realized_pnl + unrealized_pnl
+    
+        return {
+            'has_position': True,
+            'size': total_size,
+            'side': side,
+            'entry_price': avg_price,
+            'current_price': current_price,
+            'current_pnl': total_pnl,  # Total P&L
+            'unrealized_pnl': unrealized_pnl,  # NEW: Unrealized P&L
+            'realized_pnl': realized_pnl,  # NEW: Realized P&L (from partial fills)
+            'stop_orders': stop_orders,
+            'limit_orders': limit_orders,
+            'duration_minutes': duration,
+            'position_type': position_type
+        }
+
+    def get_position_context_for_ai(self, acct_id: int, cid: str) -> Dict:
+        """
+        Get position context formatted for AI decision making - ENHANCED VERSION
+        """
+        position_state = self.get_position_state(acct_id, cid)
+        account_state = self.get_account_state(acct_id)
+    
+        context = {
+            'current_position': {
+                'has_position': position_state['has_position'],
+                'size': position_state['size'],
+                'side': position_state['side'],
+                'entry_price': position_state['entry_price'],
+                'current_price': position_state.get('current_price'),  # NEW
+                'current_pnl': position_state['current_pnl'],
+                'unrealized_pnl': position_state.get('unrealized_pnl', 0),  # NEW
+                'realized_pnl': position_state.get('realized_pnl', 0),  # NEW
+                'duration_minutes': position_state['duration_minutes'],
+                'stop_count': len(position_state['stop_orders']),
+                'target_count': len(position_state['limit_orders'])
+            },
+            'account_metrics': {
+                'daily_pnl': account_state['daily_pnl'],
+                'win_rate': account_state['win_rate'],
+                'consecutive_losses': account_state['consecutive_losses'],
+                'open_positions': account_state['open_positions'],
+                'risk_level': account_state['risk_level'],
+                'can_trade': account_state['can_trade']
+            },
+            'risk_limits': {
+                'max_daily_loss': self.max_daily_loss,
+                'profit_target': self.profit_target,
+                'max_consecutive_losses': self.max_consecutive_losses
+            }
+        }
+    
+        # Add specific warnings
+        warnings = []
+        if account_state['daily_pnl'] < self.max_daily_loss * 0.5:
+            warnings.append("Approaching daily loss limit")
+    
+        if account_state['consecutive_losses'] >= 2:
+            warnings.append(f"On {account_state['consecutive_losses']} consecutive losses")
+        
+        if position_state['has_position'] and position_state['duration_minutes'] > 60:
+            warnings.append("Position open for over 1 hour")
+        
+        # NEW: Add P&L warnings
+        if position_state['has_position']:
+            if position_state.get('unrealized_pnl', 0) < -50:
+                warnings.append(f"Large unrealized loss: ${position_state['unrealized_pnl']:.2f}")
+            elif position_state.get('unrealized_pnl', 0) > 100:
+                warnings.append(f"Large unrealized profit: ${position_state['unrealized_pnl']:.2f} - consider scaling out")
+    
+        context['warnings'] = warnings
+    
+        return context
