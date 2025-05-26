@@ -961,12 +961,12 @@ def get_market_conditions_summary(force_refresh: bool = False) -> Dict:
             'volatility': 'unknown'
         }
 
-def get_current_market_price(symbol: str = "MES1!", max_age_seconds: int = 120) -> Tuple[Optional[float], Optional[str]]:
+def get_current_market_price(symbol: str = "CON.F.US.MES.M25!", max_age_seconds: int = 120) -> Tuple[Optional[float], Optional[str]]:
     """
     Get the current market price from the best available source.
     
     Args:
-        symbol: The symbol to get price for (default: MES1!)
+        symbol: The symbol to get price for (default: CON.F.US.MES.M25!)
         max_age_seconds: Maximum age of data to consider valid (default: 120 seconds)
         
     Returns:
@@ -1049,7 +1049,7 @@ def get_current_market_price(symbol: str = "MES1!", max_age_seconds: int = 120) 
         return None, None
 
 
-def get_spread_and_mid_price(symbol: str = "MES1!") -> Dict[str, Optional[float]]:
+def get_spread_and_mid_price(symbol: str = "CON.F.US.MES.M25!") -> Dict[str, Optional[float]]:
     """
     Get bid, ask, spread, and mid price from the data feed.
     
