@@ -28,11 +28,8 @@ def start_scheduler(app):
     
     # Original 5-minute cron job
     def cron_job():
-        """Runs 5 seconds after each 5-min candle close to fetch fresh charts"""
-        logging.info("[APScheduler] Fetching fresh charts after candle close")
-    
-        # Force a complete cache refresh
-        from api import fetch_multi_timeframe_analysis, get_supabase_client
+        """Runs 5 seconds after each 5-min candle close to fetch fresh charts AND update regime"""
+        logging.info("[APScheduler] Fetching fresh charts and updating regime after candle close")
     
         try:
             # Clear any existing cache first
@@ -43,7 +40,7 @@ def start_scheduler(app):
             # Get n8n base URL
             n8n_base_url = config.get('N8N_AI_URL', '').split('/webhook/')[0]
         
-            # Force fetch fresh charts from n8n (this will update the cache)
+            # Force fetch fresh charts AND regime analysis
             market_analysis = fetch_multi_timeframe_analysis(
                 n8n_base_url,
                 timeframes=['1m', '5m', '15m', '30m', '1h'],
@@ -51,10 +48,17 @@ def start_scheduler(app):
                 force_refresh=True  # Force fresh fetch
             )
         
-            logging.info(f"[APScheduler] Fresh charts fetched and cached at {datetime.now(CT)}")
+            # Log regime update
+            regime = market_analysis.get('regime_analysis', {})
+            logging.info(f"[APScheduler] Regime updated: {regime.get('primary_regime', 'unknown')} "
+                        f"(confidence: {regime.get('confidence', 0)}%)")
+        
+            # Check for regime changes and alerts
+            if regime.get('primary_regime') == 'choppy' and regime.get('confidence', 0) > 80:
+                logging.warning(f"⚠️ CHOPPY MARKET ALERT: High confidence choppy conditions detected!")
         
         except Exception as e:
-            logging.error(f"[APScheduler] Chart fetch failed: {e}")
+            logging.error(f"[APScheduler] Chart/regime fetch failed: {e}")
     
         # Then run the normal webhook
         data = {
