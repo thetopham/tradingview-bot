@@ -134,6 +134,12 @@ class SignalRTradingListener(threading.Thread):
             })
             .build()
         )
+
+        def wrap_handler(handler):
+            def wrapped(*args, **kwargs):
+                self.last_event_time = time.time()
+                return handler(*args, **kwargs)
+            return wrapped
         
         # Register handlers before starting
         self.hub.on("GatewayUserAccount", self.event_handlers.get("on_account_update", self.default_handler))
