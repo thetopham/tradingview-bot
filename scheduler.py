@@ -255,8 +255,8 @@ def start_scheduler(app):
                        (now.weekday() == 4 and now.hour >= 16)):
                     logging.warning("⚠️ No current market price available - data feed may be stale")
             
-    except Exception as e:
-        logging.error(f"Data feed monitor error: {e}")
+        except Exception as e:
+            logging.error(f"Data feed monitor error: {e}")
 
  
     # Data feed monitor - runs every minute during market hours
