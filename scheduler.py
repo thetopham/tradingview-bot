@@ -216,7 +216,7 @@ def start_scheduler(app):
             from api import get_current_market_price, get_spread_and_mid_price, get_contract
         
             # Get current price
-            price, source = get_current_market_price(max_age_seconds=60)
+            price, source = get_current_market_price(max_age_seconds=60000)
         
             if price:
                 # Get additional price info
