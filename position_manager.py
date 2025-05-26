@@ -127,7 +127,7 @@ class PositionManager:
         # Get current market price from best available source
         try:
             from api import get_current_market_price
-            current_price, price_source = get_current_market_price()
+            current_price, price_source = get_current_market_price(symbol="MES1!")
             
             if current_price and avg_price > 0:
                 # MES has a multiplier of $5 per point
