@@ -150,7 +150,7 @@ def get_latest_all_analysis():
     try:
         supabase = get_supabase_client()
         
-        timeframes = ['1m', '5m', '15m', '30m', '1h', '4h']
+        timeframes = ['5m', '15m', '1h']
         all_data = {}
         
         for tf in timeframes:
