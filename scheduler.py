@@ -250,7 +250,29 @@ def start_scheduler(app):
         except Exception as e:
             logging.error(f"Data feed monitor error: {e}")
 
+    # Metadata cleanup - runs every hour
+    def metadata_cleanup_job():
+        """Clean up any orphaned trade metadata"""
+        try:
+            from signalr_listener import cleanup_stale_metadata
+            removed = cleanup_stale_metadata(max_age_hours=12)
+            if removed > 0:
+                logging.info(f"Cleaned up {removed} stale metadata entries")
+        except Exception as e:
+            logging.error(f"[Metadata Cleanup] Error: {e}")
+
+
+
+
     # Schedule jobs
+
+
+    scheduler.add_job(
+        metadata_cleanup_job,
+        CronTrigger(minute=30, timezone=CT),  # Run at :30 every hour
+        id='metadata_cleanup',
+        replace_existing=True
+    )
     
     # Chart fetch and regime update - every 5 minutes
     scheduler.add_job(
