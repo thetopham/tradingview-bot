@@ -403,10 +403,10 @@ def start_scheduler(app):
         replace_existing=True
     )
     
-    # Market analysis every 15 minutes
+    # Market analysis every 5 minutes
     scheduler.add_job(
         market_analysis_job,
-        CronTrigger(minute='0,15,30,45', second=45, timezone=CT),
+        CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=55, timezone=CT),
         id='market_analysis',
         replace_existing=True
     )
