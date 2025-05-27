@@ -14,8 +14,16 @@ orders_state = {}
 positions_state = {}
 trade_meta = {}
 
-def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, order_id, alert, account, symbol, sl_id=None, tp_ids=None, trades=None, regime=None):
+def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, order_id, 
+                alert, account, symbol, sl_id=None, tp_ids=None, trades=None, regime=None):
+    """Enhanced trade tracking with session ID to prevent mixing trades"""
+    
+    # Generate a unique session ID for this trade
+    import uuid
+    session_id = str(uuid.uuid4())[:8]  # Short ID for this trading session
+    
     meta = {
+        "session_id": session_id,  # NEW: Unique ID for this trading session
         "entry_time": entry_time,
         "ai_decision_id": ai_decision_id,
         "strategy": strategy,
@@ -28,9 +36,12 @@ def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, o
         "account": account,
         "symbol": symbol,
         "trades": trades,
-        "regime": regime,  # Add regime to metadata
+        "regime": regime,
     }
-    logging.info(f"[track_trade] Called with ai_decision_id={ai_decision_id}, regime={regime}, meta={meta}")
+    
+    logging.info(f"[track_trade] New session {session_id} - AI decision {ai_decision_id}, "
+                f"order {order_id}, {sig} {size} {symbol}")
+    
     trade_meta[(acct_id, cid)] = meta
 
 def reconstruct_trade_metadata_on_startup():
@@ -365,29 +376,42 @@ def on_position_update(args):
     account_id = position_data.get("accountId")
     contract_id = position_data.get("contractId")
     size = position_data.get("size", 0)
+    
     if account_id is None or contract_id is None:
         logging.error(f"on_position_update: missing account_id or contract_id in {position_data}")
         return
 
+    # Store current position state
     positions_state.setdefault(account_id, {})[contract_id] = position_data
 
+    # Update entry time for new positions
     entry_time = position_data.get("creationTimestamp")
     if size > 0:
         meta = trade_meta.get((account_id, contract_id))
         if meta is not None:
-            meta["entry_time"] = entry_time
+            # Only update if this is a new position (check session ID or order ID)
+            if "entry_time" not in meta or not meta["entry_time"]:
+                meta["entry_time"] = entry_time
+                logging.info(f"[on_position_update] Set entry_time for session {meta.get('session_id')}")
         else:
-            logging.warning(f"[on_position_update] No meta at entry for acct={account_id}, cid={contract_id}. Not updating entry_time.")
+            logging.warning(f"[on_position_update] No meta for new position acct={account_id}, cid={contract_id}")
 
     ensure_stops_match_position(account_id, contract_id)
 
+    # Position closed - log the results
     if size == 0:
         meta = trade_meta.pop((account_id, contract_id), None)
-        logging.info(f"[on_position_update] Position closed for acct={account_id}, cid={contract_id}")
-        logging.info(f"[on_position_update] meta at close: {meta}")
+        
         if meta:
+            session_id = meta.get("session_id", "unknown")
             ai_decision_id = meta.get("ai_decision_id")
-            logging.info(f"[on_position_update] Calling log_trade_results_to_supabase with ai_decision_id={ai_decision_id}")
+            
+            logging.info(f"[on_position_update] Position closed - session {session_id}, "
+                        f"AI decision {ai_decision_id}")
+            
+            # Add session close time to help with trade filtering
+            meta["exit_time"] = datetime.now(CT).isoformat()
+            
             log_trade_results_to_supabase(
                 acct_id=account_id,
                 cid=contract_id,
@@ -396,8 +420,45 @@ def on_position_update(args):
                 meta=meta
             )
         else:
-            logging.warning(f"[on_position_update] No meta found for acct={account_id} cid={contract_id} on flatten!")
+            logging.warning(f"[on_position_update] No meta found for closed position "
+                          f"acct={account_id} cid={contract_id}")
+            
         check_for_phantom_orders(account_id, contract_id)
+
+
+# Also add a helper function to clean up stale metadata
+
+def cleanup_stale_metadata(max_age_hours=24):
+    """Remove old metadata entries that might be orphaned"""
+    current_time = time.time()
+    stale_keys = []
+    
+    for key, meta in trade_meta.items():
+        entry_time = meta.get("entry_time")
+        if entry_time:
+            try:
+                if isinstance(entry_time, (int, float)):
+                    age_hours = (current_time - entry_time) / 3600
+                elif isinstance(entry_time, str):
+                    entry_dt = parser.isoparse(entry_time)
+                    age_hours = (datetime.now(entry_dt.tzinfo) - entry_dt).total_seconds() / 3600
+                else:
+                    continue
+                    
+                if age_hours > max_age_hours:
+                    stale_keys.append(key)
+                    logging.warning(f"Found stale metadata: session {meta.get('session_id')}, "
+                                  f"age {age_hours:.1f} hours")
+            except Exception as e:
+                logging.error(f"Error checking metadata age: {e}")
+    
+    # Remove stale entries
+    for key in stale_keys:
+        meta = trade_meta.pop(key, None)
+        if meta:
+            logging.info(f"Removed stale metadata for session {meta.get('session_id')}")
+    
+    return len(stale_keys)
 
 def on_trade_update(args):
     logging.info(f"[Trade Update] {args}")
