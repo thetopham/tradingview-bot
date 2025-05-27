@@ -26,6 +26,7 @@ import threading
 from datetime import datetime
 import logging
 import json
+from supabase import create_client
 
 # --- Logging/Config/Globals ---
 setup_logging()
@@ -122,21 +123,32 @@ def tv_webhook():
 def serve_dashboard():
     return send_from_directory('static', 'dashboard.html')
 
-# Add the new endpoints needed by the dashboard
 @app.route("/ai/latest-decision", methods=["GET"])
 def get_latest_ai_decision():
     """Get the latest AI trading decision from Supabase"""
     try:
         supabase = get_supabase_client()
         
+        # Fix: Ensure we get the latest by using proper timestamp ordering
         result = supabase.table('ai_trading_log') \
             .select('*') \
-            .order('timestamp', desc=True) \
+            .order('created_at', desc=True) \
             .limit(1) \
             .execute()
         
-        if result.data:
-            return jsonify(result.data[0]), 200
+        if result.data and len(result.data) > 0:
+            # Get the first item (which is the latest due to desc ordering)
+            latest_decision = result.data[0]
+            
+            # Parse the decision field if it's stored as JSON string
+            if 'decision' in latest_decision and isinstance(latest_decision['decision'], str):
+                try:
+                    import json
+                    latest_decision['decision'] = json.loads(latest_decision['decision'])
+                except:
+                    pass
+            
+            return jsonify(latest_decision), 200
         else:
             return jsonify({"error": "No AI decisions found"}), 404
             
@@ -145,13 +157,13 @@ def get_latest_ai_decision():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/analysis/latest-all", methods=["GET"])
-def get_latest_all_analysis():
-    """Get the latest analysis for all timeframes"""
+def get_latest_analysis_all():
+    """Get latest analysis for all timeframes from Supabase"""
     try:
         supabase = get_supabase_client()
         
-        timeframes = ['5m', '15m', '1h', '1D']
-        all_data = {}
+        timeframes = ['1m', '5m', '15m', '30m', '1h', '4h']
+        analysis_data = {}
         
         for tf in timeframes:
             result = supabase.table('latest_chart_analysis') \
@@ -165,14 +177,97 @@ def get_latest_all_analysis():
             if result.data:
                 record = result.data[0]
                 snapshot = record.get('snapshot')
+                
+                # Parse JSON if it's a string
                 if isinstance(snapshot, str):
-                    snapshot = json.loads(snapshot)
-                all_data[tf] = snapshot
+                    try:
+                        import json
+                        snapshot = json.loads(snapshot)
+                    except:
+                        snapshot = {}
+                
+                analysis_data[tf] = snapshot
         
-        return jsonify(all_data), 200
+        return jsonify(analysis_data), 200
         
     except Exception as e:
-        logging.error(f"Error fetching all analysis: {e}")
+        logging.error(f"Error fetching analysis data: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/positions/summary", methods=["GET"])
+def get_positions_summary():
+    """Get a summary of all positions with proper account data"""
+    try:
+        from position_manager import PositionManager
+        from api import get_contract, get_current_market_price
+        
+        pm = PositionManager(ACCOUNTS)
+        cid = get_contract("CON.F.US.MES.M25")
+        
+        # Get current market price
+        current_price, price_source = get_current_market_price(symbol="MES")
+        
+        summary = {
+            'market_price': current_price,
+            'price_source': price_source,
+            'accounts': {},
+            'total_positions': 0,
+            'total_unrealized_pnl': 0,
+            'total_realized_pnl': 0,
+            'timestamp': datetime.now(CT).isoformat()
+        }
+        
+        for account_name, acct_id in ACCOUNTS.items():
+            try:
+                position_state = pm.get_position_state(acct_id, cid)
+                account_state = pm.get_account_state(acct_id)
+                
+                account_data = {
+                    'position': None,
+                    'daily_stats': {
+                        'daily_pnl': account_state['daily_pnl'],
+                        'trades_today': account_state['trade_count'],
+                        'win_rate': f"{account_state['win_rate']:.1%}",
+                        'winning_trades': account_state['winning_trades'],
+                        'losing_trades': account_state['losing_trades'],
+                        'consecutive_losses': account_state['consecutive_losses'],
+                        'can_trade': account_state['can_trade'],
+                        'risk_level': account_state['risk_level']
+                    }
+                }
+                
+                if position_state['has_position']:
+                    account_data['position'] = {
+                        'size': position_state['size'],
+                        'side': position_state['side'],
+                        'entry_price': position_state['entry_price'],
+                        'current_price': current_price or position_state.get('current_price'),
+                        'unrealized_pnl': position_state.get('unrealized_pnl', 0),
+                        'realized_pnl': position_state.get('realized_pnl', 0),
+                        'total_pnl': position_state['current_pnl'],
+                        'duration_minutes': position_state['duration_minutes'],
+                        'stops': len(position_state['stop_orders']),
+                        'targets': len(position_state['limit_orders'])
+                    }
+                    
+                    summary['total_positions'] += 1
+                    summary['total_unrealized_pnl'] += position_state.get('unrealized_pnl', 0)
+                    summary['total_realized_pnl'] += position_state.get('realized_pnl', 0)
+                
+                summary['accounts'][account_name] = account_data
+                
+            except Exception as e:
+                logging.error(f"Error getting data for account {account_name}: {e}")
+                summary['accounts'][account_name] = {
+                    'error': str(e),
+                    'position': None,
+                    'daily_stats': {}
+                }
+        
+        return jsonify(summary), 200
+        
+    except Exception as e:
+        logging.error(f"Error getting positions summary: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/positions", methods=["GET"])
