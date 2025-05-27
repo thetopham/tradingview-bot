@@ -964,13 +964,6 @@ def get_market_conditions_summary(force_refresh: bool = False) -> Dict:
 def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) -> Tuple[Optional[float], Optional[str]]:
     """
     Get the current market price from the best available source.
-    
-    Args:
-        symbol: The symbol to get price for (default: MES)
-        max_age_seconds: Maximum age of data to consider valid (default: 120 seconds)
-        
-    Returns:
-        Tuple of (price, source) where source indicates where the price came from
     """
     try:
         supabase = get_supabase_client()
@@ -992,16 +985,21 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
                 # Check data freshness
                 from dateutil import parser
                 bar_time = parser.parse(record.get('ts'))
-                age_seconds = (datetime.now(datetime.timezone.utc) - bar_time).total_seconds()
+                current_time = datetime.now(datetime.timezone.utc)
+                age_seconds = (current_time - bar_time).total_seconds()
+                
+                # Log debug info
+                logging.debug(f"tv_datafeed: price=${price}, ts={record.get('ts')}, age={age_seconds:.0f}s, max_age={max_age_seconds}s")
                 
                 if age_seconds <= max_age_seconds:
-                    logging.debug(f"Current price from 1m feed: ${price} (age: {age_seconds:.0f}s)")
                     return price, f"1m_feed_{int(age_seconds)}s_old"
                 else:
-                    logging.debug(f"1m data too old: {age_seconds:.0f}s > {max_age_seconds}s")
+                    logging.warning(f"1m data too old: {age_seconds:.0f}s > {max_age_seconds}s. Last update: {record.get('ts')}")
+            else:
+                logging.warning("No data in tv_datafeed table")
                     
         except Exception as e:
-            logging.debug(f"Could not get 1m price: {e}")
+            logging.error(f"Error querying tv_datafeed: {e}")
         
         # Fallback to 5m chart analysis
         try:
