@@ -6,6 +6,7 @@ import pytz
 import logging
 import requests
 import re
+import time
 from config import load_config
 from api import get_market_conditions_summary
 from position_manager import PositionManager
@@ -261,11 +262,112 @@ def start_scheduler(app):
         except Exception as e:
             logging.error(f"[Metadata Cleanup] Error: {e}")
 
+    # GET FLAT FUNCTIONS
+    def get_flat_job():
+        """Automatically flatten all positions at get-flat time"""
+        try:
+            logging.info("⏰ GET FLAT TIME - Flattening all positions")
+            
+            from api import search_pos, flatten_contract, get_contract
+            
+            flattened_count = 0
+            errors = []
+            
+            # Get the contract ID for MES
+            cid = get_contract("CON.F.US.MES.M25")
+            
+            for account_name, acct_id in ACCOUNTS.items():
+                try:
+                    # Get all open positions
+                    positions = search_pos(acct_id)
+                    
+                    # Find positions for our contract
+                    open_positions = [p for p in positions if p["contractId"] == cid and p.get("size", 0) > 0]
+                    
+                    if open_positions:
+                        total_size = sum(p.get("size", 0) for p in open_positions)
+                        avg_price = sum(p.get("averagePrice", 0) * p.get("size", 0) for p in open_positions) / total_size if total_size > 0 else 0
+                        
+                        logging.warning(f"🔻 FLATTENING {account_name}: {total_size} contracts @ ${avg_price:.2f}")
+                        
+                        # Flatten the position
+                        success = flatten_contract(acct_id, cid, timeout=15)
+                        
+                        if success:
+                            flattened_count += 1
+                            logging.info(f"✅ Successfully flattened {account_name}")
+                            
+                            # Log the flatten action to Supabase for tracking
+                            try:
+                                from api import get_supabase_client
+                                supabase = get_supabase_client()
+                                
+                                supabase.table('ai_trading_log').insert({
+                                    'strategy': 'get_flat',
+                                    'signal': 'FLAT',
+                                    'symbol': 'CON.F.US.MES.M25',
+                                    'account': account_name,
+                                    'size': 0,
+                                    'timestamp': datetime.now(CT).isoformat(),
+                                    'reason': 'Automatic get-flat at 3:07 PM CT',
+                                    'alert': 'Scheduled get-flat window',
+                                    'ai_decision_id': f'GET_FLAT_{int(time.time())}'
+                                }).execute()
+                            except Exception as e:
+                                logging.error(f"Failed to log get-flat action: {e}")
+                        else:
+                            errors.append(f"{account_name}: Failed to flatten")
+                            logging.error(f"❌ Failed to flatten {account_name}")
+                    else:
+                        logging.info(f"No open positions for {account_name}")
+                        
+                except Exception as e:
+                    errors.append(f"{account_name}: {str(e)}")
+                    logging.error(f"Error processing {account_name}: {e}")
+            
+            # Summary
+            if flattened_count > 0:
+                logging.warning(f"🏁 GET FLAT COMPLETE: Flattened {flattened_count} accounts")
+            else:
+                logging.info("GET FLAT: No positions to flatten")
+                
+            if errors:
+                logging.error(f"GET FLAT ERRORS: {', '.join(errors)}")
+                
+        except Exception as e:
+            logging.error(f"[Get Flat Job] Critical error: {e}")
 
+    def pre_flat_warning_job():
+        """Warn 5 minutes before get-flat time"""
+        try:
+            logging.warning("⚠️ GET FLAT WARNING: Positions will be flattened in 5 minutes (3:07 PM CT)")
+            
+            # Check current positions and log warning
+            from api import search_pos, get_contract
+            cid = get_contract("CON.F.US.MES.M25")
+            
+            positions_to_flatten = []
+            
+            for account_name, acct_id in ACCOUNTS.items():
+                positions = search_pos(acct_id)
+                open_positions = [p for p in positions if p["contractId"] == cid and p.get("size", 0) > 0]
+                
+                if open_positions:
+                    total_size = sum(p.get("size", 0) for p in open_positions)
+                    positions_to_flatten.append(f"{account_name}: {total_size} contracts")
+            
+            if positions_to_flatten:
+                logging.warning(f"⚠️ Positions to be flattened at 3:07 PM: {', '.join(positions_to_flatten)}")
+                
+        except Exception as e:
+            logging.error(f"[Pre-flat Warning] Error: {e}")
 
+    def weekend_flatten_job():
+        """Flatten all positions before weekend"""
+        logging.info("🏁 WEEKEND FLATTEN - Closing all positions for weekend")
+        get_flat_job()  # Reuse the same logic
 
     # Schedule jobs
-
 
     scheduler.add_job(
         metadata_cleanup_job,
@@ -337,6 +439,31 @@ def start_scheduler(app):
         lambda: pre_session_analysis('NY_AFTERNOON'),
         CronTrigger(hour=12, minute=45, timezone=CT),
         id='pre_ny_afternoon',
+        replace_existing=True
+    )
+    
+    # GET FLAT JOBS
+    # Pre-flat warning at 3:02 PM CT (5 minutes before)
+    scheduler.add_job(
+        pre_flat_warning_job,
+        CronTrigger(hour=15, minute=2, timezone=CT),
+        id='pre_flat_warning',
+        replace_existing=True
+    )
+    
+    # Get flat at 3:07 PM CT
+    scheduler.add_job(
+        get_flat_job,
+        CronTrigger(hour=15, minute=7, timezone=CT),
+        id='get_flat',
+        replace_existing=True
+    )
+    
+    # Weekend flatten job (Friday 4:00 PM CT)
+    scheduler.add_job(
+        weekend_flatten_job,
+        CronTrigger(day_of_week='fri', hour=16, minute=0, timezone=CT),
+        id='weekend_flatten',
         replace_existing=True
     )
     
