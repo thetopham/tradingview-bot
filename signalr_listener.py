@@ -376,42 +376,58 @@ def on_position_update(args):
     account_id = position_data.get("accountId")
     contract_id = position_data.get("contractId")
     size = position_data.get("size", 0)
-    
     if account_id is None or contract_id is None:
         logging.error(f"on_position_update: missing account_id or contract_id in {position_data}")
         return
 
-    # Store current position state
     positions_state.setdefault(account_id, {})[contract_id] = position_data
 
-    # Update entry time for new positions
     entry_time = position_data.get("creationTimestamp")
     if size > 0:
         meta = trade_meta.get((account_id, contract_id))
         if meta is not None:
-            # Only update if this is a new position (check session ID or order ID)
-            if "entry_time" not in meta or not meta["entry_time"]:
-                meta["entry_time"] = entry_time
-                logging.info(f"[on_position_update] Set entry_time for session {meta.get('session_id')}")
+            meta["entry_time"] = entry_time
         else:
-            logging.warning(f"[on_position_update] No meta for new position acct={account_id}, cid={contract_id}")
+            # CREATE METADATA FOR POSITIONS WITHOUT IT
+            logging.warning(f"[on_position_update] No meta for open position acct={account_id}, cid={contract_id}. Creating basic metadata.")
+            # Determine position type
+            position_type = position_data.get('type')
+            signal = 'BUY' if position_type == 1 else 'SELL' if position_type == 2 else 'UNKNOWN'
+            
+            # Find account name
+            account_name = 'unknown'
+            for name, id in ACCOUNTS.items():
+                if id == account_id:
+                    account_name = name
+                    break
+            
+            trade_meta[(account_id, contract_id)] = {
+                'entry_time': entry_time or time.time(),
+                'ai_decision_id': None,  # No AI decision for manual trades
+                'strategy': 'manual',
+                'signal': signal,
+                'size': size,
+                'order_id': None,
+                'sl_id': None,
+                'tp_ids': None,
+                'alert': 'Position tracked by SignalR',
+                'account': account_name,
+                'symbol': contract_id,
+                'trades': None,
+                'regime': 'unknown',
+                'comment': f'Metadata created on position update at {datetime.now(CT).strftime("%Y-%m-%d %H:%M:%S")}'
+            }
 
     ensure_stops_match_position(account_id, contract_id)
 
-    # Position closed - log the results
     if size == 0:
         meta = trade_meta.pop((account_id, contract_id), None)
+        logging.info(f"[on_position_update] Position closed for acct={account_id}, cid={contract_id}")
+        logging.info(f"[on_position_update] meta at close: {meta}")
         
         if meta:
-            session_id = meta.get("session_id", "unknown")
             ai_decision_id = meta.get("ai_decision_id")
-            
-            logging.info(f"[on_position_update] Position closed - session {session_id}, "
-                        f"AI decision {ai_decision_id}")
-            
-            # Add session close time to help with trade filtering
-            meta["exit_time"] = datetime.now(CT).isoformat()
-            
+            logging.info(f"[on_position_update] Calling log_trade_results_to_supabase with ai_decision_id={ai_decision_id}")
             log_trade_results_to_supabase(
                 acct_id=account_id,
                 cid=contract_id,
@@ -420,8 +436,40 @@ def on_position_update(args):
                 meta=meta
             )
         else:
-            logging.warning(f"[on_position_update] No meta found for closed position "
-                          f"acct={account_id} cid={contract_id}")
+            # STILL LOG TRADE RESULTS EVEN WITHOUT METADATA
+            logging.warning(f"[on_position_update] No meta found for closed position, creating minimal log entry")
+            
+            # Try to get position info from the last known state
+            last_position = positions_state.get(account_id, {}).get(contract_id, {})
+            
+            # Find account name
+            account_name = 'unknown'
+            for name, id in ACCOUNTS.items():
+                if id == account_id:
+                    account_name = name
+                    break
+            
+            # Create minimal metadata for logging
+            minimal_meta = {
+                'strategy': 'unknown',
+                'signal': 'UNKNOWN',
+                'symbol': contract_id,
+                'account': account_name,
+                'size': last_position.get('size', 0),
+                'alert': 'Position closed without metadata',
+                'comment': 'Trade result logged without original metadata'
+            }
+            
+            # Use position creation time if available
+            entry_time = last_position.get('creationTimestamp', datetime.now(CT) - timedelta(hours=1))
+            
+            log_trade_results_to_supabase(
+                acct_id=account_id,
+                cid=contract_id,
+                entry_time=entry_time,
+                ai_decision_id=None,
+                meta=minimal_meta
+            )
             
         check_for_phantom_orders(account_id, contract_id)
 
