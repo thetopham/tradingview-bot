@@ -129,14 +129,14 @@ def get_latest_ai_decision():
     try:
         supabase = get_supabase_client()
         
-        # Try multiple ordering fields to ensure we get the latest
+        # Order by ai_decision_id descending to get the latest
         result = supabase.table('ai_trading_log') \
             .select('*') \
-            .order('id', desc=True) \
+            .order('ai_decision_id', desc=True) \
             .limit(1) \
             .execute()
         
-        if not result.data:
+        if not result.data or len(result.data) == 0:
             # Fallback to timestamp ordering
             result = supabase.table('ai_trading_log') \
                 .select('*') \
@@ -144,39 +144,59 @@ def get_latest_ai_decision():
                 .limit(1) \
                 .execute()
         
-        if not result.data:
-            # Another fallback to created_at
-            result = supabase.table('ai_trading_log') \
-                .select('*') \
-                .order('created_at', desc=True) \
-                .limit(1) \
-                .execute()
-        
         if result.data and len(result.data) > 0:
-            latest_decision = result.data[0]
+            latest_decision = result.data[0]  # Get the FIRST item (latest)
             
-            # Parse nested JSON fields if they exist
-            for field in ['decision', 'meta', 'urls', 'support', 'resistance', 'trend']:
-                if field in latest_decision and isinstance(latest_decision[field], str):
+            # Log for debugging
+            logging.info(f"Found AI decision with ai_decision_id: {latest_decision.get('ai_decision_id')}")
+            
+            # Parse JSON string fields
+            json_string_fields = ['urls', 'support', 'resistance', 'trend']
+            
+            for field in json_string_fields:
+                if field in latest_decision and isinstance(latest_decision[field], str) and latest_decision[field]:
                     try:
-                        latest_decision[field] = json.loads(latest_decision[field])
-                    except:
+                        # Only try to parse if it looks like JSON
+                        if latest_decision[field].strip().startswith('{') or latest_decision[field].strip().startswith('['):
+                            latest_decision[field] = json.loads(latest_decision[field])
+                    except json.JSONDecodeError:
+                        logging.warning(f"Failed to parse {field} as JSON: {latest_decision[field]}")
+            
+            # Ensure numeric fields are properly typed
+            numeric_fields = ['size', 'tp1', 'tp2', 'tp3', 'sl', 'entrylimit']
+            for field in numeric_fields:
+                if field in latest_decision and latest_decision[field] is not None:
+                    try:
+                        if field in ['size', 'tp1', 'tp2', 'tp3', 'sl']:
+                            latest_decision[field] = int(latest_decision[field])
+                        else:  # entrylimit
+                            latest_decision[field] = float(latest_decision[field])
+                    except (ValueError, TypeError):
                         pass
             
-            # Extract decision data if it's nested
-            if 'decision' in latest_decision and isinstance(latest_decision['decision'], dict):
-                # Merge decision data with top-level
-                for key, value in latest_decision['decision'].items():
-                    if key not in latest_decision:
-                        latest_decision[key] = value
-            
+            # Add a formatted timestamp for display
+            if 'timestamp' in latest_decision:
+                latest_decision['formatted_timestamp'] = latest_decision['timestamp']
+                
             return jsonify(latest_decision), 200
         else:
-            return jsonify({"error": "No AI decisions found"}), 404
+            return jsonify({
+                "error": "No AI decisions found",
+                "signal": "HOLD",
+                "strategy": "--",
+                "size": "--",
+                "reason": "No decisions in database"
+            }), 404
             
     except Exception as e:
-        logging.error(f"Error fetching latest AI decision: {e}")
-        return jsonify({"error": str(e)}), 500
+        logging.error(f"Error fetching latest AI decision: {str(e)}")
+        logging.error(f"Full error details: {repr(e)}")
+        return jsonify({
+            "error": str(e),
+            "signal": "HOLD",
+            "strategy": "--",
+            "size": "--"
+        }), 500
 
 @app.route("/analysis/latest-all", methods=["GET"])
 def get_latest_analysis_all():
