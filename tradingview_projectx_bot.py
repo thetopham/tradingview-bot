@@ -129,24 +129,46 @@ def get_latest_ai_decision():
     try:
         supabase = get_supabase_client()
         
-        # Fix: Ensure we get the latest by using proper timestamp ordering
+        # Try multiple ordering fields to ensure we get the latest
         result = supabase.table('ai_trading_log') \
             .select('*') \
-            .order('created_at', desc=True) \
+            .order('id', desc=True) \
             .limit(1) \
             .execute()
         
+        if not result.data:
+            # Fallback to timestamp ordering
+            result = supabase.table('ai_trading_log') \
+                .select('*') \
+                .order('timestamp', desc=True) \
+                .limit(1) \
+                .execute()
+        
+        if not result.data:
+            # Another fallback to created_at
+            result = supabase.table('ai_trading_log') \
+                .select('*') \
+                .order('created_at', desc=True) \
+                .limit(1) \
+                .execute()
+        
         if result.data and len(result.data) > 0:
-            # Get the first item (which is the latest due to desc ordering)
             latest_decision = result.data[0]
             
-            # Parse the decision field if it's stored as JSON string
-            if 'decision' in latest_decision and isinstance(latest_decision['decision'], str):
-                try:
-                    import json
-                    latest_decision['decision'] = json.loads(latest_decision['decision'])
-                except:
-                    pass
+            # Parse nested JSON fields if they exist
+            for field in ['decision', 'meta', 'urls', 'support', 'resistance', 'trend']:
+                if field in latest_decision and isinstance(latest_decision[field], str):
+                    try:
+                        latest_decision[field] = json.loads(latest_decision[field])
+                    except:
+                        pass
+            
+            # Extract decision data if it's nested
+            if 'decision' in latest_decision and isinstance(latest_decision['decision'], dict):
+                # Merge decision data with top-level
+                for key, value in latest_decision['decision'].items():
+                    if key not in latest_decision:
+                        latest_decision[key] = value
             
             return jsonify(latest_decision), 200
         else:
@@ -162,31 +184,38 @@ def get_latest_analysis_all():
     try:
         supabase = get_supabase_client()
         
-        timeframes = ['1m', '5m', '15m', '30m', '1h', '4h']
+        timeframes = ['5m', '15m', '1h', '1D']
         analysis_data = {}
         
         for tf in timeframes:
-            result = supabase.table('latest_chart_analysis') \
-                .select('*') \
-                .eq('symbol', 'MES') \
-                .eq('timeframe', tf) \
-                .order('timestamp', desc=True) \
-                .limit(1) \
-                .execute()
-            
-            if result.data:
-                record = result.data[0]
-                snapshot = record.get('snapshot')
+            try:
+                result = supabase.table('latest_chart_analysis') \
+                    .select('*') \
+                    .eq('symbol', 'MES') \
+                    .eq('timeframe', tf) \
+                    .order('timestamp', desc=True) \
+                    .limit(1) \
+                    .execute()
                 
-                # Parse JSON if it's a string
-                if isinstance(snapshot, str):
-                    try:
-                        import json
-                        snapshot = json.loads(snapshot)
-                    except:
-                        snapshot = {}
-                
-                analysis_data[tf] = snapshot
+                if result.data:
+                    record = result.data[0]
+                    snapshot = record.get('snapshot')
+                    
+                    # Parse JSON if it's a string
+                    if isinstance(snapshot, str):
+                        try:
+                            snapshot = json.loads(snapshot)
+                        except:
+                            snapshot = {}
+                    
+                    # Ensure we have the data we need
+                    if snapshot:
+                        analysis_data[tf] = snapshot
+                    else:
+                        logging.warning(f"No snapshot data for timeframe {tf}")
+                        
+            except Exception as e:
+                logging.error(f"Error fetching {tf} data: {e}")
         
         return jsonify(analysis_data), 200
         
@@ -205,7 +234,11 @@ def get_positions_summary():
         cid = get_contract("CON.F.US.MES.M25")
         
         # Get current market price
-        current_price, price_source = get_current_market_price(symbol="MES")
+        try:
+            current_price, price_source = get_current_market_price(symbol="MES")
+        except:
+            current_price = None
+            price_source = "unavailable"
         
         summary = {
             'market_price': current_price,
@@ -214,6 +247,7 @@ def get_positions_summary():
             'total_positions': 0,
             'total_unrealized_pnl': 0,
             'total_realized_pnl': 0,
+            'total_daily_pnl': 0,
             'timestamp': datetime.now(CT).isoformat()
         }
         
@@ -227,7 +261,7 @@ def get_positions_summary():
                     'daily_stats': {
                         'daily_pnl': account_state['daily_pnl'],
                         'trades_today': account_state['trade_count'],
-                        'win_rate': f"{account_state['win_rate']:.1%}",
+                        'win_rate': f"{account_state['win_rate']:.1%}" if account_state['win_rate'] else "0.0%",
                         'winning_trades': account_state['winning_trades'],
                         'losing_trades': account_state['losing_trades'],
                         'consecutive_losses': account_state['consecutive_losses'],
@@ -236,22 +270,37 @@ def get_positions_summary():
                     }
                 }
                 
+                # Add to total daily P&L
+                summary['total_daily_pnl'] += account_state['daily_pnl']
+                
                 if position_state['has_position']:
+                    # Calculate current P&L if we have market price
+                    if current_price and position_state['entry_price']:
+                        contract_multiplier = 5  # MES multiplier
+                        if position_state['side'] == 'LONG':
+                            unrealized_pnl = (current_price - position_state['entry_price']) * position_state['size'] * contract_multiplier
+                        elif position_state['side'] == 'SHORT':
+                            unrealized_pnl = (position_state['entry_price'] - current_price) * position_state['size'] * contract_multiplier
+                        else:
+                            unrealized_pnl = 0
+                    else:
+                        unrealized_pnl = position_state.get('unrealized_pnl', 0)
+                    
                     account_data['position'] = {
                         'size': position_state['size'],
                         'side': position_state['side'],
                         'entry_price': position_state['entry_price'],
                         'current_price': current_price or position_state.get('current_price'),
-                        'unrealized_pnl': position_state.get('unrealized_pnl', 0),
+                        'unrealized_pnl': unrealized_pnl,
                         'realized_pnl': position_state.get('realized_pnl', 0),
-                        'total_pnl': position_state['current_pnl'],
-                        'duration_minutes': position_state['duration_minutes'],
+                        'total_pnl': position_state.get('realized_pnl', 0) + unrealized_pnl,
+                        'duration_minutes': int(position_state['duration_minutes']),
                         'stops': len(position_state['stop_orders']),
                         'targets': len(position_state['limit_orders'])
                     }
                     
                     summary['total_positions'] += 1
-                    summary['total_unrealized_pnl'] += position_state.get('unrealized_pnl', 0)
+                    summary['total_unrealized_pnl'] += unrealized_pnl
                     summary['total_realized_pnl'] += position_state.get('realized_pnl', 0)
                 
                 summary['accounts'][account_name] = account_data
@@ -261,8 +310,21 @@ def get_positions_summary():
                 summary['accounts'][account_name] = {
                     'error': str(e),
                     'position': None,
-                    'daily_stats': {}
+                    'daily_stats': {
+                        'daily_pnl': 0,
+                        'trades_today': 0,
+                        'win_rate': '0.0%',
+                        'can_trade': False,
+                        'risk_level': 'unknown'
+                    }
                 }
+        
+        # Add summary stats
+        summary['summary'] = {
+            'total_pnl': summary['total_unrealized_pnl'] + summary['total_realized_pnl'],
+            'positions_open': summary['total_positions'],
+            'market_status': 'OPEN' if not in_get_flat(datetime.now(CT)) else 'FLAT_WINDOW'
+        }
         
         return jsonify(summary), 200
         
