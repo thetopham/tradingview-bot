@@ -362,10 +362,6 @@ def start_scheduler(app):
         except Exception as e:
             logging.error(f"[Pre-flat Warning] Error: {e}")
 
-    def weekend_flatten_job():
-        """Flatten all positions before weekend"""
-        logging.info("🏁 WEEKEND FLATTEN - Closing all positions for weekend")
-        get_flat_job()  # Reuse the same logic
 
     # Schedule jobs
 
@@ -459,13 +455,6 @@ def start_scheduler(app):
         replace_existing=True
     )
     
-    # Weekend flatten job (Friday 4:00 PM CT)
-    scheduler.add_job(
-        weekend_flatten_job,
-        CronTrigger(day_of_week='fri', hour=16, minute=0, timezone=CT),
-        id='weekend_flatten',
-        replace_existing=True
-    )
     
     scheduler.start()
     logging.info("[APScheduler] Scheduler started with monitoring jobs only (no autonomous trading)")
