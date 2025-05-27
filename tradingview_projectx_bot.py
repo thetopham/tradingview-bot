@@ -724,7 +724,7 @@ def handle_webhook_logic(data):
         size  = int(data.get("size", 1))
         alert = data.get("alert", "")
         ai_decision_id = data.get("ai_decision_id", None)
-        regime = "unknown"  # Initialize regime with default value
+        regime = "unknown"
         regime_confidence = 0
 
         if acct not in ACCOUNTS:
@@ -747,22 +747,11 @@ def handle_webhook_logic(data):
             logging.info("In get-flat window, no trades processed")
             return
         
-       # Get current market session
+        # Get current market session
         session_name, session_info = get_current_session(now)
         logging.info(f"Current session: {session_name} - {session_info['characteristics']}")
         
-        # Apply session-based rules
-        if session_name == 'NY_LUNCH':
-            logging.info("NY lunch session - reducing position size and requiring higher confidence")
-            # Don't return here - let the trade continue but the AI will adjust
-            # The regime analysis will likely show "choppy" during lunch
-            # which will naturally reduce position sizes
-        
-        if session_name == 'OFF_HOURS':
-            logging.info("Market closed, skipping trade")
-            return
-        
-        # Log market conditions periodically (every 5 minutes)
+        # Log market conditions periodically
         if not hasattr(handle_webhook_logic, 'last_market_log'):
             handle_webhook_logic.last_market_log = now - timedelta(minutes=6)
         
@@ -770,16 +759,14 @@ def handle_webhook_logic(data):
             get_market_conditions_summary()
             handle_webhook_logic.last_market_log = now
 
-        # --- Enhanced AI Overseer with Regime Detection ---
+        # --- AI Overseer OR Direct Trading ---
         if acct in AI_ENDPOINTS:
+            # AI path - existing code
             ai_url = AI_ENDPOINTS[acct]
-            
-            # Use the new regime-aware AI decision function
             ai_decision = ai_trade_decision_with_regime(
                 acct, strat, sig, sym, size, alert, ai_url
             )
             
-            # Log regime information
             regime = ai_decision.get('regime', 'unknown')
             regime_confidence = ai_decision.get('regime_confidence', 0)
             logging.info(f"Market regime: {regime} (confidence: {regime_confidence}%)")
@@ -788,29 +775,17 @@ def handle_webhook_logic(data):
                 logging.info(f"AI blocked trade: {ai_decision.get('reason', 'No reason')}")
                 return
                 
-            # Overwrite user values with AI's preferred decision
+            # Overwrite with AI decision
             strat = ai_decision.get("strategy", strat)
             sig = ai_decision.get("signal", sig)
             sym = ai_decision.get("symbol", sym)
             size = ai_decision.get("size", size)
             alert = ai_decision.get("alert", alert)
             ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
-            
-            # Apply session-based position sizing adjustments
-            if session_name == 'NY_MORNING':
-                # High volatility session - consider reducing size
-                if regime in ['choppy', 'breakout']:
-                    size = max(1, size - 1)
-                    logging.info(f"Reduced position size to {size} for NY morning + {regime} regime")
-            elif session_name == 'NY_LUNCH':  # <-- ADD THIS
-                # Lunch session - always reduce size by 1
-                size = max(1, size - 1)
-                logging.info(f"Reduced position size to {size} for NY lunch session")
-            elif session_name == 'ASIAN':
-                # Low volatility session - might increase size for trending markets
-                if regime in ['trending_up', 'trending_down'] and regime_confidence > 80:
-                    size = min(3, size + 1)
-                    logging.info(f"Increased position size to {size} for Asian session trending market")
+        else:
+            # NON-AI ACCOUNT - Create a simple decision ID for tracking
+            ai_decision_id = f"MANUAL_{acct}_{int(time.time())}"
+            logging.info(f"Non-AI account {acct} - proceeding with manual trade")
 
         # Check current positions before entry
         positions = search_pos(acct_id)
@@ -819,7 +794,6 @@ def handle_webhook_logic(data):
         if not open_pos:
             cancel_all_stops(acct_id, cid)
         else:
-            # Log current position for context
             total_size = sum(p.get("size", 0) for p in open_pos)
             logging.info(f"Current position size: {total_size}")
 
