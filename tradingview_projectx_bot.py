@@ -631,6 +631,8 @@ def handle_webhook_logic(data):
         size  = int(data.get("size", 1))
         alert = data.get("alert", "")
         ai_decision_id = data.get("ai_decision_id", None)
+        regime = "unknown"  # Initialize regime with default value
+        regime_confidence = 0
 
         if acct not in ACCOUNTS:
             logging.error(f"Unknown account '{acct}'")
