@@ -622,6 +622,27 @@ def get_position_context(account):
         logging.error(f"Error getting position context: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route("/debug/price-sources", methods=["GET"])
+def debug_price_sources():
+    """Debug what price data is available"""
+    try:
+        supabase = get_supabase_client()
+        
+        # Check tv_datafeed
+        tv_result = supabase.table('tv_datafeed').select('*').limit(5).execute()
+        
+        # Check latest_chart_analysis
+        chart_result = supabase.table('latest_chart_analysis').select('*').limit(5).execute()
+        
+        return jsonify({
+            'tv_datafeed_count': len(tv_result.data) if tv_result.data else 0,
+            'tv_datafeed_sample': tv_result.data[0] if tv_result.data else None,
+            'chart_analysis_count': len(chart_result.data) if chart_result.data else 0,
+            'chart_analysis_sample': chart_result.data[0] if chart_result.data else None
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 def handle_webhook_logic(data):
     try:
         strat = data.get("strategy", "bracket").lower()
