@@ -329,7 +329,6 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         if isinstance(entry_time, (float, int)):
             entry_time = datetime.fromtimestamp(entry_time, CT)
         elif isinstance(entry_time, str):
-            # Handles ISO8601 strings like '2025-05-23T13:50:50.957529+00:00'
             entry_time = parser.isoparse(entry_time).astimezone(CT)
         elif entry_time.tzinfo is None:
             entry_time = CT.localize(entry_time)
@@ -340,38 +339,76 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         entry_time = datetime.now(CT)
 
     exit_time = datetime.now(CT)
-    start_time = entry_time - timedelta(minutes=2)
+    
+    # IMPORTANT: Only get trades that are part of THIS trading session
+    # We need to be more precise about which trades belong to this position
+    
+    # First, let's get the entry order ID if we have it
+    entry_order_id = meta.get("order_id")
+    
+    # Get trades from a reasonable window
+    start_time = entry_time - timedelta(seconds=30)  # Reduced from 2 minutes to 30 seconds
+    
     try:
         resp = post("/api/Trade/search", {
             "accountId": acct_id,
             "startTimestamp": start_time.isoformat()
         })
-        trades = resp.get("trades", [])
+        all_trades = resp.get("trades", [])
 
-        relevant_trades = [
-            t for t in trades
-            if t.get("contractId") == cid and not t.get("voided", False) and t.get("size", 0) > 0
+        # Filter for this contract and not voided
+        contract_trades = [
+            t for t in all_trades
+            if t.get("contractId") == cid and not t.get("voided", False)
         ]
+
+        # Now we need to identify which trades belong to THIS position session
+        relevant_trades = []
+        
+        if entry_order_id:
+            # Find the entry trade
+            entry_trade = None
+            for t in contract_trades:
+                if t.get("orderId") == entry_order_id:
+                    entry_trade = t
+                    break
+            
+            if entry_trade:
+                entry_trade_time = parser.isoparse(entry_trade["creationTimestamp"])
+                
+                # Get all trades from entry until now that have P&L (exit trades)
+                for t in contract_trades:
+                    trade_time = parser.isoparse(t["creationTimestamp"])
+                    # Include the entry trade and any exit trades after it
+                    if t == entry_trade or (trade_time > entry_trade_time and t.get("profitAndLoss") is not None):
+                        relevant_trades.append(t)
+            else:
+                # Fallback: use time-based approach
+                logging.warning(f"Entry trade not found for order_id {entry_order_id}, using time-based approach")
+                relevant_trades = get_trades_by_time_window(contract_trades, entry_time, exit_time)
+        else:
+            # No entry order ID, use time-based approach
+            relevant_trades = get_trades_by_time_window(contract_trades, entry_time, exit_time)
 
         if not relevant_trades:
             logging.warning("[log_trade_results_to_supabase] No relevant trades found, skipping Supabase log.")
-            try:
-                with open("/tmp/trade_results_missing.jsonl", "a") as f:
-                    f.write(json.dumps({
-                        "acct_id": acct_id,
-                        "cid": cid,
-                        "entry_time": entry_time.isoformat(),
-                        "ai_decision_id": ai_decision_id,
-                        "meta": meta,
-                        "all_trades": trades
-                    }) + "\n")
-            except Exception as e2:
-                logging.error(f"[log_trade_results_to_supabase] Failed to write missing-trade log: {e2}")
             return
 
-        total_pnl = sum(float(t.get("profitAndLoss") or 0.0) for t in relevant_trades)
-        trade_ids = [t.get("id") for t in relevant_trades]
-        duration_sec = int((exit_time - entry_time).total_seconds())
+        # Calculate P&L only from exit trades (trades with profitAndLoss)
+        exit_trades = [t for t in relevant_trades if t.get("profitAndLoss") is not None]
+        total_pnl = sum(float(t.get("profitAndLoss", 0)) for t in exit_trades)
+        
+        # Get unique trade IDs
+        trade_ids = [t.get("id") for t in relevant_trades if t.get("id")]
+        
+        # Calculate actual duration based on first and last trade
+        if relevant_trades:
+            first_trade_time = min(parser.isoparse(t["creationTimestamp"]) for t in relevant_trades)
+            last_trade_time = max(parser.isoparse(t["creationTimestamp"]) for t in relevant_trades)
+            duration_sec = int((last_trade_time - first_trade_time).total_seconds())
+        else:
+            duration_sec = int((exit_time - entry_time).total_seconds())
+
         ai_decision_id_out = str(ai_decision_id) if ai_decision_id is not None else None
 
         payload = {
@@ -381,17 +418,18 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
             "account":       str(meta.get("account") or ""),
             "size":          int(meta.get("size") or 0),
             "ai_decision_id": ai_decision_id_out,
-            "entry_time":    entry_time.isoformat() if hasattr(entry_time, "isoformat") else str(entry_time),
-            "exit_time":     exit_time.isoformat() if hasattr(exit_time, "isoformat") else str(exit_time),
-            "duration_sec":  str(duration_sec) if duration_sec is not None else "0",
+            "entry_time":    entry_time.isoformat(),
+            "exit_time":     exit_time.isoformat(),
+            "duration_sec":  str(duration_sec),
             "alert":         str(meta.get("alert") or ""),
-            "total_pnl":     float(total_pnl) if total_pnl is not None else 0.0,
-            "raw_trades":    relevant_trades if relevant_trades else [],
+            "total_pnl":     float(total_pnl),
+            "raw_trades":    relevant_trades,
             "order_id":      str(meta.get("order_id") or ""),
-            "comment":       str(meta.get("comment") or ""),
-            "trade_ids":     trade_ids if trade_ids else [],
+            "comment":       f"Entry order: {entry_order_id}, Exit trades: {len(exit_trades)}",
+            "trade_ids":     trade_ids,
         }
 
+        # Log to Supabase
         url = f"{SUPABASE_URL}/rest/v1/trade_results"
         headers = {
             "apikey": SUPABASE_KEY,
@@ -399,24 +437,69 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
             "Content-Type": "application/json",
             "Prefer": "return=minimal"
         }
-        try:
-            r = session.post(url, json=payload, headers=headers, timeout=(3.05, 10))
-            if r.status_code == 201:
-                logging.info(f"[log_trade_results_to_supabase] Uploaded trade result for acct={acct_id}, cid={cid}, PnL={total_pnl}, ai_decision_id={ai_decision_id_out}")
-            else:
-                logging.warning(f"[log_trade_results_to_supabase] Supabase returned non-201: status={r.status_code}, text={r.text}")
-            r.raise_for_status()
-        except Exception as e:
-            logging.error(f"[log_trade_results_to_supabase] Supabase upload failed: {e}")
-            try:
-                with open("/tmp/trade_results_fallback.jsonl", "a") as f:
-                    f.write(json.dumps(payload) + "\n")
-                logging.info("[log_trade_results_to_supabase] Trade result written to local fallback log.")
-            except Exception as e2:
-                logging.error(f"[log_trade_results_to_supabase] Failed to write trade result to local log: {e2}")
+        
+        r = session.post(url, json=payload, headers=headers, timeout=(3.05, 10))
+        if r.status_code == 201:
+            logging.info(f"[log_trade_results_to_supabase] Uploaded trade result: "
+                        f"acct={acct_id}, trades={len(relevant_trades)}, "
+                        f"PnL={total_pnl:.2f}, ai_id={ai_decision_id_out}")
+        else:
+            logging.warning(f"[log_trade_results_to_supabase] Supabase returned {r.status_code}: {r.text}")
+        r.raise_for_status()
 
     except Exception as e:
-        logging.error(f"[log_trade_results_to_supabase] Outer error: {e}")
+        logging.error(f"[log_trade_results_to_supabase] Error: {e}")
+
+
+def get_trades_by_time_window(contract_trades, entry_time, exit_time):
+    """
+    Helper function to get trades within a time window when we don't have order IDs.
+    This tries to be smarter about grouping trades that belong together.
+    """
+    relevant_trades = []
+    
+    # Group trades into sessions based on time gaps
+    if not contract_trades:
+        return []
+    
+    # Sort trades by time
+    sorted_trades = sorted(contract_trades, key=lambda t: t.get("creationTimestamp", ""))
+    
+    # Find trade sessions (groups of trades with small time gaps between them)
+    sessions = []
+    current_session = []
+    
+    for i, trade in enumerate(sorted_trades):
+        if i == 0:
+            current_session.append(trade)
+        else:
+            prev_time = parser.isoparse(sorted_trades[i-1]["creationTimestamp"])
+            curr_time = parser.isoparse(trade["creationTimestamp"])
+            
+            # If more than 5 minutes between trades, consider it a new session
+            if (curr_time - prev_time).total_seconds() > 300:
+                if current_session:
+                    sessions.append(current_session)
+                current_session = [trade]
+            else:
+                current_session.append(trade)
+    
+    if current_session:
+        sessions.append(current_session)
+    
+    # Find the session that best matches our entry time
+    best_session = None
+    best_time_diff = float('inf')
+    
+    for session in sessions:
+        session_start = parser.isoparse(session[0]["creationTimestamp"])
+        time_diff = abs((session_start - entry_time).total_seconds())
+        
+        if time_diff < best_time_diff and time_diff < 60:  # Within 1 minute
+            best_session = session
+            best_time_diff = time_diff
+    
+    return best_session or []
 
 
 
