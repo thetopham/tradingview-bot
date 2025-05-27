@@ -5,11 +5,12 @@ from typing import Dict, List, Optional, Tuple
 import statistics
 import hashlib  
 import json     
-import time    
+import time
+import pytz
 
 class MarketRegime:
     """
-    Market regime detection based on multiple timeframes and indicators
+    Market regime detection optimized for day trading with 5m, 15m, 30m timeframes
     """
     
     REGIME_TRENDING_UP = "trending_up"
@@ -25,6 +26,44 @@ class MarketRegime:
         self._calculation_cache = {}
         self._cache_expiry = 240  # 4 minutes
         self._last_cache_cleanup = time.time()
+        
+        # Configurable timeframes for day trading
+        self.timeframes = ['5m', '15m', '30m']
+        self.primary_timeframes = ['15m', '30m']  # For "higher TF" checks
+        
+        # Day trading optimized weights
+        self.default_weights = {
+            '5m': 0.3,   # Entry/exit timing
+            '15m': 0.5,  # Primary signal (most weight)
+            '30m': 0.2   # Context/filter
+        }
+        
+        # Dynamic weight adjustments by market state
+        self.market_state_weights = {
+            'volatile_open': {
+                '5m': 0.4,   # More responsive
+                '15m': 0.45,
+                '30m': 0.15
+            },
+            'normal': {
+                '5m': 0.3,
+                '15m': 0.5,
+                '30m': 0.2
+            },
+            'lunch_chop': {
+                '5m': 0.2,   # Less weight on noise
+                '15m': 0.6,  # Trust the middle
+                '30m': 0.2
+            },
+            'power_hour': {
+                '5m': 0.35,  # Bit more responsive
+                '15m': 0.45,
+                '30m': 0.2
+            }
+        }
+        
+        # Chicago timezone
+        self.CT = pytz.timezone("America/Chicago")
         
     def _generate_cache_key(self, timeframe_data: Dict[str, Dict]) -> str:
         """Generate a cache key based on input data"""
@@ -74,13 +113,55 @@ class MarketRegime:
         for key in expired_keys:
             del self._calculation_cache[key]
         self._last_cache_cleanup = current_time
+    
+    def _get_current_weights(self) -> Dict:
+        """Get weights based on current market session"""
+        now = datetime.now(self.CT)
+        hour = now.hour
+        minute = now.minute
+        
+        # First 30 min of market (8:30-9:00 AM CT)
+        if (hour == 8 and minute >= 30) or (hour == 9 and minute < 0):
+            return self.market_state_weights['volatile_open']
+        
+        # Lunch period (11:00 AM - 1:00 PM CT)
+        elif 11 <= hour < 13:
+            return self.market_state_weights['lunch_chop']
+        
+        # Power hour (2:00 PM - 3:00 PM CT)
+        elif 14 <= hour < 15:
+            return self.market_state_weights['power_hour']
+        
+        # Normal trading hours
+        else:
+            return self.market_state_weights['normal']
+    
+    def _adjust_confidence_for_session(self, base_confidence: int) -> int:
+        """Adjust confidence based on trading session"""
+        now = datetime.now(self.CT)
+        hour = now.hour
+        minute = now.minute
+        
+        # Lower confidence during lunch
+        if 11 <= hour < 13:
+            return max(base_confidence - 10, 0)
+        
+        # Lower confidence in first 5 minutes of market
+        elif hour == 8 and 30 <= minute < 35:
+            return max(base_confidence - 15, 0)
+        
+        # Higher confidence during prime hours
+        elif (9 <= hour < 11) or (13 <= hour < 15):
+            return min(base_confidence + 5, 100)
+        
+        return base_confidence
         
     def analyze_regime(self, timeframe_data: Dict[str, Dict]) -> Dict:
         """
         Analyze market regime based on multiple timeframe data
         
         Args:
-            timeframe_data: Dict with keys like '5m', '15m', '1h' containing chart analysis
+            timeframe_data: Dict with keys like '5m', '15m', '30m' containing chart analysis
             
         Returns:
             Dict with regime analysis including:
@@ -127,6 +208,10 @@ class MarketRegime:
             regime_result['trade_recommendation'] = self._get_trade_recommendation(regime_result)
             regime_result['risk_level'] = self._assess_risk_level(regime_result, metrics)
             
+            # Add day trading specific analysis
+            regime_result['scalping_bias'] = self.get_scalping_bias(metrics)
+            regime_result['session_quality'] = self._assess_session_quality()
+            
             # Cache the result
             self._cache_result(cache_key, regime_result)
             
@@ -164,7 +249,9 @@ class MarketRegime:
                 'bullish_indicators': 0,
                 'bearish_indicators': 0,
                 'indicator_bias': 'neutral'
-            }
+            },
+            'scalping_bias': {'bias': 'neutral', 'confidence': 0},
+            'session_quality': 'unknown'
         }
     
     def _extract_metrics(self, timeframe_data: Dict[str, Dict]) -> Dict:
@@ -208,56 +295,35 @@ class MarketRegime:
         return metrics
     
     def _analyze_trend_alignment(self, metrics: Dict) -> Dict:
-        """Analyze trend alignment across timeframes - IMPROVED VERSION"""
+        """Analyze trend alignment across timeframes - OPTIMIZED FOR DAY TRADING"""
         trends = []
         weighted_trends = {'up': 0, 'down': 0, 'sideways': 0}
         
-        # CHANGE: Focus on fewer, more meaningful timeframes
-        # Give much more weight to higher timeframes
-        weights = {
-            '5m': 0.2,   # Short-term
-            '15m': 0.3,  # Medium-term  
-            '1h': 0.5    # Dominant weight on higher timeframe
-        }
+        # Get current weights based on market session
+        weights = self._get_current_weights()
         
-        # Track trends by timeframe group
-        short_term_trends = []  # 5m
-        medium_term_trends = [] # 15m
-        long_term_trends = []   # 1h
+        # Track trends by speed
+        fast_trends = []    # 5m
+        medium_trends = []  # 15m 
+        slow_trends = []    # 30m
         
-        # Also handle legacy 1m and 30m data if present
-        legacy_weights = {
-            '1m': 0.05,  # Very low weight
-            '30m': 0.35  # Between 15m and 1h
-        }
-        
-        # Process main timeframes
-        for tf, weight in weights.items():
+        # Process timeframes
+        for tf in self.timeframes:
             if tf in metrics:
                 trend = metrics[tf].get('trend', 'sideways')
+                weight = weights.get(tf, self.default_weights.get(tf, 0.33))
+                
                 if trend in weighted_trends:
                     weighted_trends[trend] += weight
                 trends.append(trend)
                 
-                # Group by timeframe
+                # Group by speed
                 if tf == '5m':
-                    short_term_trends.append(trend)
+                    fast_trends.append(trend)
                 elif tf == '15m':
-                    medium_term_trends.append(trend)
-                elif tf == '1h':
-                    long_term_trends.append(trend)
-        
-        # Process legacy timeframes if present (with lower impact)
-        for tf, weight in legacy_weights.items():
-            if tf in metrics:
-                trend = metrics[tf].get('trend', 'sideways')
-                if trend in weighted_trends:
-                    weighted_trends[trend] += weight * 0.5  # Further reduce impact
-                
-                if tf == '1m':
-                    short_term_trends.append(trend)
+                    medium_trends.append(trend)
                 elif tf == '30m':
-                    medium_term_trends.append(trend)
+                    slow_trends.append(trend)
         
         if not trends:
             return {
@@ -271,26 +337,24 @@ class MarketRegime:
         
         # Determine primary trend
         primary_trend = max(weighted_trends, key=weighted_trends.get)
-        total_weight = sum(weights.get(tf, 0) for tf in metrics if tf in weights)
-        # Add legacy weights if present
-        total_weight += sum(legacy_weights.get(tf, 0) * 0.5 for tf in metrics if tf in legacy_weights)
+        total_weight = sum(weights.get(tf, self.default_weights.get(tf, 0)) for tf in metrics if tf in self.timeframes)
         
         alignment_score = (weighted_trends[primary_trend] / total_weight * 100) if total_weight > 0 else 0
         
-        # Smart conflict detection - only care about higher timeframe conflicts
-        higher_tf_trends = medium_term_trends + long_term_trends
-        unique_higher_tf_trends = set(higher_tf_trends)
+        # Smart conflict detection for day trading
+        primary_tf_trends = medium_trends + slow_trends  # 15m and 30m
+        unique_primary_trends = set(primary_tf_trends)
         
-        # Only flag conflict if HIGHER timeframes disagree significantly
-        has_conflict = len(unique_higher_tf_trends) > 1 and 'up' in unique_higher_tf_trends and 'down' in unique_higher_tf_trends
+        # Only flag conflict if primary timeframes disagree significantly
+        has_conflict = len(unique_primary_trends) > 1 and 'up' in unique_primary_trends and 'down' in unique_primary_trends
         
-        # Consider it aligned if just the important timeframes agree
-        is_aligned = len(unique_higher_tf_trends) == 1 or alignment_score > 80
+        # Consider it aligned if primary timeframes agree
+        is_aligned = len(unique_primary_trends) == 1 or alignment_score > 75
         
-        # Check if at least 15m and 1h agree (most important)
+        # Check if 15m and 30m agree (most important for day trading)
         higher_tf_agreement = False
-        if '15m' in metrics and '1h' in metrics:
-            higher_tf_agreement = metrics['15m']['trend'] == metrics['1h']['trend']
+        if '15m' in metrics and '30m' in metrics:
+            higher_tf_agreement = metrics['15m']['trend'] == metrics['30m']['trend']
         
         return {
             'primary_trend': primary_trend,
@@ -298,10 +362,28 @@ class MarketRegime:
             'is_aligned': is_aligned,
             'has_conflict': has_conflict,
             'trends_by_timeframe': {tf: metrics[tf].get('trend', 'unknown') 
-                                   for tf in metrics},
+                                   for tf in metrics if tf in self.timeframes},
             'higher_tf_agreement': higher_tf_agreement,
-            'trend_strength': self._calculate_trend_strength(metrics, primary_trend)
+            'trend_strength': self._calculate_trend_strength(metrics, primary_trend),
+            'fast_vs_slow': self._compare_fast_slow_trends(fast_trends, slow_trends)
         }
+    
+    def _compare_fast_slow_trends(self, fast_trends: List[str], slow_trends: List[str]) -> str:
+        """Compare fast vs slow timeframe trends for entry timing"""
+        if not fast_trends or not slow_trends:
+            return 'unknown'
+        
+        fast_trend = fast_trends[0] if fast_trends else 'unknown'
+        slow_trend = slow_trends[0] if slow_trends else 'unknown'
+        
+        if fast_trend == slow_trend:
+            return 'aligned'
+        elif slow_trend in ['up', 'down'] and fast_trend == 'sideways':
+            return 'pullback'  # Good entry opportunity
+        elif fast_trend in ['up', 'down'] and slow_trend == 'sideways':
+            return 'breakout_attempt'
+        else:
+            return 'divergent'
     
     def _calculate_trend_strength(self, metrics: Dict, primary_trend: str) -> str:
         """Calculate the strength of the primary trend"""
@@ -311,7 +393,7 @@ class MarketRegime:
         strength_score = 0
         
         # Check if signals align with trend
-        for tf in ['5m', '15m', '30m']:
+        for tf in self.timeframes:
             if tf in metrics:
                 signal = metrics[tf].get('signal', 'HOLD')
                 if (primary_trend == 'up' and signal == 'BUY') or \
@@ -334,8 +416,8 @@ class MarketRegime:
         volatilities = []
         ranges = []
         
-        # Focus on key timeframes
-        for tf in ['5m', '15m', '30m']:
+        # Focus on configured timeframes
+        for tf in self.timeframes:
             if tf in metrics:
                 vol = metrics[tf].get('volatility', 'medium')
                 volatilities.append(vol)
@@ -343,14 +425,6 @@ class MarketRegime:
                 range_size = metrics[tf].get('range_size', 0)
                 if range_size > 0:
                     ranges.append(range_size)
-        
-        # Include 30m if available
-        if '30m' in metrics:
-            vol = metrics['30m'].get('volatility', 'medium')
-            volatilities.append(vol)
-            range_size = metrics['30m'].get('range_size', 0)
-            if range_size > 0:
-                ranges.append(range_size)
         
         if not volatilities:
             return {
@@ -384,7 +458,8 @@ class MarketRegime:
             'volatility_regime': volatility_regime,
             'range_percent': range_percent,
             'is_expanding': range_percent > 0.5,  # More than 0.5% range
-            'is_contracting': range_percent < 0.2  # Less than 0.2% range
+            'is_contracting': range_percent < 0.2,  # Less than 0.2% range
+            'intraday_atr': avg_range if ranges else 0
         }
     
     def _analyze_momentum(self, metrics: Dict) -> Dict:
@@ -398,7 +473,7 @@ class MarketRegime:
         bearish_indicators = 0
         divergence_count = 0
         
-        for tf in ['5m', '15m', '30m']:
+        for tf in self.timeframes:
             if tf in metrics:
                 # Handle different momentum naming conventions
                 momentum = metrics[tf].get('momentum', 'neutral')
@@ -449,27 +524,38 @@ class MarketRegime:
             'bearish_indicators': bearish_indicators,
             'indicator_bias': 'bullish' if bullish_indicators > bearish_indicators + 1 else 
                              'bearish' if bearish_indicators > bullish_indicators + 1 else 'neutral',
-            'divergence_present': divergence_count > 0
+            'divergence_present': divergence_count > 0,
+            'momentum_quality': self._assess_momentum_quality(avg_momentum, divergence_count)
         }
+    
+    def _assess_momentum_quality(self, avg_momentum: float, divergence_count: int) -> str:
+        """Assess the quality of momentum for day trading"""
+        if avg_momentum > 2.5 and divergence_count == 0:
+            return 'excellent'
+        elif avg_momentum > 2.0 and divergence_count <= 1:
+            return 'good'
+        elif divergence_count > 1:
+            return 'divergent'
+        else:
+            return 'poor'
     
     def _determine_regime(self, trend_analysis: Dict, volatility_analysis: Dict, 
                          momentum_analysis: Dict, metrics: Dict) -> Dict:
-        """Determine the primary market regime - IMPROVED VERSION"""
+        """Determine the primary market regime - OPTIMIZED FOR DAY TRADING"""
         regime = self.REGIME_CHOPPY
         confidence = 50
         supporting_factors = []
         
-        # CHANGE: More lenient trending regime detection
-        # Lower threshold from 70 to 60 for alignment
+        # More aggressive regime detection for day trading
         if trend_analysis['alignment_score'] > 60:
-            # Check if at least higher timeframes agree
+            # Check if at least primary timeframes agree
             if trend_analysis.get('higher_tf_agreement', False) or not trend_analysis['has_conflict']:
                 if trend_analysis['primary_trend'] == 'up' and momentum_analysis['momentum_state'] != 'weak':
                     regime = self.REGIME_TRENDING_UP
-                    confidence = min(trend_analysis['alignment_score'] + 10, 90)  # Boost confidence
+                    confidence = min(trend_analysis['alignment_score'] + 10, 90)
                     supporting_factors.append(f"Uptrend with {trend_analysis['alignment_score']:.0f}% alignment")
                     if trend_analysis.get('higher_tf_agreement'):
-                        supporting_factors.append("Higher timeframes in agreement")
+                        supporting_factors.append("15m and 30m in agreement")
                         confidence += 5
                     if trend_analysis.get('trend_strength') == 'strong':
                         supporting_factors.append("Strong trend signals")
@@ -479,22 +565,22 @@ class MarketRegime:
                     confidence = min(trend_analysis['alignment_score'] + 10, 90)
                     supporting_factors.append(f"Downtrend with {trend_analysis['alignment_score']:.0f}% alignment")
                     if trend_analysis.get('higher_tf_agreement'):
-                        supporting_factors.append("Higher timeframes in agreement")
+                        supporting_factors.append("15m and 30m in agreement")
                         confidence += 5
                     if trend_analysis.get('trend_strength') == 'strong':
                         supporting_factors.append("Strong trend signals")
                         confidence += 5
         
-        # Alternative: If alignment is 50-60% but higher timeframes strongly agree
+        # Alternative: If alignment is 50-60% but primary timeframes agree
         elif trend_analysis['alignment_score'] > 50 and trend_analysis.get('higher_tf_agreement', False):
             if trend_analysis['primary_trend'] == 'up' and momentum_analysis['indicator_bias'] == 'bullish':
                 regime = self.REGIME_TRENDING_UP
                 confidence = 65
-                supporting_factors.append("Higher timeframes aligned bullish")
+                supporting_factors.append("Primary timeframes aligned bullish")
             elif trend_analysis['primary_trend'] == 'down' and momentum_analysis['indicator_bias'] == 'bearish':
                 regime = self.REGIME_TRENDING_DOWN
                 confidence = 65
-                supporting_factors.append("Higher timeframes aligned bearish")
+                supporting_factors.append("Primary timeframes aligned bearish")
         
         # Ranging regime detection
         elif (trend_analysis['primary_trend'] == 'sideways' and 
@@ -504,8 +590,7 @@ class MarketRegime:
             confidence = 70
             supporting_factors.append("Sideways trend with contained volatility")
             
-        # Be more specific about choppy conditions
-        # Only call it choppy if there's real disagreement in higher timeframes
+        # Choppy conditions
         elif (trend_analysis['has_conflict'] and trend_analysis['alignment_score'] < 50):
             regime = self.REGIME_CHOPPY
             confidence = 80
@@ -514,24 +599,22 @@ class MarketRegime:
                 supporting_factors.append("High volatility")
                 confidence += 5
         
-        # If we still haven't determined regime, check the dominant timeframe
-        if regime == self.REGIME_CHOPPY and '1h' in metrics:
-            # Trust the 1h timeframe as a tiebreaker
-            hourly_trend = metrics['1h'].get('trend', 'sideways')
-            hourly_signal = metrics['1h'].get('signal', 'HOLD')
+        # If still undetermined, check 30m as tiebreaker
+        if regime == self.REGIME_CHOPPY and '30m' in metrics:
+            thirty_min_trend = metrics['30m'].get('trend', 'sideways')
+            thirty_min_signal = metrics['30m'].get('signal', 'HOLD')
             
-            if hourly_trend == 'up' and hourly_signal == 'BUY':
+            if thirty_min_trend == 'up' and thirty_min_signal == 'BUY':
                 regime = self.REGIME_TRENDING_UP
                 confidence = 65
-                supporting_factors = ["Hourly timeframe showing uptrend"]
-            elif hourly_trend == 'down' and hourly_signal == 'SELL':
+                supporting_factors = ["30m timeframe showing uptrend"]
+            elif thirty_min_trend == 'down' and thirty_min_signal == 'SELL':
                 regime = self.REGIME_TRENDING_DOWN
                 confidence = 65
-                supporting_factors = ["Hourly timeframe showing downtrend"]
+                supporting_factors = ["30m timeframe showing downtrend"]
         
-        # Breakout detection
+        # Breakout detection with day trading sensitivity
         if self._detect_breakout(metrics):
-            # Don't override a trending regime with breakout
             if regime not in [self.REGIME_TRENDING_UP, self.REGIME_TRENDING_DOWN]:
                 regime = self.REGIME_BREAKOUT
                 confidence = 75
@@ -557,10 +640,12 @@ class MarketRegime:
         # Add indicator bias
         if momentum_analysis['indicator_bias'] != 'neutral':
             supporting_factors.append(f"{momentum_analysis['indicator_bias'].capitalize()} indicator bias")
-            # Boost confidence if indicators align with regime
             if (regime == self.REGIME_TRENDING_UP and momentum_analysis['indicator_bias'] == 'bullish') or \
                (regime == self.REGIME_TRENDING_DOWN and momentum_analysis['indicator_bias'] == 'bearish'):
                 confidence = min(confidence + 5, 95)
+        
+        # Session-based confidence adjustment
+        confidence = self._adjust_confidence_for_session(confidence)
         
         return {
             'primary_regime': regime,
@@ -572,10 +657,13 @@ class MarketRegime:
         }
     
     def _detect_breakout(self, metrics: Dict) -> bool:
-        """Detect potential breakout conditions"""
+        """Detect potential breakout conditions - MORE SENSITIVE FOR DAY TRADING"""
         breakout_signals = 0
         
-        for tf in ['5m', '15m', '30m']:
+        # Give more weight to faster timeframes for breakout detection
+        timeframe_weights = {'5m': 1.5, '15m': 1.0, '30m': 0.5}
+        
+        for tf in self.timeframes:
             if tf not in metrics:
                 continue
                 
@@ -587,23 +675,30 @@ class MarketRegime:
             if not current_price or (not resistances and not supports):
                 continue
             
+            # More sensitive thresholds for day trading
+            proximity_threshold = 0.10 if tf == '5m' else 0.15
+            
+            # Get weight for this timeframe
+            weight = timeframe_weights.get(tf, 1.0)
+            
             # Check proximity to resistance (potential bullish breakout)
             for resistance in resistances:
                 if resistance and resistance > current_price:
                     distance_pct = ((resistance - current_price) / current_price) * 100
-                    if distance_pct < 0.15:  # Within 0.15% of resistance
-                        breakout_signals += 1
+                    if distance_pct < proximity_threshold:
+                        breakout_signals += weight
                         break
             
             # Check proximity to support (potential bearish breakout)
             for support in supports:
                 if support and support < current_price:
                     distance_pct = ((current_price - support) / current_price) * 100
-                    if distance_pct < 0.15:  # Within 0.15% of support
-                        breakout_signals += 1
+                    if distance_pct < proximity_threshold:
+                        breakout_signals += weight
                         break
         
-        return breakout_signals >= 2
+        # Lower threshold for day trading (was 2, now 1.5)
+        return breakout_signals >= 1.5
     
     def _get_trade_recommendation(self, regime_result: Dict) -> bool:
         """Determine if trading is recommended in this regime"""
@@ -612,11 +707,11 @@ class MarketRegime:
         
         # Good regimes for trading
         if regime in [self.REGIME_TRENDING_UP, self.REGIME_TRENDING_DOWN]:
-            return confidence > 55  # Lowered from 60
+            return confidence > 55  # Lowered from 60 for more opportunities
         
         # Potentially good for range trading
         elif regime == self.REGIME_RANGING:
-            return confidence > 65  # Slightly lowered from 70
+            return confidence > 65
         
         # Generally avoid choppy markets
         elif regime == self.REGIME_CHOPPY:
@@ -625,7 +720,7 @@ class MarketRegime:
         
         # Breakout - only with good confidence
         elif regime == self.REGIME_BREAKOUT:
-            return confidence > 70  # Lowered from 75
+            return confidence > 70
         
         return False
     
@@ -635,11 +730,17 @@ class MarketRegime:
         volatility = regime_result['volatility_details']['volatility_regime']
         confidence = regime_result['confidence']
         
+        # Session-based risk adjustment
+        session_quality = self._assess_session_quality()
+        
         # High risk conditions
         if regime == self.REGIME_CHOPPY and confidence > 70:
             return 'high'
         
         if volatility == 'high' and regime != self.REGIME_BREAKOUT:
+            return 'high'
+        
+        if session_quality == 'poor':
             return 'high'
         
         # Low risk conditions
@@ -656,8 +757,78 @@ class MarketRegime:
         # Default to medium
         return 'medium'
     
+    def _assess_session_quality(self) -> str:
+        """Assess current trading session quality"""
+        now = datetime.now(self.CT)
+        hour = now.hour
+        minute = now.minute
+        
+        # Excellent times
+        if (hour == 9 and minute >= 30) or (hour == 10):
+            return 'excellent'
+        
+        # Good times
+        elif (hour == 9 and minute < 30) or (13 <= hour < 14):
+            return 'good'
+        
+        # Poor times
+        elif 11 <= hour < 13:  # Lunch
+            return 'poor'
+        
+        # First/last 5 minutes
+        elif (hour == 8 and minute >= 25 and minute < 35) or \
+             (hour == 14 and minute >= 55):
+            return 'poor'
+        
+        return 'normal'
+    
+    def get_scalping_bias(self, metrics: Dict) -> Dict:
+        """Quick bias for scalping decisions using only 5m and 15m"""
+        if '5m' not in metrics or '15m' not in metrics:
+            return {'bias': 'neutral', 'confidence': 0, 'entry_allowed': False}
+        
+        five_min = metrics['5m']
+        fifteen_min = metrics['15m']
+        
+        # Both agree strongly?
+        if five_min['trend'] == fifteen_min['trend'] and five_min['trend'] != 'sideways':
+            # Check if signals also agree
+            if five_min['signal'] == fifteen_min['signal'] and five_min['signal'] != 'HOLD':
+                return {
+                    'bias': five_min['trend'],
+                    'confidence': 85,
+                    'entry_allowed': True,
+                    'note': 'Strong alignment for scalping'
+                }
+            else:
+                return {
+                    'bias': five_min['trend'],
+                    'confidence': 70,
+                    'entry_allowed': True
+                }
+        
+        # 15m trend with 5m pullback?
+        elif fifteen_min['trend'] in ['up', 'down'] and five_min['trend'] == 'sideways':
+            return {
+                'bias': fifteen_min['trend'],
+                'confidence': 60,
+                'entry_allowed': True,
+                'note': 'Pullback entry opportunity'
+            }
+        
+        # 5m breakout from 15m range?
+        elif fifteen_min['trend'] == 'sideways' and five_min['trend'] in ['up', 'down']:
+            return {
+                'bias': five_min['trend'],
+                'confidence': 55,
+                'entry_allowed': True,
+                'note': 'Potential range breakout'
+            }
+        
+        return {'bias': 'neutral', 'confidence': 40, 'entry_allowed': False}
+    
     def get_regime_trading_rules(self, regime: str) -> Dict:
-        """Get specific trading rules for each regime"""
+        """Get specific trading rules for each regime - OPTIMIZED FOR DAY TRADING"""
         rules = {
             self.REGIME_TRENDING_UP: {
                 'preferred_signal': 'BUY',
@@ -665,7 +836,8 @@ class MarketRegime:
                 'stop_loss_multiplier': 1.0,
                 'take_profit_multiplier': 1.5,
                 'max_position_size': 3,
-                'entry_confirmation_required': False
+                'entry_confirmation_required': False,
+                'preferred_entry': 'pullback_to_15m_support'
             },
             self.REGIME_TRENDING_DOWN: {
                 'preferred_signal': 'SELL',
@@ -673,7 +845,8 @@ class MarketRegime:
                 'stop_loss_multiplier': 1.0,
                 'take_profit_multiplier': 1.5,
                 'max_position_size': 3,
-                'entry_confirmation_required': False
+                'entry_confirmation_required': False,
+                'preferred_entry': 'pullback_to_15m_resistance'
             },
             self.REGIME_RANGING: {
                 'preferred_signal': 'BOTH',
@@ -681,7 +854,8 @@ class MarketRegime:
                 'stop_loss_multiplier': 0.75,
                 'take_profit_multiplier': 1.0,
                 'max_position_size': 2,
-                'entry_confirmation_required': True
+                'entry_confirmation_required': True,
+                'preferred_entry': 'range_extremes'
             },
             self.REGIME_CHOPPY: {
                 'preferred_signal': None,
@@ -689,7 +863,8 @@ class MarketRegime:
                 'stop_loss_multiplier': 0.5,
                 'take_profit_multiplier': 0.5,
                 'max_position_size': 0,
-                'entry_confirmation_required': True
+                'entry_confirmation_required': True,
+                'preferred_entry': 'avoid'
             },
             self.REGIME_BREAKOUT: {
                 'preferred_signal': 'MOMENTUM',
@@ -697,7 +872,8 @@ class MarketRegime:
                 'stop_loss_multiplier': 1.25,
                 'take_profit_multiplier': 2.0,
                 'max_position_size': 2,
-                'entry_confirmation_required': True
+                'entry_confirmation_required': True,
+                'preferred_entry': 'breakout_retest'
             }
         }
         
