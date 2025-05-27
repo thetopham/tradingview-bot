@@ -33,6 +33,16 @@ def start_scheduler(app):
     # Original 5-minute cron job - still fetches charts
     def cron_job():
         """Runs 5 seconds after each 5-min candle close to fetch fresh charts AND update regime"""
+        
+        # Check if we're in the get-flat window
+        from auth import in_get_flat
+        now = datetime.now(CT)
+        
+        if in_get_flat(now):
+            logging.info("[APScheduler] SKIPPING chart/regime fetch - in get-flat window")
+            # Don't make any n8n calls or webhook calls during flat time
+            return
+        
         logging.info("[APScheduler] Fetching fresh charts and updating regime after candle close")
     
         try:
@@ -83,6 +93,12 @@ def start_scheduler(app):
     # Market analysis job - runs every 15 minutes
     def market_analysis_job():
         """Log market conditions and alerts"""
+        # Skip during flat window
+        from auth import in_get_flat
+        if in_get_flat(datetime.now(CT)):
+            logging.info("[Market Analysis] Skipping - in get-flat window")
+            return
+            
         try:
             from api import get_market_conditions_summary
             summary = get_market_conditions_summary(force_refresh=False)
@@ -109,6 +125,7 @@ def start_scheduler(app):
     # Position monitoring job - runs every 2 minutes
     def position_monitoring_job():
         """Monitor existing positions and log alerts"""
+        # Always run position monitoring, even during flat time
         try:
             logging.info("🔄 Running position monitoring...")
             
@@ -180,6 +197,12 @@ def start_scheduler(app):
     # Pre-session analysis jobs
     def pre_session_analysis(session_name):
         """Run analysis before each major session"""
+        # Skip if in flat window
+        from auth import in_get_flat
+        if in_get_flat(datetime.now(CT)):
+            logging.info(f"[Pre-session Analysis] Skipping {session_name} - in get-flat window")
+            return
+            
         try:
             logging.info(f"🔔 Pre-{session_name} session analysis starting...")
             summary = get_market_conditions_summary(force_refresh=True)
@@ -383,7 +406,7 @@ def start_scheduler(app):
     # Market analysis every 15 minutes
     scheduler.add_job(
         market_analysis_job,
-        CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=45, timezone=CT),
+        CronTrigger(minute='0,15,30,45', second=45, timezone=CT),
         id='market_analysis',
         replace_existing=True
     )
