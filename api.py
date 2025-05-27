@@ -983,20 +983,15 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
                 price = float(record.get('c'))
                 
                 # Check data freshness
-                from dateutil import parser
                 bar_time = parser.parse(record.get('ts'))
-                current_time = datetime.now(datetime.timezone.utc)
+                current_time = datetime.now(timezone.utc)  # Fixed: use imported timezone
                 age_seconds = (current_time - bar_time).total_seconds()
                 
-                # Log debug info
-                logging.debug(f"tv_datafeed: price=${price}, ts={record.get('ts')}, age={age_seconds:.0f}s, max_age={max_age_seconds}s")
-                
                 if age_seconds <= max_age_seconds:
+                    logging.debug(f"Current price from 1m feed: ${price} (age: {age_seconds:.0f}s)")
                     return price, f"1m_feed_{int(age_seconds)}s_old"
                 else:
-                    logging.warning(f"1m data too old: {age_seconds:.0f}s > {max_age_seconds}s. Last update: {record.get('ts')}")
-            else:
-                logging.warning("No data in tv_datafeed table")
+                    logging.debug(f"1m data too old: {age_seconds:.0f}s > {max_age_seconds}s")
                     
         except Exception as e:
             logging.error(f"Error querying tv_datafeed: {e}")
@@ -1016,7 +1011,7 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
                 
                 # Check age
                 timestamp = parser.parse(record.get('timestamp'))
-                age_seconds = (datetime.now(datetime.timezone.utc) - timestamp).total_seconds()
+                age_seconds = (datetime.now(timezone.utc) - timestamp).total_seconds()  # Fixed
                 
                 if age_seconds <= 360:  # Accept up to 6 minutes old for chart data
                     snapshot = record.get('snapshot')
