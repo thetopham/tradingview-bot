@@ -33,7 +33,7 @@ class PositionManager:
         """
         positions = [p for p in search_pos(acct_id) if p["contractId"] == cid]
         open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
-    
+
         if not positions:
             return {
                 'has_position': False,
@@ -46,16 +46,19 @@ class PositionManager:
                 'stop_orders': [],
                 'limit_orders': [],
                 'duration_minutes': 0
-           }
-    
+            }
+
         # Calculate aggregate position
         total_size = sum(p.get("size", 0) for p in positions)
         avg_price = sum(p.get("averagePrice", 0) * p.get("size", 0) for p in positions) / total_size if total_size > 0 else 0
-    
-        # Determine side (1 = long, 2 = short)
+
+        # Determine side - THIS IS CRITICAL
         position_type = positions[0].get("type") if positions else None
         side = "LONG" if position_type == 1 else "SHORT" if position_type == 2 else None
-    
+
+        # Log for debugging
+        self.logger.info(f"Position debug: type={position_type}, side={side}, size={total_size}, avg_price={avg_price}")
+
         # Get position age
         creation_time = positions[0].get("creationTimestamp")
         if creation_time:
@@ -67,40 +70,61 @@ class PositionManager:
                 duration = 0
         else:
             duration = 0
-    
+
         # Categorize orders
         stop_orders = [o for o in open_orders if o["type"] == 4 and o["status"] == 1]
         limit_orders = [o for o in open_orders if o["type"] == 1 and o["status"] == 1]
+
+        # IMPORTANT: Only get trades AFTER position entry time to avoid old P&L
+        if creation_time:
+            try:
+                entry_time = parser.parse(creation_time)
+                # Only get trades after this position was opened
+                trades = search_trades(acct_id, entry_time)
+            except:
+                trades = []
+        else:
+            trades = []
     
-        # Get recent trades for P&L calculation
-        trades = search_trades(acct_id, datetime.now(CT) - timedelta(hours=24))
+        # Filter for this contract and calculate realized P&L ONLY for this position
         position_trades = [t for t in trades if t["contractId"] == cid and not t.get("voided", False)]
-        realized_pnl = sum(float(t.get("profitAndLoss") or 0) for t in position_trades if t.get("profitAndLoss") is not None)
     
+        # Only count trades that are actually closing this position (have P&L)
+        realized_pnl = sum(float(t.get("profitAndLoss") or 0) for t in position_trades 
+                          if t.get("profitAndLoss") is not None)
+
         # Calculate unrealized P&L
         unrealized_pnl = 0
         current_price = None
-    
+
         try:
             from api import get_current_market_price
-            current_price, price_source = get_current_market_price(symbol="MES")
-            
+            current_price, price_source = get_current_market_price(symbol="MES", max_age_seconds=600)
+        
             if current_price and avg_price > 0:
                 contract_multiplier = 5  # MES multiplier
             
+                # Debug logging
+                self.logger.info(f"P&L calculation: current={current_price}, entry={avg_price}, "
+                               f"size={total_size}, side={side}, type={position_type}")
+        
                 if side == "LONG":
                     unrealized_pnl = (current_price - avg_price) * total_size * contract_multiplier
                 elif side == "SHORT":
                     unrealized_pnl = (avg_price - current_price) * total_size * contract_multiplier
-            
-                self.logger.info(f"P&L: ${unrealized_pnl:.2f} unrealized (entry: {avg_price:.2f}, current: {current_price:.2f})")
-                    
+                else:
+                    unrealized_pnl = 0
+                    self.logger.warning(f"Unknown position side: type={position_type}")
+        
+                self.logger.info(f"Unrealized P&L: ${unrealized_pnl:.2f}")
+                
         except Exception as e:
             self.logger.error(f"Error calculating unrealized P&L: {e}")
-    
-        # Total P&L
-        total_pnl = realized_pnl + unrealized_pnl
-    
+
+        # Total P&L is ONLY unrealized for open positions
+        # (realized P&L should be 0 for positions that are still open)
+        total_pnl = unrealized_pnl  # Don't add realized_pnl here
+
         return {
             'has_position': True,
             'size': total_size,
