@@ -311,7 +311,7 @@ class MarketRegime:
         strength_score = 0
         
         # Check if signals align with trend
-        for tf in ['5m', '15m', '1h']:
+        for tf in ['5m', '15m', '30m']:
             if tf in metrics:
                 signal = metrics[tf].get('signal', 'HOLD')
                 if (primary_trend == 'up' and signal == 'BUY') or \
@@ -335,7 +335,7 @@ class MarketRegime:
         ranges = []
         
         # Focus on key timeframes
-        for tf in ['5m', '15m', '1h']:
+        for tf in ['5m', '15m', '30m']:
             if tf in metrics:
                 vol = metrics[tf].get('volatility', 'medium')
                 volatilities.append(vol)
@@ -398,7 +398,7 @@ class MarketRegime:
         bearish_indicators = 0
         divergence_count = 0
         
-        for tf in ['5m', '15m', '1h']:
+        for tf in ['5m', '15m', '30m']:
             if tf in metrics:
                 # Handle different momentum naming conventions
                 momentum = metrics[tf].get('momentum', 'neutral')
@@ -575,7 +575,7 @@ class MarketRegime:
         """Detect potential breakout conditions"""
         breakout_signals = 0
         
-        for tf in ['5m', '15m', '1h']:
+        for tf in ['5m', '15m', '30m']:
             if tf not in metrics:
                 continue
                 
