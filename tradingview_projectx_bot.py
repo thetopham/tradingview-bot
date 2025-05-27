@@ -596,6 +596,78 @@ def get_realtime_positions():
         logging.error(f"Error getting real-time positions: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route("/debug/positions", methods=["GET"])
+def debug_positions():
+    """Debug position data and P&L calculations"""
+    try:
+        from api import search_pos, get_current_market_price, get_contract
+        
+        cid = get_contract("CON.F.US.MES.M25")
+        price, price_source = get_current_market_price()
+        
+        result = {
+            'current_price': price,
+            'price_source': price_source,
+            'contract_id': cid,
+            'accounts': {}
+        }
+        
+        for account_name, acct_id in ACCOUNTS.items():
+            positions = search_pos(acct_id)
+            
+            # Filter for our contract
+            contract_positions = [p for p in positions if p.get("contractId") == cid]
+            
+            account_info = {
+                'all_positions': positions,
+                'contract_positions': contract_positions,
+                'calculations': []
+            }
+            
+            # Calculate P&L for each position
+            for pos in contract_positions:
+                size = pos.get('size', 0)
+                entry = pos.get('averagePrice', 0)
+                pos_type = pos.get('type')
+                
+                calc = {
+                    'position_id': pos.get('id'),
+                    'type': pos_type,
+                    'type_meaning': 'LONG' if pos_type == 1 else 'SHORT' if pos_type == 2 else 'UNKNOWN',
+                    'size': size,
+                    'entry_price': entry,
+                    'current_price': price
+                }
+                
+                if price and entry and size > 0:
+                    if pos_type == 1:  # Long
+                        move = price - entry
+                        pnl = move * size * 5
+                        calc['calculation'] = f"({price} - {entry}) * {size} * 5 = {pnl}"
+                    elif pos_type == 2:  # Short
+                        move = entry - price
+                        pnl = move * size * 5
+                        calc['calculation'] = f"({entry} - {price}) * {size} * 5 = {pnl}"
+                    else:
+                        pnl = 0
+                        calc['calculation'] = f"Unknown position type: {pos_type}"
+                    
+                    calc['price_move'] = move
+                    calc['unrealized_pnl'] = pnl
+                
+                account_info['calculations'].append(calc)
+            
+            result['accounts'][account_name] = account_info
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route("/position-context/<account>", methods=["GET"])
 def get_position_context(account):
     """Get position context for AI decision making"""
