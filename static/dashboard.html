@@ -506,6 +506,12 @@
             grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
             gap: 15px;
         }
+        
+        .position-metric-value {
+            font-size: 0.9rem;
+            font-weight: 600;
+            word-break: break-all;
+        }
 
         /* Market Session Timeline */
         .session-timeline {
@@ -1173,7 +1179,7 @@
 
         async function fetchPositions() {
             try {
-                const data = await fetchJSON('/positions/realtime');
+                const data = await fetchJSON('/positions/summary');
                 updatePositionsDisplay(data);
                 updateQuickStats(data);
                 return data;
@@ -1184,10 +1190,26 @@
 
         async function fetchLatestAIDecision() {
             try {
-                // This would need to be implemented on your backend
                 const data = await fetchJSON('/ai/latest-decision');
-                updateAIDecisionDisplay(data);
-                return data;
+                
+                // Extract the actual decision data
+                let decisionData = data;
+                
+                // If the decision is nested in a 'decision' field
+                if (data.decision) {
+                    decisionData = typeof data.decision === 'string' ? 
+                        JSON.parse(data.decision) : data.decision;
+                }
+                
+                // Merge with top-level data
+                const displayData = {
+                    ...data,
+                    ...decisionData,
+                    timestamp: data.timestamp || data.created_at || new Date().toISOString()
+                };
+                
+                updateAIDecisionDisplay(displayData);
+                return displayData;
             } catch (error) {
                 console.error('Error fetching AI decision:', error);
             }
@@ -1352,9 +1374,17 @@
         function updateAIDecisionDisplay(data) {
             const container = document.getElementById('ai-decision-content');
             
+            // Handle both direct data and nested decision field
             const signal = data.signal || 'HOLD';
             const strategy = data.strategy || '--';
             const size = data.size || '--';
+            const entrylimit = data.entrylimit || data.entry_limit || null;
+            const sl = data.sl || data.stop_loss || null;
+            const tp1 = data.tp1 || data.take_profit_1 || null;
+            const tp2 = data.tp2 || data.take_profit_2 || null;
+            const reason = data.reason || data.reasoning || '';
+            const regime = data.regime || data.market_regime || '';
+            const timestamp = data.timestamp || data.created_at || new Date().toISOString();
             
             container.innerHTML = `
                 <div class="ai-signal">
@@ -1370,36 +1400,54 @@
                                 <div class="metric-value">${size}</div>
                             </div>
                             <div class="metric-card">
+                                <div class="metric-label">Regime</div>
+                                <div class="metric-value">${regime.replace(/_/g, ' ')}</div>
+                            </div>
+                            <div class="metric-card">
                                 <div class="metric-label">Entry</div>
-                                <div class="metric-value">${formatPrice(data.entrylimit)}</div>
+                                <div class="metric-value">${formatPrice(entrylimit)}</div>
                             </div>
                             <div class="metric-card">
                                 <div class="metric-label">Stop Loss</div>
-                                <div class="metric-value negative">${formatPrice(data.sl)}</div>
+                                <div class="metric-value negative">${formatPrice(sl)}</div>
                             </div>
                             <div class="metric-card">
                                 <div class="metric-label">Target 1</div>
-                                <div class="metric-value positive">${formatPrice(data.tp1)}</div>
+                                <div class="metric-value positive">${formatPrice(tp1)}</div>
                             </div>
-                            <div class="metric-card">
-                                <div class="metric-label">Target 2</div>
-                                <div class="metric-value positive">${formatPrice(data.tp2)}</div>
-                            </div>
+                            ${tp2 ? `
+                                <div class="metric-card">
+                                    <div class="metric-label">Target 2</div>
+                                    <div class="metric-value positive">${formatPrice(tp2)}</div>
+                                </div>
+                            ` : ''}
                         </div>
-                        ${data.reason ? `
+                        ${reason ? `
                             <div style="margin-top: 20px; padding: 15px; background: var(--bg-secondary); border-radius: 8px;">
                                 <div class="text-small text-dim" style="margin-bottom: 5px;">AI REASONING</div>
-                                <div>${data.reason}</div>
+                                <div>${reason}</div>
+                            </div>
+                        ` : ''}
+                        ${data.position_aware_notes ? `
+                            <div style="margin-top: 15px; padding: 15px; background: var(--bg-secondary); border-radius: 8px;">
+                                <div class="text-small text-dim" style="margin-bottom: 5px;">POSITION CONTEXT</div>
+                                <div>${data.position_aware_notes}</div>
+                            </div>
+                        ` : ''}
+                        ${data.regime_notes ? `
+                            <div style="margin-top: 15px; padding: 15px; background: var(--bg-secondary); border-radius: 8px;">
+                                <div class="text-small text-dim" style="margin-bottom: 5px;">REGIME ANALYSIS</div>
+                                <div>${data.regime_notes}</div>
                             </div>
                         ` : ''}
                     </div>
                 </div>
             `;
             
-            document.getElementById('ai-timestamp').textContent = formatTime(data.timestamp);
+            document.getElementById('ai-timestamp').textContent = formatTime(timestamp);
             
             // Alert on new signals
-            if (signal !== 'HOLD' && data.timestamp && isNewData(data.timestamp, 'ai_decision')) {
+            if (signal !== 'HOLD' && timestamp && isNewData(timestamp, 'ai_decision')) {
                 showAlert('success', 'New AI Signal', `${signal} ${size} ${strategy}`, true);
             }
         }
@@ -1417,6 +1465,8 @@
                     const trend = tfData.trend_direction || tfData.trend || 'sideways';
                     const momentum = tfData.momentum || 'neutral';
                     const confidence = tfData.signal_confidence || 'low';
+                    const supports = tfData.support || [];
+                    const resistances = tfData.resistance || [];
                     
                     html += `
                         <div class="timeframe-card">
@@ -1449,7 +1499,41 @@
                                 ${tfData.current_price ? `
                                     <div class="position-metric">
                                         <div class="position-metric-label">Price</div>
-                                        <div class="position-metric-value">$${tfData.current_price.toFixed(2)}</div>
+                                        <div class="position-metric-value">${tfData.current_price.toFixed(2)}</div>
+                                    </div>
+                                ` : ''}
+                                ${supports.length > 0 ? `
+                                    <div class="position-metric">
+                                        <div class="position-metric-label">Support</div>
+                                        <div class="position-metric-value positive">
+                                            ${supports.filter(s => s).map(s => `${s.toFixed(2)}`).join(', ')}
+                                        </div>
+                                    </div>
+                                ` : ''}
+                                ${resistances.length > 0 ? `
+                                    <div class="position-metric">
+                                        <div class="position-metric-label">Resistance</div>
+                                        <div class="position-metric-value negative">
+                                            ${resistances.filter(r => r).map(r => `${r.toFixed(2)}`).join(', ')}
+                                        </div>
+                                    </div>
+                                ` : ''}
+                                ${tfData.entrylimit ? `
+                                    <div class="position-metric">
+                                        <div class="position-metric-label">Entry</div>
+                                        <div class="position-metric-value">${tfData.entrylimit.toFixed(2)}</div>
+                                    </div>
+                                ` : ''}
+                                ${tfData.sl ? `
+                                    <div class="position-metric">
+                                        <div class="position-metric-label">Stop Loss</div>
+                                        <div class="position-metric-value negative">${tfData.sl.toFixed(2)}</div>
+                                    </div>
+                                ` : ''}
+                                ${tfData.tp1 ? `
+                                    <div class="position-metric">
+                                        <div class="position-metric-label">Target 1</div>
+                                        <div class="position-metric-value positive">${tfData.tp1.toFixed(2)}</div>
                                     </div>
                                 ` : ''}
                             </div>
