@@ -979,13 +979,13 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
         try:
             result = supabase.table('tv_datafeed') \
                 .select('c, ts') \
-                .eq('symbol', symbol) \
+                .eq('symbol', 'MES') \
                 .eq('timeframe', 1) \
                 .order('ts', desc=True) \
                 .limit(1) \
                 .execute()
             
-            if result.data:
+            if result.data and len(result.data) > 0:
                 record = result.data[0]
                 price = float(record.get('c'))
                 
@@ -998,7 +998,7 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
                     logging.debug(f"Current price from 1m feed: ${price} (age: {age_seconds:.0f}s)")
                     return price, f"1m_feed_{int(age_seconds)}s_old"
                 else:
-                    logging.debug(f"1m data too old: {age_seconds:.0f}s")
+                    logging.debug(f"1m data too old: {age_seconds:.0f}s > {max_age_seconds}s")
                     
         except Exception as e:
             logging.debug(f"Could not get 1m price: {e}")
@@ -1013,7 +1013,7 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
                 .limit(1) \
                 .execute()
             
-            if result.data:
+            if result.data and len(result.data) > 0:
                 record = result.data[0]
                 
                 # Check age
@@ -1033,14 +1033,33 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
         except Exception as e:
             logging.debug(f"Could not get chart price: {e}")
         
-        # If all else fails, try to get from recent trades
-        try:
-            # This would require access to recent trade data
-            # For now, return None
-            pass
-        except:
-            pass
-            
+        # Check if market is closed
+        now = datetime.now(CT)
+        is_market_closed = (
+            now.weekday() == 5 or  # Saturday
+            (now.weekday() == 6 and now.hour < 17) or  # Sunday before 5pm
+            (now.weekday() == 4 and now.hour >= 16)  # Friday after 4pm
+        )
+        
+        if is_market_closed:
+            # Try to get last known price with much longer timeout
+            try:
+                result = supabase.table('tv_datafeed') \
+                    .select('c, ts') \
+                    .eq('symbol', 'MES') \
+                    .eq('timeframe', 1) \
+                    .order('ts', desc=True) \
+                    .limit(1) \
+                    .execute()
+                
+                if result.data:
+                    record = result.data[0]
+                    price = float(record.get('c'))
+                    return price, "market_closed_last_known"
+                    
+            except:
+                pass
+        
         logging.warning("Could not determine current market price from any source")
         return None, None
         
@@ -1062,13 +1081,13 @@ def get_spread_and_mid_price(symbol: str = "MES") -> Dict[str, Optional[float]]:
         # Get the most recent bar
         result = supabase.table('tv_datafeed') \
             .select('o, h, l, c, ts') \
-            .eq('symbol', symbol) \
+            .eq('symbol', 'MES') \
             .eq('timeframe', 1) \
             .order('ts', desc=True) \
             .limit(1) \
             .execute()
         
-        if result.data:
+        if result.data and len(result.data) > 0:
             bar = result.data[0]
             # For futures, we can approximate:
             # - High as resistance/ask area
