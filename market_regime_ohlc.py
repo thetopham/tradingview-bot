@@ -1,4 +1,4 @@
-def _analyze_single_timeframe(self, data: Dict[str, List], timeframe: str) -> Dict:
+def _analyze_single_timeframe(self, data: dict[str, List], timeframe: str) -> Dict:
     """Analyze a single timeframe's OHLC data - ENHANCED WITH INDICATORS"""
     
     # Extract basic OHLC arrays
