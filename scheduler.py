@@ -74,7 +74,7 @@ def start_scheduler(app):
         
             # Wait for n8n to process and update the database
             if successful_updates > 0:
-                wait_time = 5 if successful_updates == len(timeframes) else 8
+                wait_time = 45 if successful_updates == len(timeframes) else 8
                 logging.info(f"[APScheduler] Waiting {wait_time}s for n8n to update chart analysis...")
                 time.sleep(wait_time)
         
