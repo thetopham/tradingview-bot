@@ -416,68 +416,165 @@ class OHLCRegimeDetector:
     
     def _determine_overall_regime(self, timeframe_analysis: Dict) -> Dict:
         """Determine overall market regime from timeframe analysis"""
-        
+    
         if not timeframe_analysis:
             return self._get_default_regime()
-        
+    
         try:
             # Extract signals and trends
             signals = []
             trends = []
             confidences = []
-            
-            for tf_data in timeframe_analysis.values():
+            momentum_scores = []
+            volatility_levels = []
+        
+            for tf, tf_data in timeframe_analysis.items():
                 signals.append(tf_data.get('signal', 'HOLD'))
                 trends.append(tf_data.get('trend', 'unknown'))
                 confidences.append(tf_data.get('signal_confidence', 'low'))
-            
+                momentum_scores.append(tf_data.get('momentum_score', 50))
+                volatility_levels.append(tf_data.get('volatility', 'medium'))
+        
             # Count occurrences
             buy_count = signals.count('BUY')
             sell_count = signals.count('SELL')
             up_count = trends.count('up')
             down_count = trends.count('down')
             sideways_count = trends.count('sideways')
-            
+        
             # Determine primary regime
             total_tfs = len(signals)
-            
+        
             if buy_count >= total_tfs * 0.6 or up_count >= total_tfs * 0.6:
                 primary_regime = 'trending_up'
                 confidence = min(85, 60 + (buy_count + up_count) * 8)
                 factors = [f"{buy_count}/{total_tfs} BUY signals", f"{up_count}/{total_tfs} uptrends"]
-                
+                primary_trend = 'up'
+            
             elif sell_count >= total_tfs * 0.6 or down_count >= total_tfs * 0.6:
                 primary_regime = 'trending_down'
                 confidence = min(85, 60 + (sell_count + down_count) * 8)
                 factors = [f"{sell_count}/{total_tfs} SELL signals", f"{down_count}/{total_tfs} downtrends"]
-                
+                primary_trend = 'down'
+            
             elif sideways_count >= total_tfs * 0.6:
                 primary_regime = 'ranging'
                 confidence = 70
                 factors = [f"{sideways_count}/{total_tfs} sideways trends", "Range-bound market"]
-                
+                primary_trend = 'sideways'
+            
             else:
                 primary_regime = 'choppy'
                 confidence = 55
                 factors = ["Mixed signals across timeframes", "No clear directional bias"]
-            
+                primary_trend = 'sideways'
+        
+            # Calculate alignment score
+            if primary_trend in ['up', 'down']:
+                aligned_count = up_count if primary_trend == 'up' else down_count
+                alignment_score = (aligned_count / total_tfs * 100) if total_tfs > 0 else 0
+            else:
+                alignment_score = (sideways_count / total_tfs * 100) if total_tfs > 0 else 0
+        
+            # Determine volatility regime
+            high_vol = volatility_levels.count('high')
+            low_vol = volatility_levels.count('low')
+            if high_vol > total_tfs / 2:
+                volatility_regime = 'high'
+            elif low_vol > total_tfs / 2:
+                volatility_regime = 'low'
+            else:
+                volatility_regime = 'medium'
+        
+            # Calculate momentum state
+            avg_momentum = sum(momentum_scores) / len(momentum_scores) if momentum_scores else 50
+            if avg_momentum > 65:
+                momentum_state = 'strong'
+            elif avg_momentum < 35:
+                momentum_state = 'weak'
+            else:
+                momentum_state = 'neutral'
+        
+            # Check for higher timeframe agreement (15m and 30m)
+            higher_tf_trends = []
+            for tf in ['15m', '30m']:
+                if tf in timeframe_analysis:
+                    higher_tf_trends.append(timeframe_analysis[tf].get('trend', 'unknown'))
+        
+            higher_tf_agreement = len(set(higher_tf_trends)) == 1 and 'unknown' not in higher_tf_trends
+        
+            # Build trend details dict
+            trends_by_timeframe = {}
+            for tf, tf_data in timeframe_analysis.items():
+                trends_by_timeframe[tf] = tf_data.get('trend', 'unknown')
+        
             # Adjust confidence based on signal quality
-            high_conf_signals = [c for c in confidences if isinstance(c, (int, float)) and c > 70]
-            if len(high_conf_signals) >= total_tfs * 0.5:
+            high_conf_signals = sum(1 for c in confidences if c == 'high')
+            if high_conf_signals >= total_tfs * 0.5:
                 confidence += 5
-            
+        
+            confidence = max(30, min(95, confidence))
+        
+            # Risk level based on confidence and volatility
+            if confidence > 80 and volatility_regime != 'high':
+                risk_level = 'low'
+            elif confidence > 65 or volatility_regime == 'low':
+                risk_level = 'medium'
+            else:
+                risk_level = 'high'
+        
             return {
                 'primary_regime': primary_regime,
-                'confidence': max(30, min(95, confidence)),
+                'confidence': confidence,
                 'supporting_factors': factors,
                 'trade_recommendation': confidence > 65 and primary_regime != 'choppy',
-                'risk_level': 'low' if confidence > 80 else 'medium' if confidence > 65 else 'high',
+                'risk_level': risk_level,
+            
+                # CRITICAL: Add these nested dictionaries that the system expects
+                'trend_details': {
+                    'primary_trend': primary_trend,
+                    'alignment_score': alignment_score,
+                    'is_aligned': alignment_score > 70,
+                    'has_conflict': (up_count > 0 and down_count > 0) or buy_count > 0 and sell_count > 0,
+                    'trends_by_timeframe': trends_by_timeframe,
+                    'higher_tf_agreement': higher_tf_agreement,
+                    'trend_strength': 'strong' if alignment_score > 80 else 'moderate' if alignment_score > 60 else 'weak',
+                    'fast_vs_slow': 'aligned' if alignment_score > 70 else 'divergent'
+                },
+            
+                'volatility_details': {
+                    'volatility_regime': volatility_regime,
+                    'range_percent': 0.3 if volatility_regime == 'medium' else 0.5 if volatility_regime == 'high' else 0.2,
+                    'is_expanding': volatility_regime == 'high',
+                    'is_contracting': volatility_regime == 'low',
+                    'intraday_atr': 10  # Could calculate from actual ATR data
+                },
+            
+                'momentum_details': {
+                    'average_momentum_score': avg_momentum,
+                    'momentum_state': momentum_state,
+                    'bullish_indicators': buy_count,
+                    'bearish_indicators': sell_count,
+                    'indicator_bias': 'bullish' if buy_count > sell_count + 1 else 'bearish' if sell_count > buy_count + 1 else 'neutral',
+                    'divergence_present': False,  # Could be enhanced
+                    'momentum_quality': 'good' if momentum_state == 'strong' and alignment_score > 70 else 'poor'
+                },
+            
+                # Include session quality and scalping bias (expected by MarketRegime)
+                'scalping_bias': {
+                    'bias': primary_trend if primary_trend in ['up', 'down'] else 'neutral',
+                    'confidence': confidence,
+                    'entry_allowed': confidence > 60 and primary_regime != 'choppy'
+                },
+                'session_quality': 'normal',  # Could be enhanced based on time
+            
+                # Keep the original data for reference
                 'timeframe_alignment': {
                     'signals': {'BUY': buy_count, 'SELL': sell_count, 'HOLD': signals.count('HOLD')},
                     'trends': {'up': up_count, 'down': down_count, 'sideways': sideways_count}
                 }
             }
-            
+        
         except Exception as e:
             self.logger.error(f"Error determining overall regime: {e}")
             return self._get_default_regime()
