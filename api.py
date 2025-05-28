@@ -645,9 +645,9 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
                 result = supabase_client.table('tv_datafeed') \
                     .select('*') \
                     .eq('symbol', 'MES') \
-                    .eq('timeframe', tf_minutes) \
+                    .eq('timeframe', 1) \
                     .order('ts', desc=True) \
-                    .limit(50) \
+                    .limit(200) \
                     .execute()
                 
                 if result.data and len(result.data) >= 20:  # Need minimum 20 bars
