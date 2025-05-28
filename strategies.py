@@ -20,6 +20,8 @@ config = load_config()
 STOP_LOSS_POINTS = config.get('STOP_LOSS_POINTS', 10.0)
 TP_POINTS = config.get('TP_POINTS', [2.5, 5.0, 10.0])
 CT = config['CT']
+ACCOUNTS = config['ACCOUNTS'] 
+AI_ENDPOINTS = config.get('AI_ENDPOINTS', {})
 
 def get_regime_adjusted_params(base_sl_points: float, base_tp_points: list, regime_data: dict = None) -> tuple:
     """
