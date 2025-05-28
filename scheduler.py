@@ -53,30 +53,52 @@ def start_scheduler(app):
             # Get n8n base URL
             n8n_base_url = config.get('N8N_AI_URL', '').split('/webhook/')[0]
         
-            # ===== TRIGGER N8N CHART UPDATES FIRST =====
+            # ===== TRIGGER N8N CHART UPDATES WITH LONGER TIMEOUT =====
             timeframes = ['5m', '15m', '30m']
             logging.info("[APScheduler] Triggering n8n chart analysis updates...")
+            
+            import concurrent.futures
         
-            successful_updates = 0
-            for tf in timeframes:
+            def trigger_n8n_update(tf):
+                """Trigger n8n with 60 second timeout"""
                 try:
                     webhook_url = f"{n8n_base_url}/webhook/{tf}"
-                    response = requests.post(webhook_url, json={}, timeout=30)
+                    # Increase timeout to 60 seconds for n8n processing
+                    response = requests.post(webhook_url, json={}, timeout=60)
                 
                     if response.status_code == 200:
                         logging.info(f"[APScheduler] ✅ Triggered {tf} chart update successfully")
-                        successful_updates += 1
+                        return True
                     else:
                         logging.warning(f"[APScheduler] ❌ {tf} update returned: {response.status_code}")
+                        return False
                     
+                except requests.Timeout:
+                    logging.error(f"[APScheduler] ⏱️ {tf} chart update timed out after 60s")
+                    return False
                 except Exception as e:
                     logging.error(f"[APScheduler] Failed to trigger {tf} chart update: {e}")
+                    return False
         
-            # Wait for n8n to process and update the database
+            # Run n8n updates in parallel to save time
+            successful_updates = 0
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                future_to_tf = {executor.submit(trigger_n8n_update, tf): tf for tf in timeframes}
+            
+                for future in concurrent.futures.as_completed(future_to_tf):
+                    if future.result():
+                        successful_updates += 1
+        
+            # Wait longer for n8n to complete processing and update database
             if successful_updates > 0:
-                wait_time = 45 if successful_updates == len(timeframes) else 8
-                logging.info(f"[APScheduler] Waiting {wait_time}s for n8n to update chart analysis...")
+                # Wait 45 seconds since n8n takes 25-40 seconds
+                wait_time = 45
+                logging.info(f"[APScheduler] {successful_updates}/{len(timeframes)} updates triggered. "
+                            f"Waiting {wait_time}s for n8n to complete processing...")
                 time.sleep(wait_time)
+            else:
+                logging.error("[APScheduler] No successful n8n updates, skipping regime analysis")
+                return
         
             # NOW fetch the regime analysis (which will use the fresh chart data)
             market_analysis = fetch_multi_timeframe_analysis(
@@ -96,7 +118,7 @@ def start_scheduler(app):
                 logging.warning(f"⚠️ CHOPPY MARKET ALERT: High confidence choppy conditions detected!")
         
         except Exception as e:
-            logging.error(f"[APScheduler] Chart/regime fetch failed: {e}")
+            logging.error(f"[APScheduler] Chart/regime fetch failed: {e}", exc_info=True)
     
         # Then run the normal webhook (without any trade signals)
         data = {
