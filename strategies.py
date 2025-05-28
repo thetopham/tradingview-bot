@@ -2,17 +2,18 @@
 
 import logging
 import time
-from datetime import datetime, timedelta
+import threading
 
 from api import (
     get_contract, search_pos, flatten_contract, place_market,
     place_limit, place_stop, search_open, cancel, search_trades,
     check_for_phantom_orders, log_trade_results_to_supabase
 )
-from signalr_listener import track_trade
+from signalr_listener import track_trade, trade_meta
 from config import load_config
 from market_regime import MarketRegime
 from api import get_market_conditions_summary
+from datetime import datetime, timedelta
 
 
 config = load_config()
