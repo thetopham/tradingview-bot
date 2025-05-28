@@ -385,9 +385,35 @@ def on_position_update(args):
     entry_time = position_data.get("creationTimestamp")
     if size > 0:
         meta = trade_meta.get((account_id, contract_id))
+        
+        # IMPORTANT: Check if this is a NEW position by comparing timestamps
         if meta is not None:
-            meta["entry_time"] = entry_time
-        else:
+            # If we have metadata, check if it's for THIS position or an old one
+            meta_entry_time = meta.get("entry_time")
+            
+            # Convert times for comparison
+            try:
+                if isinstance(meta_entry_time, str):
+                    meta_time = parser.isoparse(meta_entry_time)
+                else:
+                    meta_time = datetime.fromtimestamp(meta_entry_time, CT)
+                    
+                current_time = parser.isoparse(entry_time) if entry_time else datetime.now(CT)
+                
+                # If the metadata is older than 60 seconds, it's probably from a previous position
+                time_diff = abs((current_time - meta_time).total_seconds())
+                
+                if time_diff > 60:
+                    logging.warning(f"Metadata appears to be from old position (age: {time_diff:.0f}s), clearing")
+                    meta = None
+                    trade_meta.pop((account_id, contract_id), None)
+                else:
+                    # Update entry time if needed
+                    meta["entry_time"] = entry_time
+            except Exception as e:
+                logging.error(f"Error comparing timestamps: {e}")
+        
+        if meta is None:
             # CREATE METADATA FOR POSITIONS WITHOUT IT
             logging.warning(f"[on_position_update] No meta for open position acct={account_id}, cid={contract_id}. Creating basic metadata.")
             # Determine position type
@@ -418,7 +444,14 @@ def on_position_update(args):
                 'comment': f'Metadata created on position update at {datetime.now(CT).strftime("%Y-%m-%d %H:%M:%S")}'
             }
 
-    ensure_stops_match_position(account_id, contract_id)
+    # DELAY the ensure_stops_match_position call to allow orders to settle
+    # This is key to preventing premature stop cancellation
+    def delayed_stop_check():
+        time.sleep(2)  # Wait 2 seconds for orders to register
+        ensure_stops_match_position(account_id, contract_id)
+    
+    # Run in separate thread to not block
+    threading.Thread(target=delayed_stop_check, daemon=True).start()
 
     if size == 0:
         meta = trade_meta.pop((account_id, contract_id), None)
