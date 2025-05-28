@@ -553,7 +553,7 @@ class RegimeTracker:
 def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None, 
                                  cache_minutes: int = 4, force_refresh: bool = False) -> Dict:
     """
-    Fetch multi-timeframe analysis with proper concurrency control
+    Fetch multi-timeframe analysis - NOW USING OHLC REGIME DETECTION
     """
     import datetime
     import concurrent.futures
@@ -606,9 +606,6 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
                     f"force_refresh={force_refresh}, request_key={request_key[:8]}, "
                     f"thread={threading.current_thread().name}")
         
-        timeframe_data = {}
-        chart_urls = {}
-        
         # Check cache first (unless force_refresh)
         if not force_refresh:
             try:
@@ -633,107 +630,183 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
             except Exception as e:
                 logging.info(f"Cache retrieval failed: {e}")
         
-        # If we get here and not force_refresh, check individual timeframe caches
-        timeframes_needing_fetch = []
-        
-        if not force_refresh:
+        # ===== NEW: Try OHLC regime detection first =====
+        try:
+            logging.info("Attempting OHLC-based regime detection...")
+            
+            # Fetch OHLC data for all timeframes
+            ohlc_data = {}
+            missing_timeframes = []
+            
             for tf in timeframes:
+                tf_minutes = int(tf.replace('m', ''))
+                
+                # Get last 50 bars for each timeframe
+                result = supabase_client.table('tv_datafeed') \
+                    .select('*') \
+                    .eq('symbol', 'MES') \
+                    .eq('timeframe', tf_minutes) \
+                    .order('ts', desc=True) \
+                    .limit(50) \
+                    .execute()
+                
+                if result.data and len(result.data) >= 20:  # Need minimum 20 bars
+                    # Reverse to chronological order
+                    data = list(reversed(result.data))
+                    
+                    # Extract OHLC + indicators
+                    ohlc_data[tf] = {
+                        'open': [float(d['o']) for d in data],
+                        'high': [float(d['h']) for d in data],
+                        'low': [float(d['l']) for d in data],
+                        'close': [float(d['c']) for d in data],
+                        'volume': [float(d.get('v', 0)) for d in data],
+                        # Include all available indicators
+                        'rsi': [float(d.get('rsi', 50)) for d in data],
+                        'macd_hist': [float(d.get('macd_hist', 0)) for d in data],
+                        'atr': [float(d.get('atr', 10)) for d in data],
+                        'fisher': [float(d.get('fisher', 0)) for d in data],
+                        'vzo': [float(d.get('vzo', 0)) for d in data],
+                        'phobos': [float(d.get('phobos_momentum', 0)) for d in data],
+                        'stoch_k': [float(d.get('stoch_k', 50)) for d in data],
+                        'bb_upper': [float(d.get('bb_upper', 0)) for d in data],
+                        'bb_middle': [float(d.get('bb_middle', 0)) for d in data],
+                        'bb_lower': [float(d.get('bb_lower', 0)) for d in data]
+                    }
+                    logging.info(f"Loaded {len(data)} bars of {tf} OHLC data")
+                else:
+                    missing_timeframes.append(tf)
+                    logging.warning(f"Insufficient OHLC data for {tf} (got {len(result.data) if result.data else 0} bars)")
+            
+            # If we have OHLC data for all timeframes, use it
+            if len(ohlc_data) == len(timeframes):
+                from market_regime_ohlc import OHLCRegimeDetector
+                ohlc_detector = OHLCRegimeDetector()
+                
+                # Get OHLC-based regime
+                regime_analysis = ohlc_detector.analyze_regime(ohlc_data)
+                
+                # Get the latest chart URLs for reference (but not for analysis)
+                chart_urls = {}
+                for tf in timeframes:
+                    try:
+                        chart_result = supabase_client.table('latest_chart_analysis') \
+                            .select('snapshot') \
+                            .eq('symbol', 'MES') \
+                            .eq('timeframe', tf) \
+                            .order('timestamp', desc=True) \
+                            .limit(1) \
+                            .execute()
+                        
+                        if chart_result.data:
+                            snapshot = chart_result.data[0].get('snapshot', {})
+                            if isinstance(snapshot, str):
+                                snapshot = json.loads(snapshot)
+                            chart_urls[tf] = {
+                                "url": snapshot.get("url"),
+                                "chart_time": snapshot.get("chart_time")
+                            }
+                    except Exception as e:
+                        logging.debug(f"Could not get chart URL for {tf}: {e}")
+                
+                # Build complete response
+                snapshot = {
+                    'timeframe_data': {
+                        tf: regime_analysis['timeframe_analysis'][tf] 
+                        for tf in timeframes 
+                        if tf in regime_analysis.get('timeframe_analysis', {})
+                    },
+                    'regime_analysis': regime_analysis,
+                    'chart_urls': chart_urls,
+                    'timestamp': now.isoformat(),
+                    'analysis_method': 'ohlc'  # Track which method was used
+                }
+                
+                logging.info(f"OHLC regime detection successful: {regime_analysis['primary_regime']} "
+                           f"(confidence: {regime_analysis['confidence']}%)")
+                
+                # Save regime analysis to cache
                 try:
-                    result = supabase_client.table('latest_chart_analysis') \
-                        .select('*') \
-                        .eq('symbol', 'MES') \
-                        .eq('timeframe', tf) \
-                        .order('timestamp', desc=True) \
-                        .limit(1) \
+                    # First, delete any entries from the last second to prevent near-duplicates
+                    one_second_ago = (now - datetime.timedelta(seconds=1)).isoformat()
+                    supabase_client.table('market_regime_cache') \
+                        .delete() \
+                        .gte('timestamp', one_second_ago) \
                         .execute()
                     
-                    if result.data:
-                        record = result.data[0]
-                        timestamp_str = record.get('timestamp')
-                        if timestamp_str:
-                            try:
-                                timestamp = parser.parse(timestamp_str)
-                                # Use cached data if less than 5 minutes old
-                                if (now - timestamp).total_seconds() < 5 * 60:
-                                    snapshot_data = record.get('snapshot')
-                                    if snapshot_data:
-                                        # Parse the JSON data
-                                        if isinstance(snapshot_data, str):
-                                            parsed_data = json.loads(snapshot_data)
-                                        else:
-                                            parsed_data = snapshot_data
-                                        
-                                        timeframe_data[tf] = parsed_data
-                                        chart_urls[tf] = {
-                                            "url": parsed_data.get("url"),
-                                            "chart_time": parsed_data.get("chart_time")
-                                        }
-                                        logging.info(f"Using cached {tf} analysis from database")
-                                        continue
-                            except Exception as e:
-                                logging.warning(f"Error parsing {tf} timestamp: {e}")
-                    
-                    # If we get here, we need to fetch fresh data
-                    timeframes_needing_fetch.append(tf)
-                    
+                    # Now insert the new entry
+                    supabase_client.table('market_regime_cache').insert({
+                        'analysis_data': json.dumps(snapshot),
+                        'timestamp': now.isoformat()
+                    }).execute()
+                    logging.info("Saved OHLC regime analysis to cache")
                 except Exception as e:
-                    logging.error(f"Failed to check cache for {tf}: {e}")
-                    timeframes_needing_fetch.append(tf)
-        else:
-            timeframes_needing_fetch = timeframes
-    
-        # Step 2: Make concurrent n8n calls for timeframes that need fresh data
-        if timeframes_needing_fetch:
-            logging.info(f"Fetching fresh analysis from n8n for: {timeframes_needing_fetch}")
-            
-            def fetch_timeframe(tf):
-                """Fetch a single timeframe from n8n"""
-                try:
-                    webhook_url = f"{n8n_base_url}/webhook/{tf}"
-                    response = session.post(webhook_url, json={}, timeout=60)
-                    response.raise_for_status()
-                    
-                    if response.text.strip():
-                        try:
-                            data = response.json()
-                            
-                            # Handle different response formats
-                            if isinstance(data, str):
-                                data = json.loads(data)
-                            elif isinstance(data, list):
-                                # n8n might return array of items, take first
-                                if data:
-                                    data = data[0]
-                                else:
-                                    logging.error(f"Empty array response from {tf} webhook")
-                                    return tf, {}
-                            
-                            logging.info(f"Successfully fetched {tf} analysis")
-                            return tf, data
-                        except json.JSONDecodeError as e:
-                            logging.error(f"Failed to parse {tf} JSON response: {e}")
-                            return tf, {}
-                    else:
-                        logging.error(f"Empty response from {tf} webhook")
-                        return tf, {}
-                        
-                except Exception as e:
-                    logging.error(f"Failed to fetch {tf} analysis: {e}")
-                    return tf, {}
-            
-            # Make all n8n calls concurrently
-            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                future_to_tf = {executor.submit(fetch_timeframe, tf): tf for tf in timeframes_needing_fetch}
+                    logging.error(f"Failed to save regime cache: {e}")
                 
-                for future in concurrent.futures.as_completed(future_to_tf):
-                    tf, data = future.result()
-                    if data:
-                        timeframe_data[tf] = data
-                        # Collect URL for archival
-                        chart_urls[tf] = {
-                            "url": data.get("url"),
-                            "chart_time": data.get("chart_time")
-                        }
+                return snapshot
+            else:
+                logging.warning(f"Missing OHLC data for timeframes: {missing_timeframes}, falling back to image analysis")
+                
+        except Exception as e:
+            logging.error(f"OHLC regime detection failed, falling back to image analysis: {e}", exc_info=True)
+        
+        # ===== FALLBACK: Original image-based analysis =====
+        logging.info("Using image-based regime detection...")
+        
+        timeframe_data = {}
+        chart_urls = {}
+        
+        # Step 2: Make concurrent n8n calls for timeframes
+        logging.info(f"Fetching fresh analysis from n8n for: {timeframes}")
+        
+        def fetch_timeframe(tf):
+            """Fetch a single timeframe from n8n"""
+            try:
+                webhook_url = f"{n8n_base_url}/webhook/{tf}"
+                response = session.post(webhook_url, json={}, timeout=60)
+                response.raise_for_status()
+                
+                if response.text.strip():
+                    try:
+                        data = response.json()
+                        
+                        # Handle different response formats
+                        if isinstance(data, str):
+                            data = json.loads(data)
+                        elif isinstance(data, list):
+                            # n8n might return array of items, take first
+                            if data:
+                                data = data[0]
+                            else:
+                                logging.error(f"Empty array response from {tf} webhook")
+                                return tf, {}
+                        
+                        logging.info(f"Successfully fetched {tf} analysis")
+                        return tf, data
+                    except json.JSONDecodeError as e:
+                        logging.error(f"Failed to parse {tf} JSON response: {e}")
+                        return tf, {}
+                else:
+                    logging.error(f"Empty response from {tf} webhook")
+                    return tf, {}
+                    
+            except Exception as e:
+                logging.error(f"Failed to fetch {tf} analysis: {e}")
+                return tf, {}
+        
+        # Make all n8n calls concurrently
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_tf = {executor.submit(fetch_timeframe, tf): tf for tf in timeframes}
+            
+            for future in concurrent.futures.as_completed(future_to_tf):
+                tf, data = future.result()
+                if data:
+                    timeframe_data[tf] = data
+                    # Collect URL for archival
+                    chart_urls[tf] = {
+                        "url": data.get("url"),
+                        "chart_time": data.get("chart_time")
+                    }
 
         # Analyze regime with whatever data we have
         logging.info(f"Analyzing regime with {len(timeframe_data)} timeframes of data")
@@ -743,12 +816,12 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
         snapshot = {
             'timeframe_data': timeframe_data,
             'regime_analysis': regime_analysis,
-            'chart_urls': chart_urls,  # Include URLs for archival
-            'timestamp': now.isoformat()
+            'chart_urls': chart_urls,
+            'timestamp': now.isoformat(),
+            'analysis_method': 'image'  # Track which method was used
         }
 
-       
-        # Save regime analysis to cache with duplicate prevention
+        # Save regime analysis to cache
         try:
             # First, delete any entries from the last second to prevent near-duplicates
             one_second_ago = (now - datetime.timedelta(seconds=1)).isoformat()
@@ -762,7 +835,7 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
                 'analysis_data': json.dumps(snapshot),
                 'timestamp': now.isoformat()
             }).execute()
-            logging.info("Saved regime analysis to cache")
+            logging.info("Saved image-based regime analysis to cache")
         except Exception as e:
             logging.error(f"Failed to save regime cache: {e}")
 
