@@ -580,13 +580,45 @@ class OHLCRegimeDetector:
             return self._get_default_regime()
     
     def _get_default_regime(self) -> Dict:
-        """Return default/fallback regime"""
+        """Return default/fallback regime with complete structure"""
         return {
             'primary_regime': 'choppy',
             'confidence': 30,
             'supporting_factors': ['Insufficient or invalid data for analysis'],
             'trade_recommendation': False,
             'risk_level': 'high',
+            'trend_details': {
+                'primary_trend': 'unknown',
+                'alignment_score': 0,
+                'is_aligned': False,
+                'has_conflict': True,
+                'trends_by_timeframe': {},
+                'higher_tf_agreement': False,
+                'trend_strength': 'weak',
+                'fast_vs_slow': 'unknown'
+            },
+            'volatility_details': {
+                'volatility_regime': 'unknown',
+                'range_percent': 0,
+                'is_expanding': False,
+                'is_contracting': False,
+                'intraday_atr': 0
+            },
+            'momentum_details': {
+                'average_momentum_score': 50,
+                'momentum_state': 'neutral',
+                'bullish_indicators': 0,
+                'bearish_indicators': 0,
+                'indicator_bias': 'neutral',
+                'divergence_present': False,
+                'momentum_quality': 'poor'
+            },
+            'scalping_bias': {
+                'bias': 'neutral',
+                'confidence': 0,
+                'entry_allowed': False
+            },
+            'session_quality': 'unknown',
             'timeframe_analysis': {},
             'timeframe_alignment': {
                 'signals': {'BUY': 0, 'SELL': 0, 'HOLD': 0},
