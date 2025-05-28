@@ -1195,3 +1195,46 @@ def get_spread_and_mid_price(symbol: str = "MES") -> Dict[str, Optional[float]]:
         'range': None,
         'timestamp': None
     }
+
+def fetch_ohlc_for_analysis(symbol: str = 'MES', cache_minutes: int = 5) -> Dict:
+    """Fetch OHLC data for regime analysis"""
+    try:
+        supabase = get_supabase_client()
+        
+        # Calculate how many bars we need
+        bars_needed = {
+            '5m': 50,   # 50 bars = ~4 hours
+            '15m': 50,  # 50 bars = ~12.5 hours  
+            '30m': 30   # 30 bars = ~15 hours
+        }
+        
+        ohlc_data = {}
+        
+        for timeframe, bars in bars_needed.items():
+            # Convert timeframe to minutes for query
+            tf_minutes = int(timeframe.replace('m', ''))
+            
+            result = supabase.table('tv_datafeed') \
+                .select('o, h, l, c, v, ts') \
+                .eq('symbol', symbol) \
+                .eq('timeframe', tf_minutes) \
+                .order('ts', desc=True) \
+                .limit(bars) \
+                .execute()
+            
+            if result.data and len(result.data) > 10:  # Need minimum bars
+                # Reverse to chronological order
+                data = list(reversed(result.data))
+                ohlc_data[timeframe] = {
+                    'open': [float(d['o']) for d in data],
+                    'high': [float(d['h']) for d in data],
+                    'low': [float(d['l']) for d in data],
+                    'close': [float(d['c']) for d in data],
+                    'volume': [float(d.get('v', 0)) for d in data]
+                }
+        
+        return ohlc_data
+        
+    except Exception as e:
+        logging.error(f"Error fetching OHLC data: {e}")
+        return {}
