@@ -261,9 +261,18 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
     oid = None
     
     # Generate AI decision ID for manual trades that won't break Supabase
-    if ai_decision_id is None and acct_id not in AI_ENDPOINTS.values():
-        # Use timestamp-based ID that can be converted to bigint
-        ai_decision_id = int(time.time() * 1000) % (2**31 - 1)  # Keep it within int32 range
+    if ai_decision_id is None:
+        # Check if this is a manual account
+        account_name = None
+        for name, id in ACCOUNTS.items():
+            if id == acct_id:
+                account_name = name
+                break
+        
+        if account_name and account_name not in AI_ENDPOINTS:
+            # Use timestamp-based ID that can be converted to bigint
+            ai_decision_id = int(time.time() * 1000) % (2**31 - 1)  # Keep it within int32 range
+            logging.info(f"Generated numeric AI decision ID for manual trade: {ai_decision_id}")
 
     if net_pos == target:
         log_trade_results_to_supabase(
@@ -282,7 +291,7 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
                 "message": "already at target position"
             }
         )
-        return
+        return  # already at target position
 
     # Clear ALL old metadata for this contract before starting new position
     if (acct_id, cid) in trade_meta:
@@ -293,26 +302,36 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
     for o in search_open(acct_id):
         if o["contractId"] == cid and o["type"] == 4:
             cancel(acct_id, o["id"])
-            time.sleep(0.5)  # Small delay after cancelling
+            logging.info(f"Cancelled existing stop order {o['id']} before pivot")
+    
+    # Small delay after cancelling
+    if any(o["contractId"] == cid and o["type"] == 4 for o in search_open(acct_id)):
+        time.sleep(0.5)
 
     # Position reversal logic
     if net_pos * target < 0:
-        # Flatten first
+        # Opposite position exists - flatten first then open new
         flatten_side = 1 if net_pos > 0 else 0
+        logging.info(f"Pivot: Flattening opposite position of {abs(net_pos)} contracts")
         flatten_order = place_market(acct_id, cid, flatten_side, abs(net_pos))
         trade_log.append(flatten_order)
         time.sleep(1)  # Wait for flatten to complete
         
         # Then open new position
+        logging.info(f"Pivot: Opening new position of {size} contracts")
         ent = place_market(acct_id, cid, side, size)
         trade_log.append(ent)
         oid = ent.get("orderId")
     elif net_pos == 0:
+        # No position - just open
+        logging.info(f"Pivot: Opening position of {size} contracts (was flat)")
         ent = place_market(acct_id, cid, side, size)
         trade_log.append(ent)
         oid = ent.get("orderId")
     elif abs(net_pos) != abs(target):
+        # Same direction but wrong size - flatten and reopen
         flatten_side = 1 if net_pos > 0 else 0
+        logging.info(f"Pivot: Adjusting position from {net_pos} to {target}")
         trade_log.append(place_market(acct_id, cid, flatten_side, abs(net_pos)))
         time.sleep(1)
         ent = place_market(acct_id, cid, side, size)
@@ -326,28 +345,38 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
     positions = search_pos(acct_id)
     current_pos = [p for p in positions if p["contractId"] == cid and p.get("size", 0) > 0]
     
+    sl_id = None
     if current_pos:
         # Get recent trades to find entry price
         trades = [t for t in search_trades(acct_id, datetime.now(CT) - timedelta(minutes=5))
                   if t["contractId"] == cid and not t.get("voided", False)]
         
         if trades:
-            # Find the most recent entry trade
+            # Find the most recent entry trade (should be our order)
             entry_trades = sorted(trades, key=lambda t: t["creationTimestamp"], reverse=True)
-            entry_price = entry_trades[0]["price"] if entry_trades else None
+            
+            # Look for our specific order if we have the ID
+            entry_price = None
+            if oid:
+                for t in entry_trades:
+                    if t.get("orderId") == oid:
+                        entry_price = t["price"]
+                        break
+            
+            # If not found by order ID, use most recent
+            if entry_price is None and entry_trades:
+                entry_price = entry_trades[0]["price"]
             
             if entry_price is not None:
                 stop_price = entry_price - 15.0 if side == 0 else entry_price + 15.0
                 sl = place_stop(acct_id, cid, exit_side, size, stop_price)
                 sl_id = sl["orderId"]
-                logging.info(f"Placed stop for pivot at {stop_price}")
+                logging.info(f"Placed stop for pivot at {stop_price} (entry: {entry_price})")
             else:
-                sl_id = None
                 logging.warning("Could not determine entry price for stop")
         else:
-            sl_id = None
+            logging.warning("No recent trades found for stop calculation")
     else:
-        sl_id = None
         logging.warning("No position found after pivot execution")
 
     # Track with correct session
@@ -367,5 +396,11 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
         trades=trade_log
     )
     
-    # Don't immediately check for phantom orders - let SignalR update first
-    # check_for_phantom_orders(acct_id, cid)
+    # Final check for phantom orders after a delay
+    def delayed_phantom_check():
+        time.sleep(5)  # Wait 5 seconds for everything to settle
+        check_for_phantom_orders(acct_id, cid)
+    
+    threading.Thread(target=delayed_phantom_check, daemon=True).start()
+    
+    # No HTTP return; just end
