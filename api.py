@@ -1020,6 +1020,26 @@ def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url)
         else:
             position_context = None
         
+        # ===== ENTRY QUALITY EVALUATION =====
+        entry_quality = evaluate_entry_quality(regime, position_context)
+        
+        # Log entry quality
+        logging.info(f"Entry quality: {entry_quality['quality_score']}/100 - {entry_quality['recommendation']}")
+        logging.info(f"Quality factors: {', '.join(entry_quality['factors'])}")
+        
+        # Block poor quality entries (optional - you can also just pass to AI)
+        if entry_quality['recommendation'] == 'NO_ENTRY' and entry_quality['quality_score'] < 40:
+            logging.warning(f"Blocking trade due to poor entry quality ({entry_quality['quality_score']})")
+            return {
+                "strategy": strat,
+                "signal": "HOLD",
+                "account": account,
+                "reason": f"Poor entry quality: {', '.join(entry_quality['factors'])}",
+                "regime": regime['primary_regime'],
+                "entry_quality": entry_quality,
+                "error": False
+            }
+        
         # Check if trading is recommended in this regime
         if not regime['trade_recommendation']:
             logging.warning(f"Trading not recommended in {regime['primary_regime']} regime. Blocking trade.")
@@ -1074,7 +1094,8 @@ def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url)
             "resistance": {
                 tf: data.get('resistance', []) 
                 for tf, data in market_analysis['timeframe_data'].items()
-            }
+            },
+            "entry_quality": entry_quality  # Include entry quality assessment
         }
         
         # Add position context if available
@@ -1142,8 +1163,6 @@ def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url)
             "regime": "unknown",
             "error": True
         }
-
-
 # New endpoint function to add to api.py
 def get_all_positions_summary() -> Dict:
     """
