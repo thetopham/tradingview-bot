@@ -883,6 +883,100 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
         with regime_cache_lock:
             regime_cache_in_progress.pop(request_key, None)
 
+def evaluate_entry_quality(regime_analysis: Dict, position_context: Dict = None) -> Dict:
+    """
+    Evaluate entry quality based on hybrid analysis and position context
+    
+    Args:
+        regime_analysis: Output from regime detection
+        position_context: Optional position context from PositionManager
+        
+    Returns:
+        Dict with quality_score, factors, and recommendation
+    """
+    quality_score = 50  # Base score
+    factors = []
+    
+    # Check if analyses agreed (from cross_validation)
+    cross_val = regime_analysis.get('cross_validation', {})
+    if cross_val.get('agreement', True):  # Default to True if not hybrid
+        quality_score += 20
+        if 'cross_validation' in regime_analysis:  # Only show if actually hybrid
+            factors.append("Chart and OHLC agree")
+    else:
+        quality_score -= 10
+        factors.append("Chart/OHLC disagreement")
+    
+    # Check confidence
+    confidence = regime_analysis.get('confidence', 0)
+    if confidence > 80:
+        quality_score += 15
+        factors.append("High confidence setup")
+    elif confidence < 60:
+        quality_score -= 15
+        factors.append("Low confidence")
+    
+    # Check regime
+    regime = regime_analysis.get('primary_regime')
+    if regime in ['trending_up', 'trending_down']:
+        quality_score += 10
+        factors.append("Trending market")
+    elif regime == 'choppy':
+        quality_score -= 20
+        factors.append("Choppy conditions")
+    elif regime == 'ranging':
+        quality_score += 5
+        factors.append("Range-bound (fade extremes)")
+    
+    # Check trend alignment
+    trend_details = regime_analysis.get('trend_details', {})
+    alignment = trend_details.get('alignment_score', 0)
+    if alignment > 80:
+        quality_score += 10
+        factors.append(f"Strong alignment ({alignment:.0f}%)")
+    elif alignment < 50:
+        quality_score -= 10
+        factors.append(f"Poor alignment ({alignment:.0f}%)")
+    
+    # Position context adjustments
+    if position_context:
+        # Check if account can trade
+        if not position_context.get('account_metrics', {}).get('can_trade', True):
+            quality_score = 0
+            factors.append("Account cannot trade")
+            
+        # Check risk level
+        risk_level = position_context.get('account_metrics', {}).get('risk_level', 'medium')
+        if risk_level == 'high':
+            quality_score -= 20
+            factors.append("High account risk")
+            
+        # Check for existing position
+        if position_context.get('current_position', {}).get('has_position'):
+            quality_score -= 10
+            factors.append("Already in position")
+    
+    # Final score bounds
+    quality_score = max(0, min(100, quality_score))
+    
+    # Determine recommendation
+    if quality_score >= 70:
+        recommendation = 'STRONG_ENTRY'
+    elif quality_score >= 60:
+        recommendation = 'ENTRY_OK'
+    elif quality_score >= 50:
+        recommendation = 'WEAK_ENTRY'
+    else:
+        recommendation = 'NO_ENTRY'
+    
+    return {
+        'quality_score': quality_score,
+        'factors': factors,
+        'recommendation': recommendation,
+        'regime': regime,
+        'confidence': confidence
+    }
+
 
 def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url):
     """
