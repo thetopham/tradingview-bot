@@ -1,377 +1,498 @@
+# market_regime_ohlc.py - Complete working version
+
 import numpy as np
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
+import statistics
 
-def _analyze_single_timeframe(self, data: dict[str, List], timeframe: str) -> Dict:
-    """Analyze a single timeframe's OHLC data - ENHANCED WITH INDICATORS"""
+class OHLCRegimeDetector:
+    """OHLC-based regime detection using price and indicator data"""
     
-    # Extract basic OHLC arrays
-    closes = np.array(data['close'])
-    highs = np.array(data['high'])
-    lows = np.array(data['low'])
-    opens = np.array(data['open'])
-    volumes = np.array(data.get('volume', [0] * len(closes)))
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
     
-    # Extract indicators (with defaults if not present)
-    rsi_values = np.array(data.get('rsi', [50] * len(closes)))
-    macd_hist = np.array(data.get('macd_hist', [0] * len(closes)))
-    atr_values = np.array(data.get('atr', [10] * len(closes)))
-    fisher_values = np.array(data.get('fisher', [0] * len(closes)))
-    vzo_values = np.array(data.get('vzo', [0] * len(closes)))
-    phobos_values = np.array(data.get('phobos', [0] * len(closes)))
-    stoch_k = np.array(data.get('stoch_k', [50] * len(closes)))
-    bb_upper = np.array(data.get('bb_upper', highs))
-    bb_middle = np.array(data.get('bb_middle', closes))
-    bb_lower = np.array(data.get('bb_lower', lows))
-    
-    # Recent vs historical analysis - different windows for different timeframes
-    if timeframe == '1m':
-        recent_bars = 15
-        medium_bars = 30
-    elif timeframe == '5m':
-        recent_bars = 10
-        medium_bars = 20
-    elif timeframe == '15m':
-        recent_bars = 8
-        medium_bars = 16
-    else:  # 30m or higher
-        recent_bars = 6
-        medium_bars = 12
-    
-    # Ensure we have enough data
-    if len(closes) < recent_bars:
-        recent_bars = len(closes)
-        medium_bars = min(len(closes), medium_bars)
-    
-    recent_closes = closes[-recent_bars:]
-    recent_highs = highs[-recent_bars:]
-    recent_lows = lows[-recent_bars:]
-    recent_opens = opens[-recent_bars:]
-    
-    # 1. Enhanced Trend Detection with indicators
-    trend = self._calculate_trend(recent_closes, recent_highs, recent_lows)
-    
-    # Confirm/adjust trend with indicators
-    recent_rsi = rsi_values[-1] if len(rsi_values) > 0 else 50
-    recent_macd = macd_hist[-1] if len(macd_hist) > 0 else 0
-    recent_fisher = fisher_values[-1] if len(fisher_values) > 0 else 0
-    
-    # Check for divergences
-    divergence_detected = False
-    if trend['direction'] == 'up':
-        # Bearish divergence check
-        if recent_rsi < 40 or (recent_macd < 0 and abs(recent_macd) > np.std(macd_hist[-20:])):
-            trend['strength'] = 'weak'
-            divergence_detected = True
-    elif trend['direction'] == 'down':
-        # Bullish divergence check
-        if recent_rsi > 60 or (recent_macd > 0 and recent_macd > np.std(macd_hist[-20:])):
-            trend['strength'] = 'weak'
-            divergence_detected = True
-    
-    # 2. Enhanced Volatility with ATR and Bollinger Bands
-    if len(atr_values) > 0 and atr_values[-1] > 0:
-        current_atr = atr_values[-1]
-        avg_atr = np.mean(atr_values[-20:]) if len(atr_values) >= 20 else np.mean(atr_values)
+    def analyze_regime(self, ohlc_data: Dict[str, Dict]) -> Dict:
+        """
+        Analyze market regime using OHLC data from multiple timeframes
         
-        # Check Bollinger Band width
-        bb_width = (bb_upper[-1] - bb_lower[-1]) if len(bb_upper) > 0 else 0
-        bb_width_avg = np.mean(bb_upper[-10:] - bb_lower[-10:]) if len(bb_upper) >= 10 else bb_width
+        Args:
+            ohlc_data: Dict with timeframe keys ('5m', '15m', '30m') containing OHLC arrays
+            
+        Returns:
+            Dict with regime analysis
+        """
+        try:
+            self.logger.info(f"Starting OHLC regime analysis with timeframes: {list(ohlc_data.keys())}")
+            
+            timeframe_analysis = {}
+            
+            # Analyze each timeframe
+            for tf, data in ohlc_data.items():
+                if data and isinstance(data, dict) and 'close' in data:
+                    try:
+                        analysis = self._analyze_single_timeframe(data, tf)
+                        timeframe_analysis[tf] = analysis
+                        self.logger.info(f"✅ {tf}: {analysis.get('signal', 'HOLD')} signal, {analysis.get('trend', 'unknown')} trend")
+                    except Exception as e:
+                        self.logger.error(f"Error analyzing {tf}: {e}")
+                        continue
+                else:
+                    self.logger.warning(f"Invalid data for {tf}: {type(data)}")
+            
+            if not timeframe_analysis:
+                self.logger.warning("No timeframes successfully analyzed")
+                return self._get_default_regime()
+            
+            # Combine timeframe analysis into overall regime
+            regime_result = self._determine_overall_regime(timeframe_analysis)
+            regime_result['timeframe_analysis'] = timeframe_analysis
+            
+            self.logger.info(f"Overall regime: {regime_result['primary_regime']} (confidence: {regime_result['confidence']}%)")
+            
+            return regime_result
+            
+        except Exception as e:
+            self.logger.error(f"Error in OHLC regime analysis: {e}")
+            return self._get_default_regime()
+    
+    def _analyze_single_timeframe(self, data: Dict[str, List], timeframe: str) -> Dict:
+        """Analyze a single timeframe's OHLC data - ENHANCED WITH INDICATORS"""
         
-        volatility = {
-            'level': 'high' if current_atr > avg_atr * 1.3 else 'low' if current_atr < avg_atr * 0.7 else 'medium',
-            'atr': float(current_atr),
-            'average_range': float(current_atr),
-            'expanding': current_atr > avg_atr and bb_width > bb_width_avg,
-            'recent_range': float(highs[-1] - lows[-1]),
-            'bb_width': float(bb_width),
-            'bb_squeeze': bb_width < bb_width_avg * 0.8  # Bollinger squeeze
+        try:
+            # Extract basic OHLC arrays
+            closes = np.array(data['close'])
+            highs = np.array(data['high'])
+            lows = np.array(data['low'])
+            opens = np.array(data['open'])
+            volumes = np.array(data.get('volume', [0] * len(closes)))
+            
+            # Extract indicators (with defaults if not present)
+            rsi_values = np.array(data.get('rsi', [50] * len(closes)))
+            macd_hist = np.array(data.get('macd_hist', [0] * len(closes)))
+            atr_values = np.array(data.get('atr', [10] * len(closes)))
+            fisher_values = np.array(data.get('fisher', [0] * len(closes)))
+            vzo_values = np.array(data.get('vzo', [0] * len(closes)))
+            phobos_values = np.array(data.get('phobos', [0] * len(closes)))
+            stoch_k = np.array(data.get('stoch_k', [50] * len(closes)))
+            bb_upper = np.array(data.get('bb_upper', highs))
+            bb_middle = np.array(data.get('bb_middle', closes))
+            bb_lower = np.array(data.get('bb_lower', lows))
+            
+            if len(closes) < 5:
+                return {'signal': 'HOLD', 'trend': 'unknown', 'confidence': 0}
+            
+            # Enhanced trend detection
+            trend = self._calculate_trend(closes, highs, lows)
+            
+            # Enhanced volatility with ATR and Bollinger Bands
+            volatility = self._calculate_enhanced_volatility(closes, highs, lows, atr_values, bb_upper, bb_lower)
+            
+            # Enhanced momentum with multiple indicators
+            momentum = self._calculate_enhanced_momentum(closes, rsi_values, macd_hist, fisher_values, vzo_values, phobos_values)
+            
+            # Support/Resistance with Bollinger Bands
+            support_resistance = self._find_support_resistance(highs, lows, closes, bb_upper, bb_lower, bb_middle)
+            
+            # Generate enhanced signal
+            signal_info = self._generate_enhanced_signal(
+                trend, momentum, volatility, closes[-1], support_resistance,
+                {'rsi': rsi_values[-1] if len(rsi_values) > 0 else 50,
+                 'macd': macd_hist[-1] if len(macd_hist) > 0 else 0,
+                 'fisher': fisher_values[-1] if len(fisher_values) > 0 else 0,
+                 'vzo': vzo_values[-1] if len(vzo_values) > 0 else 0}
+            )
+            
+            return {
+                'trend': trend['direction'],
+                'trend_strength': trend['strength'],
+                'momentum': momentum['state'],
+                'momentum_score': momentum.get('indicator_score', 50),
+                'volatility': volatility['level'],
+                'support': support_resistance['support'],
+                'resistance': support_resistance['resistance'],
+                'signal': signal_info['signal'],
+                'signal_confidence': signal_info['confidence'],
+                'current_price': float(closes[-1]),
+                'recent_high': float(highs[-5:].max()),
+                'recent_low': float(lows[-5:].min()),
+                'timeframe': timeframe,
+                'indicators': {
+                    'rsi': float(rsi_values[-1]) if len(rsi_values) > 0 else 50,
+                    'macd_hist': float(macd_hist[-1]) if len(macd_hist) > 0 else 0,
+                    'fisher': float(fisher_values[-1]) if len(fisher_values) > 0 else 0,
+                    'vzo': float(vzo_values[-1]) if len(vzo_values) > 0 else 0
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing {timeframe} timeframe: {e}")
+            return {'signal': 'HOLD', 'trend': 'unknown', 'confidence': 0}
+    
+    def _calculate_trend(self, closes: np.ndarray, highs: np.ndarray, lows: np.ndarray) -> Dict:
+        """Calculate trend direction and strength"""
+        if len(closes) < 5:
+            return {'direction': 'unknown', 'strength': 'weak'}
+        
+        try:
+            # Simple linear regression slope
+            x = np.arange(len(closes))
+            slope = np.polyfit(x, closes, 1)[0]
+            
+            # Convert slope to percentage
+            slope_pct = (slope / closes[0]) * 100 if closes[0] != 0 else 0
+            
+            # Check for higher highs / lower lows
+            recent_highs = highs[-3:]
+            recent_lows = lows[-3:]
+            
+            higher_highs = len(recent_highs) > 1 and recent_highs[-1] > recent_highs[0]
+            lower_lows = len(recent_lows) > 1 and recent_lows[-1] < recent_lows[0]
+            
+            if slope_pct > 0.1:
+                direction = 'up'
+                strength = 'strong' if slope_pct > 0.3 and higher_highs else 'moderate'
+            elif slope_pct < -0.1:
+                direction = 'down' 
+                strength = 'strong' if slope_pct < -0.3 and lower_lows else 'moderate'
+            else:
+                direction = 'sideways'
+                strength = 'weak'
+            
+            return {
+                'direction': direction,
+                'strength': strength,
+                'slope': slope_pct,
+                'higher_highs': higher_highs,
+                'lower_lows': lower_lows
+            }
+        except Exception as e:
+            self.logger.error(f"Error calculating trend: {e}")
+            return {'direction': 'sideways', 'strength': 'weak'}
+    
+    def _calculate_enhanced_volatility(self, closes: np.ndarray, highs: np.ndarray, lows: np.ndarray, 
+                                     atr_values: np.ndarray, bb_upper: np.ndarray, bb_lower: np.ndarray) -> Dict:
+        """Enhanced volatility calculation with ATR and Bollinger Bands"""
+        try:
+            if len(closes) < 5:
+                return {'level': 'medium', 'atr': 0}
+            
+            # ATR-based volatility
+            if len(atr_values) > 0 and atr_values[-1] > 0:
+                current_atr = atr_values[-1]
+                avg_atr = np.mean(atr_values[-5:]) if len(atr_values) >= 5 else current_atr
+            else:
+                # Fallback: simple range calculation
+                ranges = highs - lows
+                current_atr = np.mean(ranges[-3:])
+                avg_atr = current_atr
+            
+            # Bollinger Band width
+            if len(bb_upper) > 0 and len(bb_lower) > 0:
+                bb_width = bb_upper[-1] - bb_lower[-1]
+                bb_width_avg = np.mean(bb_upper[-5:] - bb_lower[-5:]) if len(bb_upper) >= 5 else bb_width
+                bb_squeeze = bb_width < bb_width_avg * 0.8
+            else:
+                bb_width = 0
+                bb_squeeze = False
+            
+            # Determine volatility level
+            avg_price = np.mean(closes[-5:])
+            atr_pct = (current_atr / avg_price) * 100 if avg_price != 0 else 0
+            
+            if atr_pct > 0.5:
+                level = 'high'
+            elif atr_pct < 0.2:
+                level = 'low'
+            else:
+                level = 'medium'
+            
+            return {
+                'level': level,
+                'atr': float(current_atr),
+                'atr_percent': atr_pct,
+                'bb_squeeze': bb_squeeze,
+                'expanding': current_atr > avg_atr * 1.1,
+                'contracting': current_atr < avg_atr * 0.9
+            }
+        except Exception as e:
+            self.logger.error(f"Error calculating volatility: {e}")
+            return {'level': 'medium', 'atr': 0}
+    
+    def _calculate_enhanced_momentum(self, closes: np.ndarray, rsi: np.ndarray, macd_hist: np.ndarray, 
+                                   fisher: np.ndarray, vzo: np.ndarray, phobos: np.ndarray) -> Dict:
+        """Enhanced momentum using multiple indicators"""
+        try:
+            if len(closes) < 3:
+                return {'state': 'neutral', 'indicator_score': 50}
+            
+            # Price momentum
+            price_change = closes[-1] - closes[-3] if len(closes) >= 3 else 0
+            price_change_pct = (price_change / closes[-3]) * 100 if len(closes) >= 3 and closes[-3] != 0 else 0
+            
+            # Indicator momentum score (0-100 scale)
+            momentum_score = 50  # Start neutral
+            
+            # RSI momentum (weight: 25%)
+            if len(rsi) > 0:
+                current_rsi = rsi[-1]
+                if current_rsi > 70:
+                    momentum_score += 12.5
+                elif current_rsi > 60:
+                    momentum_score += 6.25
+                elif current_rsi < 30:
+                    momentum_score -= 12.5
+                elif current_rsi < 40:
+                    momentum_score -= 6.25
+            
+            # MACD momentum (weight: 25%)
+            if len(macd_hist) >= 2:
+                current_macd = macd_hist[-1]
+                prev_macd = macd_hist[-2]
+                
+                if current_macd > 0:
+                    if current_macd > prev_macd:
+                        momentum_score += 12.5
+                    else:
+                        momentum_score += 6.25
+                elif current_macd < 0:
+                    if current_macd < prev_macd:
+                        momentum_score -= 12.5
+                    else:
+                        momentum_score -= 6.25
+            
+            # VZO momentum (weight: 20%)
+            if len(vzo) > 0:
+                current_vzo = vzo[-1]
+                if current_vzo > 40:
+                    momentum_score += 10
+                elif current_vzo > 15:
+                    momentum_score += 5
+                elif current_vzo < -40:
+                    momentum_score -= 10
+                elif current_vzo < -15:
+                    momentum_score -= 5
+            
+            # Fisher momentum (weight: 15%)
+            if len(fisher) > 0:
+                current_fisher = fisher[-1]
+                if current_fisher > 1.5:
+                    momentum_score += 7.5
+                elif current_fisher > 0.5:
+                    momentum_score += 3.75
+                elif current_fisher < -1.5:
+                    momentum_score -= 7.5
+                elif current_fisher < -0.5:
+                    momentum_score -= 3.75
+            
+            # Phobos momentum (weight: 15%)
+            if len(phobos) > 0:
+                current_phobos = phobos[-1]
+                if current_phobos > 0.5:
+                    momentum_score += 7.5
+                elif current_phobos < -0.5:
+                    momentum_score -= 7.5
+            
+            # Determine state
+            if momentum_score >= 70 and price_change_pct > 0.1:
+                state = 'accelerating'
+            elif momentum_score <= 30 and price_change_pct < -0.1:
+                state = 'decelerating'
+            elif 40 <= momentum_score <= 60:
+                state = 'steady'
+            elif momentum_score > 60:
+                state = 'steady_bullish'
+            else:
+                state = 'steady_bearish'
+            
+            return {
+                'state': state,
+                'indicator_score': float(momentum_score),
+                'price_change_pct': price_change_pct
+            }
+        except Exception as e:
+            self.logger.error(f"Error calculating momentum: {e}")
+            return {'state': 'neutral', 'indicator_score': 50}
+    
+    def _find_support_resistance(self, highs: np.ndarray, lows: np.ndarray, closes: np.ndarray,
+                               bb_upper: np.ndarray, bb_lower: np.ndarray, bb_middle: np.ndarray) -> Dict:
+        """Enhanced support/resistance with Bollinger Bands"""
+        try:
+            if len(highs) < 5:
+                return {'support': [], 'resistance': []}
+            
+            # Basic levels
+            recent_high = float(highs[-5:].max())
+            recent_low = float(lows[-5:].min())
+            
+            support_levels = [recent_low]
+            resistance_levels = [recent_high]
+            
+            # Add Bollinger Band levels if available
+            if len(bb_upper) > 0 and len(bb_lower) > 0:
+                resistance_levels.append(float(bb_upper[-1]))
+                support_levels.append(float(bb_lower[-1]))
+                
+                # Add middle band
+                if len(bb_middle) > 0:
+                    middle = float(bb_middle[-1])
+                    current_price = float(closes[-1])
+                    
+                    if current_price > middle:
+                        support_levels.append(middle)
+                    else:
+                        resistance_levels.append(middle)
+            
+            # Remove duplicates and sort
+            support_levels = sorted(list(set(support_levels)), reverse=True)[:3]
+            resistance_levels = sorted(list(set(resistance_levels)))[:3]
+            
+            return {
+                'support': support_levels,
+                'resistance': resistance_levels,
+                'nearest_support': support_levels[0] if support_levels else recent_low,
+                'nearest_resistance': resistance_levels[0] if resistance_levels else recent_high
+            }
+        except Exception as e:
+            self.logger.error(f"Error finding S/R levels: {e}")
+            return {'support': [], 'resistance': []}
+    
+    def _generate_enhanced_signal(self, trend: Dict, momentum: Dict, volatility: Dict, 
+                                current_price: float, sr: Dict, indicators: Dict) -> Dict:
+        """Generate enhanced trading signal"""
+        try:
+            signal = "HOLD"
+            confidence = 50
+            
+            # Trend-following with momentum confirmation
+            if trend['direction'] == 'up' and trend['strength'] in ['strong', 'moderate']:
+                if momentum['indicator_score'] > 60:
+                    signal = "BUY"
+                    confidence = 75 if trend['strength'] == 'strong' else 65
+                    
+                    # Bonus for momentum alignment
+                    if momentum['state'] == 'accelerating':
+                        confidence += 5
+            
+            elif trend['direction'] == 'down' and trend['strength'] in ['strong', 'moderate']:
+                if momentum['indicator_score'] < 40:
+                    signal = "SELL"
+                    confidence = 75 if trend['strength'] == 'strong' else 65
+                    
+                    # Bonus for momentum alignment
+                    if momentum['state'] == 'decelerating':
+                        confidence += 5
+            
+            # Range trading (if no clear trend)
+            elif trend['direction'] == 'sideways':
+                # Near support - potential buy
+                if sr.get('nearest_support') and current_price <= sr['nearest_support'] * 1.001:
+                    if indicators['rsi'] < 40:
+                        signal = "BUY"
+                        confidence = 60
+                
+                # Near resistance - potential sell
+                elif sr.get('nearest_resistance') and current_price >= sr['nearest_resistance'] * 0.999:
+                    if indicators['rsi'] > 60:
+                        signal = "SELL"
+                        confidence = 60
+            
+            # Adjust for volatility
+            if volatility['level'] == 'high':
+                confidence -= 10
+            elif volatility['level'] == 'low' and signal != 'HOLD':
+                confidence += 5
+            
+            # Bollinger squeeze bonus
+            if volatility.get('bb_squeeze') and signal != 'HOLD':
+                confidence += 5
+            
+            return {
+                'signal': signal,
+                'confidence': max(0, min(100, confidence))
+            }
+        except Exception as e:
+            self.logger.error(f"Error generating signal: {e}")
+            return {'signal': 'HOLD', 'confidence': 50}
+    
+    def _determine_overall_regime(self, timeframe_analysis: Dict) -> Dict:
+        """Determine overall market regime from timeframe analysis"""
+        
+        if not timeframe_analysis:
+            return self._get_default_regime()
+        
+        try:
+            # Extract signals and trends
+            signals = []
+            trends = []
+            confidences = []
+            
+            for tf_data in timeframe_analysis.values():
+                signals.append(tf_data.get('signal', 'HOLD'))
+                trends.append(tf_data.get('trend', 'unknown'))
+                confidences.append(tf_data.get('signal_confidence', 'low'))
+            
+            # Count occurrences
+            buy_count = signals.count('BUY')
+            sell_count = signals.count('SELL')
+            up_count = trends.count('up')
+            down_count = trends.count('down')
+            sideways_count = trends.count('sideways')
+            
+            # Determine primary regime
+            total_tfs = len(signals)
+            
+            if buy_count >= total_tfs * 0.6 or up_count >= total_tfs * 0.6:
+                primary_regime = 'trending_up'
+                confidence = min(85, 60 + (buy_count + up_count) * 8)
+                factors = [f"{buy_count}/{total_tfs} BUY signals", f"{up_count}/{total_tfs} uptrends"]
+                
+            elif sell_count >= total_tfs * 0.6 or down_count >= total_tfs * 0.6:
+                primary_regime = 'trending_down'
+                confidence = min(85, 60 + (sell_count + down_count) * 8)
+                factors = [f"{sell_count}/{total_tfs} SELL signals", f"{down_count}/{total_tfs} downtrends"]
+                
+            elif sideways_count >= total_tfs * 0.6:
+                primary_regime = 'ranging'
+                confidence = 70
+                factors = [f"{sideways_count}/{total_tfs} sideways trends", "Range-bound market"]
+                
+            else:
+                primary_regime = 'choppy'
+                confidence = 55
+                factors = ["Mixed signals across timeframes", "No clear directional bias"]
+            
+            # Adjust confidence based on signal quality
+            high_conf_signals = [c for c in confidences if isinstance(c, (int, float)) and c > 70]
+            if len(high_conf_signals) >= total_tfs * 0.5:
+                confidence += 5
+            
+            return {
+                'primary_regime': primary_regime,
+                'confidence': max(30, min(95, confidence)),
+                'supporting_factors': factors,
+                'trade_recommendation': confidence > 65 and primary_regime != 'choppy',
+                'risk_level': 'low' if confidence > 80 else 'medium' if confidence > 65 else 'high',
+                'timeframe_alignment': {
+                    'signals': {'BUY': buy_count, 'SELL': sell_count, 'HOLD': signals.count('HOLD')},
+                    'trends': {'up': up_count, 'down': down_count, 'sideways': sideways_count}
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error determining overall regime: {e}")
+            return self._get_default_regime()
+    
+    def _get_default_regime(self) -> Dict:
+        """Return default/fallback regime"""
+        return {
+            'primary_regime': 'choppy',
+            'confidence': 30,
+            'supporting_factors': ['Insufficient or invalid data for analysis'],
+            'trade_recommendation': False,
+            'risk_level': 'high',
+            'timeframe_analysis': {},
+            'timeframe_alignment': {
+                'signals': {'BUY': 0, 'SELL': 0, 'HOLD': 0},
+                'trends': {'up': 0, 'down': 0, 'sideways': 0}
+            }
         }
-    else:
-        # Fallback to basic calculation
-        volatility = self._calculate_volatility(recent_highs, recent_lows, recent_closes)
-    
-    # 3. Enhanced Momentum with multiple indicators
-    momentum = self._calculate_enhanced_momentum(
-        closes, rsi_values, macd_hist, fisher_values, vzo_values, phobos_values
-    )
-    
-    # 4. Support/Resistance with Bollinger Bands
-    support_resistance = self._find_support_resistance(highs, lows, closes)
-    
-    # Add Bollinger Bands as dynamic S/R
-    if len(bb_upper) > 0:
-        support_resistance['dynamic_resistance'] = float(bb_upper[-1])
-        support_resistance['dynamic_support'] = float(bb_lower[-1])
-        support_resistance['bb_middle'] = float(bb_middle[-1])
-    
-    # 5. Enhanced Range Detection
-    is_ranging, range_bounds = self._detect_range(recent_highs, recent_lows, recent_closes)
-    
-    # Check if we're in a Bollinger Band squeeze (often precedes breakout)
-    if volatility.get('bb_squeeze', False):
-        is_ranging = True
-        range_bounds['squeeze_detected'] = True
-    
-    # 6. Pattern Detection with indicator confirmation
-    patterns = self._detect_patterns(opens, highs, lows, closes)
-    
-    # Add indicator-based patterns
-    if divergence_detected:
-        if trend['direction'] == 'up':
-            patterns.append('bearish_divergence')
-        else:
-            patterns.append('bullish_divergence')
-    
-    # Fisher extremes
-    if len(fisher_values) > 0:
-        if fisher_values[-1] > 2:
-            patterns.append('fisher_extreme_high')
-        elif fisher_values[-1] < -2:
-            patterns.append('fisher_extreme_low')
-    
-    # 7. Generate signal with all information
-    signal_info = self._generate_enhanced_signal(
-        trend, momentum, volatility, is_ranging, 
-        recent_closes[-1], support_resistance, 
-        {'rsi': recent_rsi, 'macd': recent_macd, 'fisher': recent_fisher, 'vzo': vzo_values[-1] if len(vzo_values) > 0 else 0}
-    )
-    
-    # Build comprehensive analysis result
-    return {
-        'trend': trend['direction'],
-        'trend_strength': trend['strength'],
-        'trend_quality': trend['quality'],
-        'trend_metrics': {
-            'slope': trend['slope'],
-            'slope_degrees': trend['slope_degrees'],
-            'higher_highs': trend['higher_highs'],
-            'lower_lows': trend['lower_lows']
-        },
-        'volatility': volatility['level'],
-        'atr': volatility['atr'],
-        'volatility_expanding': volatility.get('expanding', False),
-        'bb_squeeze': volatility.get('bb_squeeze', False),
-        'momentum': momentum['state'],
-        'momentum_value': momentum['value'],
-        'momentum_score': momentum.get('indicator_score', 0),
-        'support': support_resistance['support'],
-        'resistance': support_resistance['resistance'],
-        'dynamic_levels': {
-            'bb_upper': support_resistance.get('dynamic_resistance'),
-            'bb_middle': support_resistance.get('bb_middle'),
-            'bb_lower': support_resistance.get('dynamic_support')
-        },
-        'is_ranging': is_ranging,
-        'range_bounds': range_bounds,
-        'patterns': patterns,
-        'signal': signal_info['signal'],
-        'signal_confidence': signal_info['confidence'],
-        'signal_reasons': signal_info['reasons'],
-        'indicators': {
-            'rsi': float(recent_rsi),
-            'macd_hist': float(recent_macd),
-            'fisher': float(recent_fisher),
-            'vzo': float(vzo_values[-1]) if len(vzo_values) > 0 else 0,
-            'phobos': float(phobos_values[-1]) if len(phobos_values) > 0 else 0,
-            'stoch_k': float(stoch_k[-1]) if len(stoch_k) > 0 else 50
-        },
-        'current_price': float(closes[-1]),
-        'price_vs_bb': 'above' if closes[-1] > bb_upper[-1] else 'below' if closes[-1] < bb_lower[-1] else 'inside',
-        'recent_high': float(recent_highs.max()),
-        'recent_low': float(recent_lows.min()),
-        'recent_range': float(recent_highs.max() - recent_lows.min()),
-        'timestamp': timeframe
-    }
-
-def _calculate_enhanced_momentum(self, closes, rsi, macd_hist, fisher, vzo, phobos):
-    """Calculate momentum using multiple indicators with proper weighting"""
-    
-    # Price momentum (existing)
-    mom_5 = closes[-1] - closes[-5] if len(closes) >= 5 else 0
-    mom_10 = closes[-1] - closes[-10] if len(closes) >= 10 else 0
-    mom_20 = closes[-1] - closes[-20] if len(closes) >= 20 else 0
-    
-    # Indicator momentum score (0-100 scale)
-    momentum_score = 50  # Start neutral
-    
-    # RSI momentum (weight: 25%)
-    if len(rsi) > 0:
-        current_rsi = rsi[-1]
-        if current_rsi > 70:
-            momentum_score += 12.5
-        elif current_rsi > 60:
-            momentum_score += 6.25
-        elif current_rsi < 30:
-            momentum_score -= 12.5
-        elif current_rsi < 40:
-            momentum_score -= 6.25
-    
-    # MACD momentum (weight: 25%)
-    if len(macd_hist) >= 5:
-        current_macd = macd_hist[-1]
-        prev_macd = macd_hist[-5]
-        
-        if current_macd > 0:
-            if current_macd > prev_macd:  # Accelerating up
-                momentum_score += 12.5
-            else:
-                momentum_score += 6.25
-        elif current_macd < 0:
-            if current_macd < prev_macd:  # Accelerating down
-                momentum_score -= 12.5
-            else:
-                momentum_score -= 6.25
-    
-    # VZO momentum (Volume Zone Oscillator) (weight: 20%)
-    if len(vzo) > 0 and vzo[-1] != 0:
-        current_vzo = vzo[-1]
-        if current_vzo > 40:
-            momentum_score += 10
-        elif current_vzo > 15:
-            momentum_score += 5
-        elif current_vzo < -40:
-            momentum_score -= 10
-        elif current_vzo < -15:
-            momentum_score -= 5
-    
-    # Fisher momentum (weight: 15%)
-    if len(fisher) > 0:
-        current_fisher = fisher[-1]
-        if current_fisher > 1.5:
-            momentum_score += 7.5
-        elif current_fisher > 0.5:
-            momentum_score += 3.75
-        elif current_fisher < -1.5:
-            momentum_score -= 7.5
-        elif current_fisher < -0.5:
-            momentum_score -= 3.75
-    
-    # Phobos momentum (weight: 15%)
-    if len(phobos) > 0 and phobos[-1] != 0:
-        current_phobos = phobos[-1]
-        if current_phobos > 0.5:
-            momentum_score += 7.5
-        elif current_phobos < -0.5:
-            momentum_score -= 7.5
-    
-    # Determine state based on combined score and price movement
-    if momentum_score >= 70 and mom_5 > 3:
-        state = 'accelerating'
-    elif momentum_score <= 30 and mom_5 < -3:
-        state = 'decelerating'
-    elif abs(mom_5) < 2 and 40 <= momentum_score <= 60:
-        state = 'flat'
-    elif momentum_score > 60:
-        state = 'steady_bullish'
-    elif momentum_score < 40:
-        state = 'steady_bearish'
-    else:
-        state = 'steady'
-    
-    return {
-        'state': state,
-        'value': float(mom_5),
-        'indicator_score': float(momentum_score),
-        '5_bar': float(mom_5),
-        '10_bar': float(mom_10),
-        '20_bar': float(mom_20),
-        'acceleration': float(mom_5 - mom_10) if len(closes) >= 10 else 0
-    }
-
-def _generate_enhanced_signal(self, trend, momentum, volatility, is_ranging, 
-                            current_price, sr, indicators):
-    """Generate trading signal with confidence and reasoning"""
-    
-    signal = "HOLD"
-    confidence = 50
-    reasons = []
-    
-    # Range-bound strategy
-    if is_ranging:
-        range_position = (current_price - sr['nearest_support']) / (sr['nearest_resistance'] - sr['nearest_support']) \
-                        if sr['nearest_resistance'] > sr['nearest_support'] else 0.5
-        
-        if range_position <= 0.2:  # Near support
-            if indicators['rsi'] < 40 and indicators['vzo'] < -20:
-                signal = "BUY"
-                confidence = 75
-                reasons.append("At range support with oversold indicators")
-            elif momentum['state'] in ['flat', 'steady_bullish']:
-                signal = "BUY"
-                confidence = 65
-                reasons.append("At range support")
-        
-        elif range_position >= 0.8:  # Near resistance
-            if indicators['rsi'] > 60 and indicators['vzo'] > 20:
-                signal = "SELL"
-                confidence = 75
-                reasons.append("At range resistance with overbought indicators")
-            elif momentum['state'] in ['flat', 'steady_bearish']:
-                signal = "SELL"
-                confidence = 65
-                reasons.append("At range resistance")
-        else:
-            reasons.append("Middle of range - no edge")
-    
-    # Trend following with indicator confirmation
-    elif trend['direction'] == 'up' and trend['strength'] in ['strong', 'moderate']:
-        if momentum['indicator_score'] > 60:
-            if volatility.get('bb_squeeze'):
-                signal = "BUY"
-                confidence = 80
-                reasons.append("Uptrend with squeeze breakout potential")
-            elif current_price <= sr.get('bb_middle', current_price):
-                signal = "BUY"
-                confidence = 75
-                reasons.append("Uptrend pullback to mid-BB")
-            elif momentum['state'] == 'accelerating':
-                signal = "BUY"
-                confidence = 70
-                reasons.append("Uptrend with accelerating momentum")
-            else:
-                signal = "BUY"
-                confidence = 65
-                reasons.append("Uptrend continuation")
-        else:
-            reasons.append("Uptrend but weak momentum - waiting")
-    
-    elif trend['direction'] == 'down' and trend['strength'] in ['strong', 'moderate']:
-        if momentum['indicator_score'] < 40:
-            if volatility.get('bb_squeeze'):
-                signal = "SELL"
-                confidence = 80
-                reasons.append("Downtrend with squeeze breakout potential")
-            elif current_price >= sr.get('bb_middle', current_price):
-                signal = "SELL"
-                confidence = 75
-                reasons.append("Downtrend pullback to mid-BB")
-            elif momentum['state'] == 'decelerating':
-                signal = "SELL"
-                confidence = 70
-                reasons.append("Downtrend with accelerating momentum")
-            else:
-                signal = "SELL"
-                confidence = 65
-                reasons.append("Downtrend continuation")
-        else:
-            reasons.append("Downtrend but weak momentum - waiting")
-    
-    # Sideways/weak trend
-    else:
-        if indicators['fisher'] > 2:
-            signal = "SELL"
-            confidence = 60
-            reasons.append("Fisher extreme - potential reversal")
-        elif indicators['fisher'] < -2:
-            signal = "BUY"
-            confidence = 60
-            reasons.append("Fisher extreme - potential reversal")
-        else:
-            reasons.append("No clear trend or range - staying out")
-    
-    return {
-        'signal': signal,
-        'confidence': confidence,
-        'reasons': reasons
-    }
