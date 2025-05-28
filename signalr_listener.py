@@ -594,6 +594,7 @@ def ensure_stops_match_position(acct_id, contract_id, max_retries=5, retry_delay
             position = next((p for p in fresh_positions if p["contractId"] == contract_id), None)
             if position:
                 positions_state.setdefault(acct_id, {})[contract_id] = position
+        
         current_size = position.get("size", 0) if position else 0
 
         if current_size > 0 or attempt == max_retries - 1:
@@ -602,19 +603,29 @@ def ensure_stops_match_position(acct_id, contract_id, max_retries=5, retry_delay
 
     open_orders = search_open(acct_id)
     stops = [o for o in open_orders if o["contractId"] == contract_id and o["type"] == 4 and o["status"] == 1]
+    
+    # Get position type to determine stop side
+    position_type = position.get("type") if position else None
 
     for stop in stops:
         if stop["size"] != current_size and current_size > 0:
             logging.info(f"[SL SYNC] Canceling old stop of size {stop['size']} to match position {current_size}")
             cancel(acct_id, stop["id"])
-            stop_side = stop["side"]
+            
+            # Only replace if we know the stop price and have a position
             stop_price = stop.get("stopPrice")
-            place_stop(acct_id, contract_id, stop_side, current_size, stop_price)
+            if stop_price and position_type:
+                # Determine correct side for stop based on position type
+                # If LONG (type 1), stop should be SELL (side 1)
+                # If SHORT (type 2), stop should be BUY (side 0)
+                stop_side = 1 if position_type == 1 else 0
+                time.sleep(0.5)  # Small delay before placing new stop
+                place_stop(acct_id, contract_id, stop_side, current_size, stop_price)
+    
     if current_size == 0:
         for stop in stops:
             logging.info(f"[SL SYNC] No open position, canceling leftover stop {stop['id']}")
             cancel(acct_id, stop["id"])
-
 # Example usage:
 if __name__ == "__main__":
     print("SignalR Listener module. Import and launch from your tradingview_projectx_bot.py main script.")
