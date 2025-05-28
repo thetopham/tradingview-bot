@@ -234,7 +234,7 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
               if t["contractId"] == cid]
     entry_price = trades[-1]["price"] if trades else None
     if entry_price is not None:
-        stop_price = entry_price - STOP_LOSS_POINTS if side == 0 else entry_price + STOP_LOSS_POINTS
+        stop_price = entry_price - 15 if side == 0 else entry_price + 15
         sl = place_stop(acct_id, cid, exit_side, size, stop_price)
         sl_id = sl["orderId"]
     else:
@@ -257,4 +257,4 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
     )
 
     check_for_phantom_orders(acct_id, cid)
-    # No HTTP return; just end
+ 
