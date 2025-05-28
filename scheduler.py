@@ -33,16 +33,15 @@ def start_scheduler(app):
     # Original 5-minute cron job - still fetches charts
     def cron_job():
         """Runs 5 seconds after each 5-min candle close to fetch fresh charts AND update regime"""
-        
+    
         # Check if we're in the get-flat window
         from auth import in_get_flat
         now = datetime.now(CT)
-        
+    
         if in_get_flat(now):
             logging.info("[APScheduler] SKIPPING chart/regime fetch - in get-flat window")
-            # Don't make any n8n calls or webhook calls during flat time
             return
-        
+    
         logging.info("[APScheduler] Fetching fresh charts and updating regime after candle close")
     
         try:
@@ -54,10 +53,35 @@ def start_scheduler(app):
             # Get n8n base URL
             n8n_base_url = config.get('N8N_AI_URL', '').split('/webhook/')[0]
         
-            # Force fetch fresh charts AND regime analysis
+            # ===== TRIGGER N8N CHART UPDATES FIRST =====
+            timeframes = ['5m', '15m', '30m']
+            logging.info("[APScheduler] Triggering n8n chart analysis updates...")
+        
+            successful_updates = 0
+            for tf in timeframes:
+                try:
+                    webhook_url = f"{n8n_base_url}/webhook/{tf}"
+                    response = requests.post(webhook_url, json={}, timeout=30)
+                
+                    if response.status_code == 200:
+                        logging.info(f"[APScheduler] ✅ Triggered {tf} chart update successfully")
+                        successful_updates += 1
+                    else:
+                        logging.warning(f"[APScheduler] ❌ {tf} update returned: {response.status_code}")
+                    
+                except Exception as e:
+                    logging.error(f"[APScheduler] Failed to trigger {tf} chart update: {e}")
+        
+            # Wait for n8n to process and update the database
+            if successful_updates > 0:
+                wait_time = 5 if successful_updates == len(timeframes) else 8
+                logging.info(f"[APScheduler] Waiting {wait_time}s for n8n to update chart analysis...")
+                time.sleep(wait_time)
+        
+            # NOW fetch the regime analysis (which will use the fresh chart data)
             market_analysis = fetch_multi_timeframe_analysis(
                 n8n_base_url,
-                timeframes=['5m', '15m', '30m'], 
+                timeframes=timeframes,
                 cache_minutes=0,  # Don't use cache
                 force_refresh=True  # Force fresh fetch
             )
@@ -78,7 +102,7 @@ def start_scheduler(app):
         data = {
             "secret": WEBHOOK_SECRET,
             "strategy": "",
-            "account": "beta",
+            "account": "beta", 
             "signal": "",
             "symbol": "CON.F.US.MES.M25",
             "size": 3,
