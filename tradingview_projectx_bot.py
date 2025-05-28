@@ -7,8 +7,8 @@ Handles webhooks, AI decisions, trade execution, and scheduled processing.
 """
 
 
-from flask_cors import CORS
-from flask import Flask, request, jsonify, send_from_directory
+
+from flask import Flask, request, jsonify
 from logging_config import setup_logging
 from config import load_config
 from api import (
@@ -43,65 +43,7 @@ AI_ENDPOINTS = {
 AUTH_LOCK = threading.Lock()
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for the dashboard
 
-# Add this route to serve the dashboard
-@app.route("/")
-def serve_dashboard():
-    return send_from_directory('static', 'dashboard.html')
-
-# Add the new endpoints needed by the dashboard
-@app.route("/ai/latest-decision", methods=["GET"])
-def get_latest_ai_decision():
-    """Get the latest AI trading decision from Supabase"""
-    try:
-        supabase = get_supabase_client()
-        
-        result = supabase.table('ai_trading_log') \
-            .select('*') \
-            .order('timestamp', desc=True) \
-            .limit(1) \
-            .execute()
-        
-        if result.data:
-            return jsonify(result.data[0]), 200
-        else:
-            return jsonify({"error": "No AI decisions found"}), 404
-            
-    except Exception as e:
-        logging.error(f"Error fetching latest AI decision: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/analysis/latest-all", methods=["GET"])
-def get_latest_all_analysis():
-    """Get the latest analysis for all timeframes"""
-    try:
-        supabase = get_supabase_client()
-        
-        timeframes = ['1m', '5m', '15m', '30m', '1h', '4h']
-        all_data = {}
-        
-        for tf in timeframes:
-            result = supabase.table('latest_chart_analysis') \
-                .select('*') \
-                .eq('symbol', 'MES') \
-                .eq('timeframe', tf) \
-                .order('timestamp', desc=True) \
-                .limit(1) \
-                .execute()
-            
-            if result.data:
-                record = result.data[0]
-                snapshot = record.get('snapshot')
-                if isinstance(snapshot, str):
-                    snapshot = json.loads(snapshot)
-                all_data[tf] = snapshot
-        
-        return jsonify(all_data), 200
-        
-    except Exception as e:
-        logging.error(f"Error fetching all analysis: {e}")
-        return jsonify({"error": str(e)}), 500
 
 # --- Health Check Route (optional, but recommended for uptime monitoring) ---
 @app.route("/healthz")
