@@ -8,9 +8,8 @@ import requests
 import re
 import time
 from config import load_config
-from api import get_market_conditions_summary
 from position_manager import PositionManager
-from api import get_supabase_client, fetch_multi_timeframe_analysis
+from api import get_supabase_client, fetch_multi_timeframe_analysis, get_market_conditions_summary, check_contract_rollover
 from datetime import datetime, timedelta
 
 
