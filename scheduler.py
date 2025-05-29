@@ -523,6 +523,14 @@ def start_scheduler(app):
         id='get_flat',
         replace_existing=True
     )
+
+    # Add to start_scheduler function
+    scheduler.add_job(
+        check_contract_rollover,
+        CronTrigger(hour=6, minute=0, timezone=CT),  # Run at 6 AM CT daily
+        id='contract_rollover_check',
+        replace_existing=True
+    )
     
     
     scheduler.start()
