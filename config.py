@@ -18,6 +18,12 @@ def load_config():
         'SUPABASE_KEY': os.getenv("SUPABASE_KEY"),
         'WEBHOOK': os.getenv("WEBHOOK"),
     }
+
+    # Contract configuration
+    config['USE_DYNAMIC_CONTRACTS'] = os.getenv("USE_DYNAMIC_CONTRACTS", "true").lower() == "true"
+    config['LIVE_MODE'] = os.getenv("LIVE_MODE", "false").lower() == "true"
+    config['DEFAULT_SYMBOL'] = os.getenv("DEFAULT_SYMBOL", "MES")
+
     # Build account map
     config['ACCOUNTS'] = {
         k[len("ACCOUNT_"):].lower(): int(v)
@@ -26,7 +32,7 @@ def load_config():
     if not config['ACCOUNTS']:
         raise RuntimeError("No accounts loaded from .env. Add ACCOUNT_<NAME>=<ID>.")
     config['DEFAULT_ACCOUNT'] = next(iter(config['ACCOUNTS']))
-    config['OVERRIDE_CONTRACT_ID'] = os.getenv("OVERRIDE_CONTRACT_ID", "CON.F.US.MES.M25")
+    config['OVERRIDE_CONTRACT_ID'] = os.getenv("OVERRIDE_CONTRACT_ID", None)
     config['GET_FLAT_START'] = dtime(15, 7)
     config['GET_FLAT_END'] = dtime(17, 0)
     config['CT'] = pytz.timezone("America/Chicago")
