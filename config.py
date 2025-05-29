@@ -17,6 +17,15 @@ def load_config():
         'SUPABASE_URL': os.getenv("SUPABASE_URL"),
         'SUPABASE_KEY': os.getenv("SUPABASE_KEY"),
         'WEBHOOK': os.getenv("WEBHOOK"),
+        
+        # ADD THESE LINES - Load risk management parameters
+        'DAILY_PROFIT_TARGET': float(os.getenv("DAILY_PROFIT_TARGET", 500.0)),
+        'MAX_DAILY_LOSS': float(os.getenv("MAX_DAILY_LOSS", -500.0)),
+        'MAX_CONSECUTIVE_LOSSES': int(os.getenv("MAX_CONSECUTIVE_LOSSES", 3)),
+        
+        # Add stop loss and take profit parameters too
+        'STOP_LOSS_POINTS': float(os.getenv("STOP_LOSS_POINTS", 10.0)),
+        'TP_POINTS': [float(x) for x in os.getenv("TP_POINTS", "2.5,5.0,10.0").split(",")],
     }
 
     # Contract configuration
@@ -37,4 +46,3 @@ def load_config():
     config['GET_FLAT_END'] = dtime(17, 0)
     config['CT'] = pytz.timezone("America/Chicago")
     return config
-
