@@ -9,7 +9,7 @@ import re
 import time
 from config import load_config
 from position_manager import PositionManager
-from api import get_supabase_client, fetch_multi_timeframe_analysis, get_market_conditions_summary, check_contract_rollover
+from api import get_supabase_client, fetch_multi_timeframe_analysis, get_market_conditions_summary, check_contract_rollover, get_contract
 from datetime import datetime, timedelta
 
 
