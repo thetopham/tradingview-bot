@@ -24,6 +24,34 @@ SUPABASE_URL = config['SUPABASE_URL']
 SUPABASE_KEY = config['SUPABASE_KEY']
 CT = pytz.timezone("America/Chicago")
 
+# Add to the top of api.py after imports
+contract_cache = {}
+contract_cache_expiry = {}
+CONTRACT_CACHE_DURATION = 3600  # Cache for 1 hour
+
+def get_active_contract_for_symbol_cached(symbol: str, live: bool = False) -> Optional[str]:
+    """
+    Get active contract with caching to avoid repeated API calls
+    """
+    cache_key = f"{symbol}_{live}"
+    current_time = time.time()
+    
+    # Check cache
+    if cache_key in contract_cache and cache_key in contract_cache_expiry:
+        if current_time < contract_cache_expiry[cache_key]:
+            logging.debug(f"Using cached contract for {symbol}: {contract_cache[cache_key]}")
+            return contract_cache[cache_key]
+    
+    # Fetch fresh data
+    contract_id = get_active_contract_for_symbol(symbol, live)
+    
+    # Update cache
+    if contract_id:
+        contract_cache[cache_key] = contract_id
+        contract_cache_expiry[cache_key] = current_time + CONTRACT_CACHE_DURATION
+    
+    return contract_id
+
 # Global lock for regime cache updates
 regime_cache_lock = threading.Lock()
 regime_cache_in_progress = {}
@@ -241,9 +269,94 @@ def cancel_all_stops(acct_id, cid):
         if o["contractId"] == cid and o["type"] == 4:
             cancel(acct_id, o["id"])
 
+def search_contracts(search_text: str, live: bool = False) -> List[Dict]:
+    """
+    Search for contracts by name
+    
+    Args:
+        search_text: The contract symbol to search for (e.g., "MES", "ES", "NQ")
+        live: Whether to search for live contracts (True) or sim (False)
+        
+    Returns:
+        List of matching contracts
+    """
+    try:
+        resp = post("/api/Contract/search", {
+            "searchText": search_text,
+            "live": live
+        })
+        contracts = resp.get("contracts", [])
+        logging.info(f"Found {len(contracts)} contracts for '{search_text}'")
+        return contracts
+    except Exception as e:
+        logging.error(f"Error searching contracts: {e}")
+        return []
+
+
+def get_active_contract_for_symbol(symbol: str, live: bool = False) -> Optional[str]:
+    """
+    Get the active contract ID for a given symbol
+    
+    Args:
+        symbol: The base symbol (e.g., "MES", "ES", "NQ")
+        live: Whether to use live data subscription
+        
+    Returns:
+        The contract ID of the active contract, or None if not found
+    """
+    contracts = search_contracts(symbol, live)
+    
+    # Filter for active contracts
+    active_contracts = [c for c in contracts if c.get("activeContract", False)]
+    
+    if not active_contracts:
+        logging.warning(f"No active contracts found for {symbol}")
+        return None
+    
+    # Sort by contract ID to get the front month (contracts are typically named with month codes)
+    # The ID format is like "CON.F.US.MES.M25" where M25 is the month/year
+    active_contracts.sort(key=lambda x: x.get("id", ""))
+    
+    # For futures, typically the first active contract is the front month
+    selected = active_contracts[0]
+    
+    logging.info(f"Selected active contract for {symbol}: {selected['id']} - {selected['description']}")
+    return selected["id"]
+
+
+# Update the get_contract function to support dynamic lookup
 def get_contract(sym):
+    """
+    Get contract ID for a symbol. 
+    First checks for override, then tries dynamic lookup.
+    
+    Args:
+        sym: Can be either:
+            - A full contract ID like "CON.F.US.MES.M25"
+            - A base symbol like "MES" (will lookup active contract)
+    """
+    # Check if override is set
     if OVERRIDE_CONTRACT_ID:
         return OVERRIDE_CONTRACT_ID
+    
+    # If sym looks like a full contract ID, return it
+    if sym and sym.startswith("CON."):
+        return sym
+    
+    # Otherwise, try to lookup the active contract
+    if sym:
+        # Extract base symbol (handle cases like "MES", "ES", etc.)
+        base_symbol = sym.upper().replace("CON.F.US.", "").split(".")[0]
+        
+        # Check if we're in live mode (you might want to make this configurable)
+        live_mode = config.get('LIVE_MODE', False)
+        
+        contract_id = get_active_contract_for_symbol(base_symbol, live=live_mode)
+        if contract_id:
+            return contract_id
+        else:
+            logging.error(f"Could not find active contract for {base_symbol}")
+    
     return None
 
 def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url):
