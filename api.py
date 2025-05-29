@@ -1319,7 +1319,7 @@ def get_all_positions_summary() -> Dict:
             'timestamp': datetime.now(CT).isoformat()
         }
         
-        cid = get_contract("CON.F.US.MES.M25")
+        cid = get_contract('MES')
         
         for account_name, acct_id in ACCOUNTS.items():
             position_state = pm.get_position_state(acct_id, cid)
