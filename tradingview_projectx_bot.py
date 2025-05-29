@@ -252,7 +252,7 @@ def get_positions_summary():
         from api import get_contract, get_current_market_price
         
         pm = PositionManager(ACCOUNTS)
-        cid = get_contract("CON.F.US.MES.M25")
+        cid = get_contract('MES')
         
         # Get current market price
         try:
@@ -376,7 +376,7 @@ def get_account_positions(account):
             return jsonify({"error": f"Unknown account: {account}"}), 404
         
         pm = PositionManager(ACCOUNTS)
-        cid = get_contract("CON.F.US.MES.M25")
+        cid = get_contract('MES')
         
         position_state = pm.get_position_state(acct_id, cid)
         account_state = pm.get_account_state(acct_id)
@@ -408,7 +408,7 @@ def get_position_suggestions(account):
             return jsonify({"error": f"Unknown account: {account}"}), 404
         
         pm = PositionManager(ACCOUNTS)
-        cid = get_contract("CON.F.US.MES.M25")
+        cid = get_contract('MES')
         
         # Get full context for AI
         context = pm.get_position_context_for_ai(acct_id, cid)
@@ -533,7 +533,7 @@ def get_realtime_positions():
         from api import get_contract, get_current_market_price
         
         pm = PositionManager(ACCOUNTS)
-        cid = get_contract("CON.F.US.MES.M25")
+        cid = get_contract('MES')
         
         # Get current market price
         current_price, price_source = get_current_market_price(symbol="CON.F.US.MES.M25")
@@ -603,7 +603,7 @@ def debug_positions():
     try:
         from api import search_pos, get_current_market_price, get_contract
         
-        cid = get_contract("CON.F.US.MES.M25")
+        cid = get_contract('MES')
         price, price_source = get_current_market_price()
         
         result = {
@@ -681,7 +681,7 @@ def get_position_context(account):
             return jsonify({"error": f"Unknown account: {account}"}), 404
         
         pm = PositionManager(ACCOUNTS)
-        cid = get_contract("CON.F.US.MES.M25")
+        cid = get_contract('MES')
         
         context = pm.get_position_context_for_ai(acct_id, cid)
         
