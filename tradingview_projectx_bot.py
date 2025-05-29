@@ -716,12 +716,53 @@ def debug_price_sources():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route("/contracts/<symbol>", methods=["GET"])
+def get_symbol_contracts(symbol):
+    """Get all contracts for a symbol"""
+    try:
+        contracts = search_contracts(symbol.upper())
+        active = [c for c in contracts if c.get("activeContract")]
+        
+        return jsonify({
+            "symbol": symbol,
+            "total_contracts": len(contracts),
+            "active_contracts": len(active),
+            "contracts": contracts,
+            "selected": get_active_contract_for_symbol(symbol.upper()) if active else None
+        }), 200
+        
+    except Exception as e:
+        logging.error(f"Error getting contracts: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/contracts/current", methods=["GET"])
+def get_current_contracts():
+    """Get current active contracts for configured symbols"""
+    try:
+        symbols = ["MES", "ES", "NQ", "MNQ"]  # Add more as needed
+        result = {}
+        
+        for symbol in symbols:
+            contract_id = get_active_contract_for_symbol_cached(symbol)
+            if contract_id:
+                result[symbol] = contract_id
+        
+        return jsonify({
+            "contracts": result,
+            "cache_duration_seconds": CONTRACT_CACHE_DURATION,
+            "timestamp": datetime.now(CT).isoformat()
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 def handle_webhook_logic(data):
     try:
         strat = data.get("strategy", "bracket").lower()
         acct  = (data.get("account") or DEFAULT_ACCOUNT).lower()
         sig   = data.get("signal", "").upper()
-        sym   = data.get("symbol", "")
+        sym   = data.get("symbol", config['DEFAULT_SYMBOL'])  # Use default symbol if not provided
         size  = int(data.get("size", 1))
         alert = data.get("alert", "")
         ai_decision_id = data.get("ai_decision_id", None)
@@ -734,6 +775,9 @@ def handle_webhook_logic(data):
 
         acct_id = ACCOUNTS[acct]
         cid = get_contract(sym)
+        if not cid:
+            logging.error(f"Could not determine contract ID for symbol {sym}")
+            return
 
         # Manual flatten (close all) signal
         if sig == "FLAT":
