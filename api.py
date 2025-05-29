@@ -179,7 +179,34 @@ def search_pos(acct_id):
     logging.debug("Open positions for %s: %s", acct_id, pos)
     return pos
 
-
+def check_contract_rollover():
+    """
+    Check if contracts have rolled and update cache
+    This should be called periodically (e.g., daily)
+    """
+    logging.info("Checking for contract rollover...")
+    
+    # Clear cache to force fresh lookup
+    contract_cache.clear()
+    contract_cache_expiry.clear()
+    
+    # Check main symbols
+    symbols = ["MES", "ES", "NQ", "MNQ"]
+    changes = []
+    
+    for symbol in symbols:
+        old_contract = contract_cache.get(f"{symbol}_False")
+        new_contract = get_active_contract_for_symbol(symbol, live=False)
+        
+        if old_contract and new_contract and old_contract != new_contract:
+            changes.append(f"{symbol}: {old_contract} -> {new_contract}")
+            logging.warning(f"CONTRACT ROLLOVER DETECTED: {symbol} rolled from {old_contract} to {new_contract}")
+    
+    if changes:
+        # You might want to send an alert or notification here
+        logging.warning(f"Contract rollovers detected: {', '.join(changes)}")
+    
+    return changes
 
 
 #requires accountid and contractid
