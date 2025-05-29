@@ -536,7 +536,7 @@ def get_realtime_positions():
         cid = get_contract('MES')
         
         # Get current market price
-        current_price, price_source = get_current_market_price(symbol="CON.F.US.MES.M25")
+        current_price, price_source = get_current_market_price(symbol="MES")
         
         results = {
             'market_price': current_price,
