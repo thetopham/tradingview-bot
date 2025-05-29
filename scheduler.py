@@ -125,7 +125,7 @@ def start_scheduler(app):
             "strategy": "",
             "account": "beta", 
             "signal": "",
-            "symbol": "CON.F.US.MES.M25",
+            "symbol": "MES",
             "size": 3,
             "alert": f"APScheduler 5m - candle close"
         }
@@ -294,7 +294,7 @@ def start_scheduler(app):
                 # Only log if there's an open position or if market is open
                 has_positions = False
                 for account_name, acct_id in ACCOUNTS.items():
-                    positions = position_manager.get_position_state(acct_id, get_contract("CON.F.US.MES.M25"))
+                    positions = position_manager.get_position_state(acct_id, get_contract("MES"))
                     if positions['has_position']:
                         has_positions = True
                         break
@@ -373,7 +373,7 @@ def start_scheduler(app):
                                 supabase.table('ai_trading_log').insert({
                                     'strategy': 'get_flat',
                                     'signal': 'FLAT',
-                                    'symbol': 'CON.F.US.MES.M25',
+                                    'symbol': 'MES',
                                     'account': account_name,
                                     'size': 0,
                                     'timestamp': datetime.now(CT).isoformat(),
