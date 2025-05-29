@@ -176,7 +176,7 @@ def start_scheduler(app):
             logging.info("🔄 Running position monitoring...")
             
             from api import get_contract
-            cid = get_contract("CON.F.US.MES.M25")
+            cid = get_contract('MES')
             
             for account_name, acct_id in ACCOUNTS.items():
                 try:
@@ -343,7 +343,7 @@ def start_scheduler(app):
             errors = []
             
             # Get the contract ID for MES
-            cid = get_contract("CON.F.US.MES.M25")
+            cid = get_contract('MES')
             
             for account_name, acct_id in ACCOUNTS.items():
                 try:
@@ -413,7 +413,7 @@ def start_scheduler(app):
             
             # Check current positions and log warning
             from api import search_pos, get_contract
-            cid = get_contract("CON.F.US.MES.M25")
+            cid = get_contract('MES')
             
             positions_to_flatten = []
             
