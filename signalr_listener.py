@@ -3,7 +3,8 @@ import time
 import threading
 import logging
 from api import search_pos, log_trade_results_to_supabase, check_for_phantom_orders
-from datetime import datetime, parser
+from datetime import datetime
+from dateutil import parser
 from signalrcore.hub_connection_builder import HubConnectionBuilder
 import pytz
 
