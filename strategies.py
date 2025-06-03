@@ -397,13 +397,7 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
         symbol=sym,
         sl_id=sl_id,
         trades=trade_log
-    )
+    )    
     
-    # Final check for phantom orders after a delay
-    def delayed_phantom_check():
-        time.sleep(10)  # Wait 5 seconds for everything to settle
-        check_for_phantom_orders(acct_id, cid)
-    
-    threading.Thread(target=delayed_phantom_check, daemon=True).start()
     
     # No HTTP return; just end
