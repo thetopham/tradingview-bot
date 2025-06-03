@@ -584,11 +584,14 @@ def launch_signalr_listener(get_token, get_token_expiry, authenticate, auth_lock
 
 def ensure_stops_match_position(acct_id, contract_id, max_retries=5, retry_delay=0.4):
     from api import search_open, place_stop, cancel, search_pos
-
+    
     if acct_id is None or contract_id is None:
         logging.error(f"ensure_stops_match_position called with acct_id={acct_id}, contract_id={contract_id} (BUG IN CALLER)")
         return
-
+    
+    # Wait longer initially to let things settle
+    time.sleep(3)  # Add initial delay
+    
     for attempt in range(max_retries):
         position = positions_state.get(acct_id, {}).get(contract_id)
         if position is None:
@@ -598,36 +601,53 @@ def ensure_stops_match_position(acct_id, contract_id, max_retries=5, retry_delay
                 positions_state.setdefault(acct_id, {})[contract_id] = position
         
         current_size = position.get("size", 0) if position else 0
-
         if current_size > 0 or attempt == max_retries - 1:
             break
         time.sleep(retry_delay)
-
+    
     open_orders = search_open(acct_id)
     stops = [o for o in open_orders if o["contractId"] == contract_id and o["type"] == 4 and o["status"] == 1]
     
     # Get position type to determine stop side
     position_type = position.get("type") if position else None
-
-    for stop in stops:
-        if stop["size"] != current_size and current_size > 0:
-            logging.info(f"[SL SYNC] Canceling old stop of size {stop['size']} to match position {current_size}")
-            cancel(acct_id, stop["id"])
-            
-            # Only replace if we know the stop price and have a position
-            stop_price = stop.get("stopPrice")
-            if stop_price and position_type:
-                # Determine correct side for stop based on position type
-                # If LONG (type 1), stop should be SELL (side 1)
-                # If SHORT (type 2), stop should be BUY (side 0)
-                stop_side = 1 if position_type == 1 else 0
-                time.sleep(0.5)  # Small delay before placing new stop
-                place_stop(acct_id, contract_id, stop_side, current_size, stop_price)
     
-    if current_size == 0:
+    # Only sync stops if we have a position
+    if current_size > 0:
         for stop in stops:
-            logging.info(f"[SL SYNC] No open position, canceling leftover stop {stop['id']}")
+            if stop["size"] != current_size:
+                logging.info(f"[SL SYNC] Adjusting stop from size {stop['size']} to match position {current_size}")
+                cancel(acct_id, stop["id"])
+                
+                # Only replace if we know the stop price
+                stop_price = stop.get("stopPrice")
+                if stop_price and position_type:
+                    stop_side = 1 if position_type == 1 else 0
+                    time.sleep(0.5)
+                    place_stop(acct_id, contract_id, stop_side, current_size, stop_price)
+    
+    # Only cancel stops if we're REALLY sure there's no position
+    elif current_size == 0:
+        # Check if stop is very new (might be for a position we haven't seen yet)
+        for stop in stops:
+            # Check stop age if possible
+            stop_time = stop.get("creationTimestamp")
+            if stop_time:
+                try:
+                    from dateutil import parser
+                    from datetime import datetime, timezone
+                    stop_dt = parser.parse(stop_time)
+                    age_seconds = (datetime.now(timezone.utc) - stop_dt).total_seconds()
+                    
+                    # Don't cancel stops less than 10 seconds old
+                    if age_seconds < 10:
+                        logging.info(f"[SL SYNC] Keeping new stop {stop['id']} (age: {age_seconds:.1f}s)")
+                        continue
+                except:
+                    pass
+            
+            logging.info(f"[SL SYNC] No position found, canceling old stop {stop['id']}")
             cancel(acct_id, stop["id"])
+          
 # Example usage:
 if __name__ == "__main__":
     print("SignalR Listener module. Import and launch from your tradingview_projectx_bot.py main script.")
