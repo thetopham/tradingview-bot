@@ -431,27 +431,27 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url):
 
 #custom phantom order function
 def check_for_phantom_orders(acct_id, cid):
-  
+    # Add a small delay before checking
+    time.sleep(2)  # Give orders time to register
+    
     # 1. Check for open position(s)
     positions = [p for p in search_pos(acct_id) if p["contractId"] == cid]
     open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
 
     # 2. If there is an open position, make sure there are protective orders
     if positions:
+        # Check specifically for stops (type 4) or limits (type 1)
         has_protective = any(o["type"] in (1, 4) and o["status"] == 1 for o in open_orders)
+        
+        # Give more time for stops to register in pivot strategy
+        if not has_protective:
+            time.sleep(3)  # Wait a bit more
+            open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
+            has_protective = any(o["type"] in (1, 4) and o["status"] == 1 for o in open_orders)
+            
         if not has_protective:
             logging.warning(f"Phantom position detected! No stop/limit attached. Positions: {positions}, Orders: {open_orders}")
             flatten_contract(acct_id, cid, timeout=10)
-    else:
-        # 3. If there are no positions, but open stop/limit orders remain, cancel them
-        leftover_orders = [o for o in open_orders if o["type"] in (1, 4) and o["status"] == 1]
-        if leftover_orders:
-            logging.warning(f"Leftover stop/limit order(s) found without a position! Orders: {leftover_orders}")
-            for o in leftover_orders:
-                try:
-                    cancel(acct_id, o["id"])
-                except Exception as e:
-                    logging.error(f"Error cancelling phantom order {o['id']}: {e}")
 
 
 
