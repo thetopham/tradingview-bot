@@ -829,7 +829,7 @@ def handle_webhook_logic(data):
             ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
         else:
             # NON-AI ACCOUNT - Create a simple decision ID for tracking
-            ai_decision_id = f"MANUAL_{acct}_{int(time.time())}"
+            ai_decision_id = int(time.time() * 1000) % (2**62)
             logging.info(f"Non-AI account {acct} - proceeding with manual trade")
 
         # Check current positions before entry
