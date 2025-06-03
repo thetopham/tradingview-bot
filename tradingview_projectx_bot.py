@@ -119,7 +119,8 @@ def tv_webhook():
     # Respond immediately to TradingView/n8n
     Thread(target=handle_webhook_logic, args=(data,)).start()
     return jsonify(status="accepted", msg="Processing started"), 202
-
+    
+'''
 @app.route("/")
 def serve_dashboard():
     return send_from_directory('static', 'dashboard.html')
@@ -425,7 +426,7 @@ def get_position_suggestions(account):
         logging.error(f"Error getting position suggestions: {e}")
         return jsonify({"error": str(e)}), 500
 
-'''
+
 @app.route("/scan", methods=["POST"])
 def scan_opportunities():
     """Manually trigger opportunity scan"""
@@ -453,7 +454,7 @@ def scan_opportunities():
     except Exception as e:
         logging.error(f"Error scanning opportunities: {e}")
         return jsonify({"error": str(e)}), 500
-'''
+'
 @app.route("/account/<account>/health", methods=["GET"])
 def get_account_health(account):
     """Get account health metrics"""
@@ -483,7 +484,7 @@ def get_account_health(account):
     except Exception as e:
         logging.error(f"Error getting account health: {e}")
         return jsonify({"error": str(e)}), 500
-
+'
 @app.route("/market", methods=["GET"])
 def get_market_status():
     """Get current market conditions and regime"""
@@ -502,7 +503,7 @@ def get_market_status():
     except Exception as e:
         logging.error(f"Error getting market status: {e}")
         return jsonify({"error": str(e)}), 500
-'''
+'
 @app.route("/autonomous/toggle", methods=["POST"])
 def toggle_autonomous():
     """Toggle autonomous trading on/off"""
@@ -524,7 +525,7 @@ def toggle_autonomous():
     except Exception as e:
         logging.error(f"Error toggling autonomous: {e}")
         return jsonify({"error": str(e)}), 500
-'''
+
 @app.route("/positions/realtime", methods=["GET"])
 def get_realtime_positions():
     """Get real-time positions with current P&L across all accounts"""
@@ -597,77 +598,7 @@ def get_realtime_positions():
         logging.error(f"Error getting real-time positions: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route("/debug/positions", methods=["GET"])
-def debug_positions():
-    """Debug position data and P&L calculations"""
-    try:
-        from api import search_pos, get_current_market_price, get_contract
-        
-        cid = get_contract('MES')
-        price, price_source = get_current_market_price()
-        
-        result = {
-            'current_price': price,
-            'price_source': price_source,
-            'contract_id': cid,
-            'accounts': {}
-        }
-        
-        for account_name, acct_id in ACCOUNTS.items():
-            positions = search_pos(acct_id)
-            
-            # Filter for our contract
-            contract_positions = [p for p in positions if p.get("contractId") == cid]
-            
-            account_info = {
-                'all_positions': positions,
-                'contract_positions': contract_positions,
-                'calculations': []
-            }
-            
-            # Calculate P&L for each position
-            for pos in contract_positions:
-                size = pos.get('size', 0)
-                entry = pos.get('averagePrice', 0)
-                pos_type = pos.get('type')
-                
-                calc = {
-                    'position_id': pos.get('id'),
-                    'type': pos_type,
-                    'type_meaning': 'LONG' if pos_type == 1 else 'SHORT' if pos_type == 2 else 'UNKNOWN',
-                    'size': size,
-                    'entry_price': entry,
-                    'current_price': price
-                }
-                
-                if price and entry and size > 0:
-                    if pos_type == 1:  # Long
-                        move = price - entry
-                        pnl = move * size * 5
-                        calc['calculation'] = f"({price} - {entry}) * {size} * 5 = {pnl}"
-                    elif pos_type == 2:  # Short
-                        move = entry - price
-                        pnl = move * size * 5
-                        calc['calculation'] = f"({entry} - {price}) * {size} * 5 = {pnl}"
-                    else:
-                        pnl = 0
-                        calc['calculation'] = f"Unknown position type: {pos_type}"
-                    
-                    calc['price_move'] = move
-                    calc['unrealized_pnl'] = pnl
-                
-                account_info['calculations'].append(calc)
-            
-            result['accounts'][account_name] = account_info
-        
-        return jsonify(result), 200
-        
-    except Exception as e:
-        import traceback
-        return jsonify({
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
+
 
 @app.route("/position-context/<account>", methods=["GET"])
 def get_position_context(account):
@@ -694,27 +625,7 @@ def get_position_context(account):
     except Exception as e:
         logging.error(f"Error getting position context: {e}")
         return jsonify({"error": str(e)}), 500
-
-@app.route("/debug/price-sources", methods=["GET"])
-def debug_price_sources():
-    """Debug what price data is available"""
-    try:
-        supabase = get_supabase_client()
-        
-        # Check tv_datafeed
-        tv_result = supabase.table('tv_datafeed').select('*').limit(5).execute()
-        
-        # Check latest_chart_analysis
-        chart_result = supabase.table('latest_chart_analysis').select('*').limit(5).execute()
-        
-        return jsonify({
-            'tv_datafeed_count': len(tv_result.data) if tv_result.data else 0,
-            'tv_datafeed_sample': tv_result.data[0] if tv_result.data else None,
-            'chart_analysis_count': len(chart_result.data) if chart_result.data else 0,
-            'chart_analysis_sample': chart_result.data[0] if chart_result.data else None
-        }), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+'''
 
 @app.route("/contracts/<symbol>", methods=["GET"])
 def get_symbol_contracts(symbol):
@@ -857,7 +768,7 @@ def handle_webhook_logic(data):
     except Exception as e:
         import traceback
         logging.error(f"Exception in handle_webhook_logic: {e}\n{traceback.format_exc()}")
-
+'''
 def scheduled_market_analysis():
     """Run market analysis every 15 minutes"""
     try:
@@ -869,7 +780,7 @@ def scheduled_market_analysis():
             
     except Exception as e:
         logging.error(f"Error in scheduled market analysis: {e}")
-
+'''
 if __name__ == "__main__":
     try:
         authenticate()
