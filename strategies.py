@@ -272,9 +272,9 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
                 account_name = name
                 break
         
-        if account_name and account_name not in AI_ENDPOINTS:
-            # Use timestamp-based ID that can be converted to bigint
-            ai_decision_id = int(time.time() * 1000) % (2**31 - 1)  # Keep it within int32 range
+        if ai_decision_id is None:
+            # Generate a pure numeric ID without any prefix
+            ai_decision_id = int(time.time() * 1000) % (2**53)  # Just a number, no prefix
             logging.info(f"Generated numeric AI decision ID for manual trade: {ai_decision_id}")
 
     if net_pos == target:
@@ -400,4 +400,4 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
     )    
     
     
-    # No HTTP return; just end
+
