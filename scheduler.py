@@ -30,6 +30,7 @@ def start_scheduler(app):
     position_manager = PositionManager(ACCOUNTS)
     
     # Original 5-minute cron job - still fetches charts
+    '''
     def cron_job():
         """Runs 5 seconds after each 5-min candle close to fetch fresh charts AND update regime"""
     
@@ -318,7 +319,7 @@ def start_scheduler(app):
             
         except Exception as e:
             logging.error(f"Data feed monitor error: {e}")
-
+    '''
     # Metadata cleanup - runs every hour
     def metadata_cleanup_job():
         """Clean up any orphaned trade metadata"""
@@ -440,6 +441,7 @@ def start_scheduler(app):
         replace_existing=True
     )
     
+    '''
     # Chart fetch and regime update - every 5 minutes
     scheduler.add_job(
         cron_job,
@@ -505,7 +507,7 @@ def start_scheduler(app):
         id='pre_ny_afternoon',
         replace_existing=True
     )
-    
+    '''
     # GET FLAT JOBS
     # Pre-flat warning at 3:02 PM CT (5 minutes before)
     scheduler.add_job(
