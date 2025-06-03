@@ -3,9 +3,10 @@ import time
 import threading
 import logging
 from api import search_pos, log_trade_results_to_supabase, check_for_phantom_orders
-from datetime import datetime
+from datetime import datetime, parser
 from signalrcore.hub_connection_builder import HubConnectionBuilder
 import pytz
+
 
 CT = pytz.timezone("America/Chicago")
 USER_HUB_URL_BASE = "wss://rtc.topstepx.com/hubs/user?access_token={}"
