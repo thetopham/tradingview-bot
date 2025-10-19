@@ -435,6 +435,30 @@ To send alerts from TradingView to your bot:
 
 ---
 
+## 🏗️ Architecture & Data Flow
+
+- **Entry Points**: `tradingview_projectx_bot.py` initializes logging, loads configuration from `.env`, authenticates with ProjectX, launches the SignalR market feed listener, starts the APScheduler background jobs, and serves the Flask API (health check, position snapshots, market status, webhook).
+- **Alert Handling**: `/webhook` accepts TradingView payloads, validates `WEBHOOK_SECRET`, and hands them to `handle_webhook_logic` on a background thread. The handler resolves accounts/contracts via `config.py` + `api.get_contract`, blocks trading during the get-flat window, and dispatches strategies from `strategies.py`.
+- **Strategy Layer**: `run_bracket`, `run_brackmod`, and `run_pivot` submit ProjectX orders, derive fills, and apply market-regime-adjusted stop/target levels. Each trade session is tracked through `signalr_listener.track_trade`, which later logs outcomes to Supabase.
+- **External Services**:
+  - ProjectX REST calls live in `api.py`; `auth.py` keeps JWTs fresh; `state.py` holds the shared `requests.Session`.
+  - Supabase stores trade logs, market-regime cache, tv_datafeed bars, and uploaded bot logs. `upload_botlog.py` can sync `/tmp/tradingview_projectx_bot.log*` into the `botlogs` bucket.
+  - n8n AI endpoints (mapped in `.env`) enrich alerts with regime insight and can veto trades for AI-managed accounts (`epsilon`, `beta` by convention).
+- **Background Jobs** (`scheduler.py`): Hourly trim orphaned metadata, warn at 15:02 CT, auto-flatten all MES exposure at 15:07 CT, and refresh contract caches daily at 06:00 CT. Additional monitoring hooks are commented out but document prior automation.
+- **Market Context**: `market_regime.py`, `market_regime_ohlc.py`, and `market_regime_hybrid.py` fuse OHLC indicators with AI chart analysis. `api.get_market_conditions_summary` exposes a normalized snapshot for logs, endpoints, and strategy adjustments.
+- **Live State Sync**: `signalr_listener.py` subscribes to TopstepX SignalR feeds per configured account, mirrors stop orders (`ensure_stops_match_position`), reconstructs metadata on restart, and triggers Supabase logging when positions close. Ensure `ACCOUNT_*` variables match funded accounts before enabling it.
+- **Risk & Positions**: `PositionManager` computes account metrics (daily P&L, risk level, consecutive losses) and serves `/positions/<account>/manage` and `/account/<account>/health`. Note: `scan_for_opportunities` referenced in the API is not implemented—avoid using `/scan` until it exists.
+
+---
+
+## 🤝 Contributing
+
+- Start with `AGENTS.md` for a compact contributor playbook covering structure, workflows, and PR expectations.
+- Use feature branches and keep commits focused; note new environment variables and manual validation steps in each PR.
+- When proposing larger changes (new strategies, schedulers, or external integrations), open a draft PR early and tag reviewers in `AGENTS.md`’s contact guidance if applicable.
+
+---
+
 ## 📚 Additional Notes and References
 
 *   **ProjectX API Documentation**: For detailed information on ProjectX API endpoints, authentication, and capabilities, refer to the official ProjectX Gateway API documentation (e.g., `https://gateway.docs.projectx.com/docs/intro` - always check for the most current link from your provider).
@@ -462,7 +486,5 @@ The developers and contributors of this software assume no liability for any fin
 ---
 
 <sup>MIT License</sup>
-
-
 
 
