@@ -20,6 +20,45 @@ This project implements a Python-based webhook designed to receive trading alert
 
 ---
 
+## 🚀 Quick Start
+
+1. **Copy the environment template**
+   ```bash
+   cp env.example .env
+   ```
+2. **Create & activate a virtual environment, then install dependencies**
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # On Windows use "venv\\Scripts\\activate"
+   pip install -r requirements.txt
+   ```
+3. **Launch the webhook service**
+   ```bash
+   python tradingview_projectx_bot.py
+   ```
+4. **Verify the service is listening**
+   ```bash
+   curl http://localhost:5000/healthz
+   ```
+   A JSON payload containing `{"status": "ok"}` confirms the Flask app is running and reporting Chicago timestamps.【F:tradingview_projectx_bot.py†L99-L118】
+5. **Send a sample webhook** (replace `WEBHOOK_SECRET` with your `.env` secret):
+   ```bash
+   curl -X POST http://localhost:5000/webhook \
+     -H "Content-Type: application/json" \
+     -d '{
+       "secret": "WEBHOOK_SECRET",
+       "strategy": "brackmod",
+       "signal": "BUY",
+       "symbol": "MES",
+       "size": 1
+     }'
+   ```
+   The endpoint immediately returns `202 Accepted` while trade handling continues on a background thread.【F:tradingview_projectx_bot.py†L113-L140】
+
+Once those steps succeed you can point TradingView alerts at the `/webhook` endpoint and begin iterating on strategies or AI-assisted routing.
+
+---
+
 ## Core Functionality
 
 The bot operates as a webhook service, processing signals from TradingView to execute trades on ProjectX. Key functionalities include:
@@ -162,6 +201,31 @@ For a production environment, it's recommended to use a more robust WSGI server 
 
 ---
 
+## 🔌 Service Endpoints
+
+The Flask app exposes several helper endpoints in addition to the primary `/webhook` hook. All JSON requests that change state must include the same `secret` you configured in `.env`.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/healthz` | Lightweight uptime probe returning the bot status and current Chicago timestamp.【F:tradingview_projectx_bot.py†L99-L112】 |
+| `POST` | `/webhook` | TradingView/n8n alert ingestion. Returns immediately while the trade executes asynchronously.【F:tradingview_projectx_bot.py†L113-L141】 |
+| `GET` | `/positions/summary` | Aggregated view of all configured accounts, including market price, open exposure, and cumulative P&L.【F:tradingview_projectx_bot.py†L248-L331】 |
+| `GET` | `/positions` | Raw ProjectX position snapshot for every account (mirrors `api.get_all_positions_summary`).【F:tradingview_projectx_bot.py†L332-L347】 |
+| `GET` | `/positions/&lt;account&gt;` | Position plus health metrics for a single friendly account key (e.g., `eval`).【F:tradingview_projectx_bot.py†L348-L382】 |
+| `POST` | `/positions/&lt;account&gt;/manage` | Returns enriched context so an AI agent can decide what to do with an open position. Requires the webhook secret.【F:tradingview_projectx_bot.py†L383-L421】 |
+| `POST` | `/scan` | Calls `PositionManager.scan_for_opportunities`; currently a stub until the scanner is implemented, so expect empty payloads.【F:tradingview_projectx_bot.py†L422-L456】 |
+| `GET` | `/account/&lt;account&gt;/health` | Daily P&L, win-rate, and configured risk guard rails for the chosen account.【F:tradingview_projectx_bot.py†L457-L482】 |
+| `GET` | `/market` | Latest market regime summary plus the detected trading session.【F:tradingview_projectx_bot.py†L483-L514】 |
+| `POST` | `/autonomous/toggle` | Placeholder toggle for hands-free trading modes; currently echoes the requested flag.【F:tradingview_projectx_bot.py†L515-L540】 |
+| `GET` | `/positions/realtime` | Real-time P&L snapshot for every account using the latest market price feed.【F:tradingview_projectx_bot.py†L541-L606】 |
+| `GET` | `/position-context/&lt;account&gt;` | Convenience endpoint exposing the same AI context without triggering suggestions.【F:tradingview_projectx_bot.py†L607-L636】 |
+| `GET` | `/contracts/&lt;symbol&gt;` | Lists available ProjectX contracts for a given symbol and highlights the active one.【F:tradingview_projectx_bot.py†L637-L669】 |
+| `GET` | `/contracts/current` | Returns cached active contracts for the symbols defined in code (MES/ES/NQ/MNQ).【F:tradingview_projectx_bot.py†L670-L688】 |
+
+These routes make it easy to wire dashboards, cron jobs, or external tooling around the bot without touching TradingView.
+
+---
+
 ## 📡 Webhook Data Format
 
 The bot expects a JSON payload on the `/webhook` endpoint. This payload contains the necessary information to execute a trade or manage positions.
@@ -283,7 +347,6 @@ PROJECTX_ACCOUNT_ID= # Optional: Specify default account ID
 
 ---
 
-## 🌐 Nginx Setup for Reverse Proxy and SSL
 ## 🌐 Nginx Setup for Reverse Proxy and SSL
 
 For production, you should run the Flask app behind Nginx, which will handle HTTPS and proxy requests to Gunicorn.
@@ -423,7 +486,6 @@ To send alerts from TradingView to your bot:
 
 3.  **Reload systemd, Enable and Start the Service**:
 
-   ```bash
     ```bash
     sudo systemctl daemon-reload
     sudo systemctl enable tradingview_bot.service
@@ -432,6 +494,18 @@ To send alerts from TradingView to your bot:
     # To see logs:
     # sudo journalctl -u tradingview_bot.service -f
     ```
+
+---
+
+## 🔁 Background Jobs & Automation
+
+`scheduler.py` wires APScheduler into the Flask app so routine hygiene tasks happen without manual input:
+
+- **5-minute candle watcher** – Triggers fresh chart downloads via n8n for several timeframes, clears stale regime cache entries, and pings the webhook once the updates land. Skips the window where accounts must be flat before the session close.【F:scheduler.py†L22-L97】
+- **Quarter-hour market analysis** – Pulls the consolidated regime snapshot, logging warnings when risk is elevated (e.g., choppy conditions above 80% confidence).【F:scheduler.py†L99-L131】
+- **Two-minute position monitor** – Re-uses `PositionManager` to log open exposure, flag deep losses, and highlight stale trades across all configured accounts.【F:scheduler.py†L133-L177】
+
+Feel free to extend these jobs—just ensure they respect the `in_get_flat` guardrails to avoid unwanted trades in restricted time blocks.【F:scheduler.py†L36-L44】【F:scheduler.py†L74-L90】
 
 ---
 
