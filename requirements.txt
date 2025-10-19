@@ -7,3 +7,5 @@ gunicorn
 python-dateutil
 signalrcore
 supabase
+flask-cors
+numpy

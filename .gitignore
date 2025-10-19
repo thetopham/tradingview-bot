@@ -1,0 +1,32 @@
+# --- Python / build ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+
+# --- Virtual envs ---
+.venv/
+venv/
+
+# --- Local env files ---
+.env
+.env.*
+
+# --- Logs (rotating) ---
+*.log
+*.log.*
+# default runtime log path noted in code
+tradingview_projectx_bot.log*
+/tmp/tradingview_projectx_bot.log*
+
+# --- Editors / OS ---
+.DS_Store
+.idea/
+.vscode/
+
+# --- Local data / cache ---
+*.sqlite
+*.db
+.cache/
