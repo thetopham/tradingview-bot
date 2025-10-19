@@ -84,6 +84,21 @@ The bot operates as a webhook service, processing signals from TradingView to ex
 
 ---
 
+## 🤖 AI Trading Decision Flow
+
+The AI-assisted path builds several guardrails before any order is released to ProjectX. The sequence below shows how alerts propagate from TradingView through the n8n regime workflow and back into the bot:
+
+1. **Alert intake & async dispatch** – The Flask webhook validates the shared secret and hands the payload to `handle_webhook_logic` on a background thread so TradingView or n8n immediately receive a `202` response.【F:tradingview_projectx_bot.py†L113-L122】
+2. **Pre-trade guardrails** – `handle_webhook_logic` normalizes the strategy, account, symbol, and size, then enforces several early exits: unknown accounts, missing contracts, manual `FLAT` commands, or time windows where trading is disallowed. It also tags the current market session and periodically logs regime snapshots for monitoring.【F:tradingview_projectx_bot.py†L671-L717】
+3. **Hybrid regime intelligence (n8n)** – AI-enabled accounts route through `ai_trade_decision_with_regime`, which first calls `fetch_multi_timeframe_analysis` using the n8n base URL. That helper aggregates 1-minute Supabase OHLC data into 5/15/30 minute bars, merges any stored chart snapshots, and falls back to live n8n `/webhook/<timeframe>` endpoints when local data is missing. All analyses are cached in Supabase to reduce duplicate n8n executions.【F:api.py†L1121-L1294】【F:api.py†L701-L1010】
+4. **Regime-aware risk filters** – The regime result drives several blocking decisions before the AI model is even called: account risk checks from `PositionManager`, entry-quality scoring that punishes choppy or low-confidence conditions, and regime rules that suppress conflicting signals (e.g., forcing HOLDs when the regime says not to trade).【F:api.py†L1140-L1205】【F:api.py†L1026-L1109】
+5. **AI adjudication & sizing** – Only after those gates does the bot send the enriched payload (regime snapshot, chart URLs, support/resistance levels, position context) to the n8n/OpenAI webhook. The returned decision is annotated with regime metadata and then clipped against regime-defined maximum size or risk-based recommendations before execution continues.【F:api.py†L1207-L1294】
+6. **Strategy execution** – If the AI authorizes a BUY/SELL, `handle_webhook_logic` overwrites the original alert with AI guidance, clears existing protective orders when appropriate, and dispatches to the configured strategy (`bracket`, `brackmod`, or `pivot`). Otherwise the trade is blocked and the reason is logged for observability.【F:tradingview_projectx_bot.py†L718-L766】
+
+The result is a closed-loop flow where TradingView alerts are tempered by a hybrid regime detector, n8n-hosted AI reasoning, and on-bot risk checks before the execution modules touch ProjectX.
+
+---
+
 ## 🛠️ Prerequisites
 
 - Python 3.8+
