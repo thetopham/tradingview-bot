@@ -15,7 +15,11 @@ from config import load_config
 from api import (
     flatten_contract, get_contract, ai_trade_decision, cancel_all_stops, 
     search_pos, get_supabase_client, search_trades, search_open,
-    get_market_conditions_summary, ai_trade_decision_with_regime
+    get_market_conditions_summary, ai_trade_decision_with_regime,
+    # Added for /contracts endpoints
+    search_contracts, get_active_contract_for_symbol_cached, 
+    get_active_contract_for_symbol,  # used in JSON response
+    CONTRACT_CACHE_DURATION
 )
 from strategies import run_bracket, run_brackmod, run_pivot
 from scheduler import start_scheduler
@@ -105,6 +109,7 @@ AUTH_LOCK = threading.Lock()
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for the dashboard
+
 # --- Health Check Route (optional, but recommended for uptime monitoring) ---
 @app.route("/healthz")
 def healthz():
@@ -119,8 +124,10 @@ def tv_webhook():
     # Respond immediately to TradingView/n8n
     Thread(target=handle_webhook_logic, args=(data,)).start()
     return jsonify(status="accepted", msg="Processing started"), 202
-    
-'''
+
+
+# --- STATIC DASHBOARD + DATA ENDPOINTS (UNCOMMENTED) ---
+
 @app.route("/")
 def serve_dashboard():
     return send_from_directory('static', 'dashboard.html')
@@ -147,36 +154,29 @@ def get_latest_ai_decision():
                 .execute()
         
         if result.data and len(result.data) > 0:
-            latest_decision = result.data[0]  # Get the FIRST item (latest)
-            
-            # Log for debugging
+            latest_decision = result.data[0]
             logging.info(f"Found AI decision with ai_decision_id: {latest_decision.get('ai_decision_id')}")
             
-            # Parse JSON string fields
+            # Parse JSON-like string fields if needed
             json_string_fields = ['urls', 'support', 'resistance', 'trend']
-            
             for field in json_string_fields:
                 if field in latest_decision and isinstance(latest_decision[field], str) and latest_decision[field]:
                     try:
-                        # Only try to parse if it looks like JSON
-                        if latest_decision[field].strip().startswith('{') or latest_decision[field].strip().startswith('['):
-                            latest_decision[field] = json.loads(latest_decision[field])
+                        txt = latest_decision[field].strip()
+                        if txt.startswith('{') or txt.startswith('['):
+                            latest_decision[field] = json.loads(txt)
                     except json.JSONDecodeError:
                         logging.warning(f"Failed to parse {field} as JSON: {latest_decision[field]}")
             
-            # Ensure numeric fields are properly typed
-            numeric_fields = ['size', 'tp1', 'tp2', 'tp3', 'sl', 'entrylimit']
-            for field in numeric_fields:
+            # Coerce numeric fields
+            for field in ['size', 'tp1', 'tp2', 'tp3', 'sl', 'entrylimit']:
                 if field in latest_decision and latest_decision[field] is not None:
                     try:
-                        if field in ['size', 'tp1', 'tp2', 'tp3', 'sl']:
-                            latest_decision[field] = int(latest_decision[field])
-                        else:  # entrylimit
-                            latest_decision[field] = float(latest_decision[field])
+                        latest_decision[field] = float(latest_decision[field])
                     except (ValueError, TypeError):
                         pass
             
-            # Add a formatted timestamp for display
+            # Add display timestamp
             if 'timestamp' in latest_decision:
                 latest_decision['formatted_timestamp'] = latest_decision['timestamp']
                 
@@ -206,7 +206,7 @@ def get_latest_analysis_all():
     try:
         supabase = get_supabase_client()
         
-        timeframes = ['5m', '15m', '1h', '1D']
+        timeframes = ['5m', '15m', '30m']  # align with your n8n workflows
         analysis_data = {}
         
         for tf in timeframes:
@@ -223,14 +223,12 @@ def get_latest_analysis_all():
                     record = result.data[0]
                     snapshot = record.get('snapshot')
                     
-                    # Parse JSON if it's a string
                     if isinstance(snapshot, str):
                         try:
                             snapshot = json.loads(snapshot)
                         except:
                             snapshot = {}
                     
-                    # Ensure we have the data we need
                     if snapshot:
                         analysis_data[tf] = snapshot
                     else:
@@ -255,7 +253,7 @@ def get_positions_summary():
         pm = PositionManager(ACCOUNTS)
         cid = get_contract('MES')
         
-        # Get current market price
+        # Current market price
         try:
             current_price, price_source = get_current_market_price(symbol="MES")
         except:
@@ -292,11 +290,9 @@ def get_positions_summary():
                     }
                 }
                 
-                # Add to total daily P&L
                 summary['total_daily_pnl'] += account_state['daily_pnl']
                 
                 if position_state['has_position']:
-                    # Calculate current P&L if we have market price
                     if current_price and position_state['entry_price']:
                         contract_multiplier = 5  # MES multiplier
                         if position_state['side'] == 'LONG':
@@ -341,7 +337,6 @@ def get_positions_summary():
                     }
                 }
         
-        # Add summary stats
         summary['summary'] = {
             'total_pnl': summary['total_unrealized_pnl'] + summary['total_realized_pnl'],
             'positions_open': summary['total_positions'],
@@ -411,10 +406,8 @@ def get_position_suggestions(account):
         pm = PositionManager(ACCOUNTS)
         cid = get_contract('MES')
         
-        # Get full context for AI
         context = pm.get_position_context_for_ai(acct_id, cid)
         
-        # Instead of managing positions, return context and suggestions
         return jsonify({
             "account": account,
             "context": context,
@@ -425,7 +418,6 @@ def get_position_suggestions(account):
     except Exception as e:
         logging.error(f"Error getting position suggestions: {e}")
         return jsonify({"error": str(e)}), 500
-
 
 @app.route("/scan", methods=["POST"])
 def scan_opportunities():
@@ -441,7 +433,9 @@ def scan_opportunities():
         opportunities = []
         
         for account_name, acct_id in ACCOUNTS.items():
-            opportunity = pm.scan_for_opportunities(acct_id, account_name)
+            # Placeholder: implement scan inside PositionManager if desired
+            # opportunity = pm.scan_for_opportunities(acct_id, account_name)
+            opportunity = None
             if opportunity:
                 opportunities.append(opportunity)
         
@@ -454,7 +448,7 @@ def scan_opportunities():
     except Exception as e:
         logging.error(f"Error scanning opportunities: {e}")
         return jsonify({"error": str(e)}), 500
-'
+
 @app.route("/account/<account>/health", methods=["GET"])
 def get_account_health(account):
     """Get account health metrics"""
@@ -468,7 +462,6 @@ def get_account_health(account):
         pm = PositionManager(ACCOUNTS)
         account_state = pm.get_account_state(acct_id)
         
-        # Add risk thresholds for context
         account_state['thresholds'] = {
             'max_daily_loss': pm.max_daily_loss,
             'profit_target': pm.profit_target,
@@ -484,26 +477,22 @@ def get_account_health(account):
     except Exception as e:
         logging.error(f"Error getting account health: {e}")
         return jsonify({"error": str(e)}), 500
-'
+
 @app.route("/market", methods=["GET"])
 def get_market_status():
     """Get current market conditions and regime"""
     try:
         summary = get_market_conditions_summary()
-        
-        # Add session info
         session_name, session_info = get_current_session()
         summary['session'] = {
             'name': session_name,
             'characteristics': session_info.get('characteristics', 'Unknown')
         }
-        
         return jsonify(summary), 200
-        
     except Exception as e:
         logging.error(f"Error getting market status: {e}")
         return jsonify({"error": str(e)}), 500
-'
+
 @app.route("/autonomous/toggle", methods=["POST"])
 def toggle_autonomous():
     """Toggle autonomous trading on/off"""
@@ -511,17 +500,12 @@ def toggle_autonomous():
         data = request.get_json()
         if data.get("secret") != WEBHOOK_SECRET:
             return jsonify(error="unauthorized"), 403
-        
         enabled = data.get("enabled", True)
-        
-        # This would need to be implemented with a global flag
-        # For now, just return status
         return jsonify({
             "autonomous_trading": enabled,
             "message": "Autonomous trading " + ("enabled" if enabled else "disabled"),
             "timestamp": datetime.now(CT).isoformat()
         }), 200
-        
     except Exception as e:
         logging.error(f"Error toggling autonomous: {e}")
         return jsonify({"error": str(e)}), 500
@@ -536,7 +520,6 @@ def get_realtime_positions():
         pm = PositionManager(ACCOUNTS)
         cid = get_contract('MES')
         
-        # Get current market price
         current_price, price_source = get_current_market_price(symbol="MES")
         
         results = {
@@ -566,14 +549,11 @@ def get_realtime_positions():
                         'targets': len(position_state['limit_orders'])
                     }
                 }
-                
-                # Add to totals
                 results['total_unrealized_pnl'] += position_state.get('unrealized_pnl', 0)
                 results['total_realized_pnl'] += position_state.get('realized_pnl', 0)
             else:
                 account_info = {'position': None}
             
-            # Add account state
             account_state = pm.get_account_state(acct_id)
             account_info['daily_stats'] = {
                 'daily_pnl': account_state['daily_pnl'],
@@ -585,7 +565,6 @@ def get_realtime_positions():
             
             results['accounts'][account_name] = account_info
         
-        # Add summary
         results['summary'] = {
             'total_pnl': results['total_unrealized_pnl'] + results['total_realized_pnl'],
             'positions_open': sum(1 for acc in results['accounts'].values() if acc['position']),
@@ -597,8 +576,6 @@ def get_realtime_positions():
     except Exception as e:
         logging.error(f"Error getting real-time positions: {e}")
         return jsonify({"error": str(e)}), 500
-
-
 
 @app.route("/position-context/<account>", methods=["GET"])
 def get_position_context(account):
@@ -625,7 +602,9 @@ def get_position_context(account):
     except Exception as e:
         logging.error(f"Error getting position context: {e}")
         return jsonify({"error": str(e)}), 500
-'''
+
+
+# --- CONTRACTS ENDPOINTS ---
 
 @app.route("/contracts/<symbol>", methods=["GET"])
 def get_symbol_contracts(symbol):
@@ -646,14 +625,12 @@ def get_symbol_contracts(symbol):
         logging.error(f"Error getting contracts: {e}")
         return jsonify({"error": str(e)}), 500
 
-
 @app.route("/contracts/current", methods=["GET"])
 def get_current_contracts():
     """Get current active contracts for configured symbols"""
     try:
-        symbols = ["MES", "ES", "NQ", "MNQ"]  # Add more as needed
+        symbols = ["MES", "ES", "NQ", "MNQ"]
         result = {}
-        
         for symbol in symbols:
             contract_id = get_active_contract_for_symbol_cached(symbol)
             if contract_id:
@@ -667,6 +644,7 @@ def get_current_contracts():
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 def handle_webhook_logic(data):
     try:
@@ -717,7 +695,6 @@ def handle_webhook_logic(data):
 
         # --- AI Overseer OR Direct Trading ---
         if acct in AI_ENDPOINTS:
-            # AI path - existing code
             ai_url = AI_ENDPOINTS[acct]
             ai_decision = ai_trade_decision_with_regime(
                 acct, strat, sig, sym, size, alert, ai_url
@@ -739,7 +716,7 @@ def handle_webhook_logic(data):
             alert = ai_decision.get("alert", alert)
             ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
         else:
-            # NON-AI ACCOUNT - Create a simple decision ID for tracking
+            # NON-AI ACCOUNT - simple decision ID for tracking
             ai_decision_id = int(time.time() * 1000) % (2**62)
             logging.info(f"Non-AI account {acct} - proceeding with manual trade")
 
@@ -768,19 +745,18 @@ def handle_webhook_logic(data):
     except Exception as e:
         import traceback
         logging.error(f"Exception in handle_webhook_logic: {e}\n{traceback.format_exc()}")
+
 '''
 def scheduled_market_analysis():
     """Run market analysis every 15 minutes"""
     try:
         summary = get_market_conditions_summary()
-        
-        # You could also send this to Supabase or Discord
         if summary['regime'] == 'choppy' and summary['confidence'] > 80:
             logging.warning("High confidence choppy market detected - be cautious!")
-            
     except Exception as e:
         logging.error(f"Error in scheduled market analysis: {e}")
 '''
+
 if __name__ == "__main__":
     try:
         authenticate()
