@@ -179,6 +179,25 @@ def search_pos(acct_id):
     logging.debug("Open positions for %s: %s", acct_id, pos)
     return pos
 
+
+def search_accounts(only_active: bool = True):
+    """
+    Returns {account_id: {"name": str, "balance": float, "canTrade": bool, "isVisible": bool}}
+    """
+    ensure_token()  # you already have this in api.py
+    payload = {"onlyActiveAccounts": bool(only_active)}
+    data = post("/api/Account/search", payload)  # existing helper in your api.py
+    out = {}
+    for a in data.get("accounts", []):
+        out[a["id"]] = {
+            "name": a.get("name"),
+            "balance": a.get("balance"),
+            "canTrade": a.get("canTrade"),
+            "isVisible": a.get("isVisible"),
+        }
+    return out
+
+
 def check_contract_rollover():
     """
     Check if contracts have rolled and update cache
