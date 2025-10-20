@@ -342,7 +342,7 @@
             50% { opacity: 0.6; }
         }
 
-        /* Position Items - More readable */
+        /* Legacy position styling kept for reference */
         .position-item {
             background: var(--bg-secondary);
             border-radius: 16px;
@@ -356,11 +356,6 @@
             transition: all 0.3s ease;
         }
 
-        .position-item:hover {
-            transform: translateX(4px);
-            box-shadow: var(--shadow-md);
-        }
-
         .position-item.long {
             border-left-color: var(--accent-green);
             background: linear-gradient(90deg, rgba(16, 185, 129, 0.1), transparent);
@@ -371,22 +366,306 @@
             background: linear-gradient(90deg, rgba(239, 68, 68, 0.1), transparent);
         }
 
-        .position-metric {
-            text-align: center;
+        /* Leaderboard */
+        .leaderboard-container {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
         }
 
-        .position-metric-label {
-            font-size: 0.875rem;
+        .leaderboard-loading,
+        .leaderboard-empty {
+            text-align: center;
+            padding: 48px 16px;
             color: var(--text-secondary);
+            font-size: 1rem;
+        }
+
+        .leaderboard-overview {
+            display: grid;
+            gap: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        }
+
+        .leaderboard-winner {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(16, 185, 129, 0.1));
+            border: 1px solid rgba(59, 130, 246, 0.4);
+            border-radius: 20px;
+            padding: 24px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .leaderboard-winner::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at top right, rgba(139, 92, 246, 0.15), transparent 55%);
+            pointer-events: none;
+        }
+
+        .leaderboard-winner h3 {
+            font-size: 0.875rem;
             text-transform: uppercase;
-            font-weight: 500;
+            letter-spacing: 1px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+
+        .leaderboard-winner .winner-name {
+            font-size: 1.75rem;
+            font-weight: 700;
             margin-bottom: 4px;
         }
 
-        .position-metric-value {
-            font-size: 1.125rem;
+        .leaderboard-winner .winner-llm {
+            color: var(--text-dim);
+            font-size: 0.95rem;
+            margin-bottom: 16px;
+        }
+
+        .winner-metrics {
+            display: grid;
+            gap: 12px;
+        }
+
+        .winner-metrics span {
+            display: block;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 2px;
+        }
+
+        .winner-metrics strong {
+            font-size: 1.35rem;
             font-weight: 700;
-            font-variant-numeric: tabular-nums;
+        }
+
+        .leaderboard-metrics {
+            display: grid;
+            gap: 16px;
+        }
+
+        .leaderboard-metric {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 20px;
+        }
+
+        .leaderboard-metric span {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            letter-spacing: 0.8px;
+        }
+
+        .leaderboard-metric strong {
+            display: block;
+            margin-top: 8px;
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .leaderboard-cards {
+            display: grid;
+            gap: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        }
+
+        .model-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .model-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.04), transparent 60%);
+            pointer-events: none;
+        }
+
+        .model-rank-badge {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            font-weight: 700;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .model-card-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .model-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            display: grid;
+            place-items: center;
+            font-size: 1.5rem;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .model-name {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .model-subtitle {
+            color: var(--text-dim);
+            font-size: 0.85rem;
+        }
+
+        .model-metrics {
+            display: grid;
+            gap: 8px;
+            margin-bottom: 12px;
+            font-size: 0.9rem;
+        }
+
+        .model-metrics span {
+            color: var(--text-secondary);
+            margin-right: 6px;
+        }
+
+        .model-bar {
+            height: 6px;
+            border-radius: 999px;
+            background: rgba(148, 163, 184, 0.2);
+            overflow: hidden;
+        }
+
+        .model-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-green), var(--accent-blue));
+            border-radius: inherit;
+            transition: width 0.6s ease;
+        }
+
+        .leaderboard-table-wrapper {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            overflow: hidden;
+        }
+
+        .leaderboard-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.95rem;
+        }
+
+        .leaderboard-table thead {
+            background: rgba(30, 41, 59, 0.6);
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            font-size: 0.75rem;
+        }
+
+        .leaderboard-table th,
+        .leaderboard-table td {
+            padding: 16px 18px;
+            text-align: left;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+        }
+
+        .leaderboard-table tbody tr:hover {
+            background: rgba(59, 130, 246, 0.08);
+        }
+
+        .leaderboard-model-cell {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .leaderboard-model-rank {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            background: rgba(59, 130, 246, 0.15);
+            color: var(--accent-blue);
+            font-weight: 600;
+        }
+
+        .leaderboard-model-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .leaderboard-model-sub {
+            color: var(--text-dim);
+            font-size: 0.8rem;
+        }
+
+        .position-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: rgba(59, 130, 246, 0.1);
+            font-size: 0.8rem;
+        }
+
+        .position-tag.positive {
+            background: rgba(16, 185, 129, 0.12);
+            color: var(--accent-green);
+        }
+
+        .position-tag.negative {
+            background: rgba(239, 68, 68, 0.12);
+            color: var(--accent-red);
+        }
+
+        .position-tag.neutral {
+            background: rgba(148, 163, 184, 0.15);
+            color: var(--text-secondary);
+        }
+
+        .risk-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .risk-low {
+            background: rgba(16, 185, 129, 0.12);
+            color: var(--accent-green);
+        }
+
+        .risk-medium {
+            background: rgba(245, 158, 11, 0.12);
+            color: var(--accent-orange);
+        }
+
+        .risk-high {
+            background: rgba(239, 68, 68, 0.12);
+            color: var(--accent-red);
+        }
+
+        .risk-unknown {
+            background: rgba(148, 163, 184, 0.15);
+            color: var(--text-secondary);
         }
 
         /* AI Signal - More prominent */
@@ -1049,12 +1328,14 @@
                             <svg class="card-icon" fill="currentColor" viewBox="0 0 20 20">
                                 <path d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2a2 2 0 002-2V5a1 1 0 000-2H3z"/>
                             </svg>
-                            Positions & Account Health
+                            LLM Overseer Leaderboard
                         </h2>
+                        <span id="leaderboard-timestamp" class="text-small text-dim">--</span>
                     </div>
-                    <div id="positions-content" style="max-height: 400px; overflow-y: auto;">
-                        <div style="text-align: center; padding: 40px;">
-                            <div class="spinner"></div>
+                    <div id="positions-content" class="leaderboard-container">
+                        <div class="leaderboard-loading">
+                            <div class="spinner" style="margin-bottom: 12px;"></div>
+                            <p class="text-small text-dim">Loading leaderboard...</p>
                         </div>
                     </div>
                 </div>
@@ -1195,6 +1476,46 @@
          const REFRESH_INTERVAL = 5000;
          const ALERT_DURATION = 8000;
          const SOUND_ENABLED_KEY = 'trading_dashboard_sound';
+
+        const DEFAULT_MODEL_META = {
+            displayName: 'Unassigned Overseer',
+            llm: 'AI Model',
+            icon: '🤖',
+            accent: '#38bdf8'
+        };
+
+        const MODEL_METADATA = {
+            alpha: {
+                displayName: 'Claude Overseer',
+                llm: 'Anthropic Claude 3.5 Sonnet',
+                icon: '🌤️',
+                accent: '#f97316'
+            },
+            beta: {
+                displayName: 'GPT Overseer',
+                llm: 'OpenAI GPT-4.1',
+                icon: '🔷',
+                accent: '#3b82f6'
+            },
+            gamma: {
+                displayName: 'Gemini Overseer',
+                llm: 'Google Gemini 1.5 Pro',
+                icon: '🪐',
+                accent: '#8b5cf6'
+            },
+            delta: {
+                displayName: 'Grok Overseer',
+                llm: 'xAI Grok 2',
+                icon: '🚀',
+                accent: '#ef4444'
+            },
+            epsilon: {
+                displayName: 'Deepseek Overseer',
+                llm: 'Deepseek V3',
+                icon: '🧠',
+                accent: '#22c55e'
+            }
+        };
         
         // State
         let refreshTimer;
@@ -1346,78 +1667,250 @@
             }
         }
 
+        function normalizeNumber(value) {
+            if (value === null || value === undefined) return null;
+            if (typeof value === 'number') {
+                return Number.isFinite(value) ? value : null;
+            }
+            const parsed = parseFloat(value);
+            return Number.isNaN(parsed) ? null : parsed;
+        }
+
+        function getRiskClass(level) {
+            switch ((level || '').toLowerCase()) {
+                case 'low':
+                    return 'risk-low';
+                case 'medium':
+                    return 'risk-medium';
+                case 'high':
+                    return 'risk-high';
+                default:
+                    return 'risk-unknown';
+            }
+        }
+
         function updatePositionsDisplay(data) {
             const container = document.getElementById('positions-content');
-            const accounts = data.accounts || {};
-            
-            let html = '';
-            
-            Object.entries(accounts).forEach(([accountName, accountData]) => {
-                if (accountData.position) {
-                    const pos = accountData.position;
-                    const stats = accountData.daily_stats;
-                    
-                    html += `
-                        <div class="position-item ${pos.side ? pos.side.toLowerCase() : ''}">
-                            <div class="position-metric">
-                                <div class="position-metric-label">Account</div>
-                                <div class="position-metric-value">${accountName.toUpperCase()}</div>
-                            </div>
-                            <div class="position-metric">
-                                <div class="position-metric-label">Position</div>
-                                <div class="position-metric-value">${pos.size} ${pos.side || '--'}</div>
-                            </div>
-                            <div class="position-metric">
-                                <div class="position-metric-label">Entry</div>
-                                <div class="position-metric-value">$${formatPrice(pos.entry_price)}</div>
-                            </div>
-                            <div class="position-metric">
-                                <div class="position-metric-label">Current</div>
-                                <div class="position-metric-value">$${formatPrice(pos.current_price)}</div>
-                            </div>
-                            <div class="position-metric">
-                                <div class="position-metric-label">P&L</div>
-                                <div class="position-metric-value ${getValueClass(pos.total_pnl)}">
-                                    ${formatCurrency(pos.total_pnl)}
-                                </div>
-                            </div>
-                            <div class="position-metric">
-                                <div class="position-metric-label">Duration</div>
-                                <div class="position-metric-value">${pos.duration_minutes}m</div>
-                            </div>
-                            <div class="position-metric">
-                                <div class="position-metric-label">Daily P&L</div>
-                                <div class="position-metric-value ${getValueClass(stats.daily_pnl)}">
-                                    ${formatCurrency(stats.daily_pnl)}
-                                </div>
-                            </div>
-                            <div class="position-metric">
-                                <div class="position-metric-label">Win Rate</div>
-                                <div class="position-metric-value">${stats.win_rate}</div>
-                            </div>
-                            <div class="position-metric">
-                                <div class="position-metric-label">Status</div>
-                                <div class="position-metric-value ${stats.can_trade ? 'positive' : 'negative'}">
-                                    ${stats.can_trade ? 'ACTIVE' : 'LOCKED'}
-                                </div>
+            const timestampEl = document.getElementById('leaderboard-timestamp');
+            if (!container) return;
+
+            const accounts = data?.accounts || {};
+            const leaderboardRows = Object.entries(accounts).map(([accountName, accountData]) => {
+                const key = accountName.toLowerCase();
+                const meta = MODEL_METADATA[key] || DEFAULT_MODEL_META;
+
+                const balance = normalizeNumber(accountData?.balances?.balance);
+                const stats = accountData?.daily_stats || {};
+                const dailyPnl = normalizeNumber(stats.daily_pnl) ?? 0;
+                const winRateDisplay = stats.win_rate || '--';
+                const winRateValue = normalizeNumber(
+                    typeof winRateDisplay === 'string' && winRateDisplay.endsWith('%')
+                        ? winRateDisplay.replace('%', '')
+                        : winRateDisplay
+                );
+                const tradesToday = stats.trades_today ?? stats.trade_count ?? 0;
+
+                const position = accountData?.position || null;
+                const totalPnl = normalizeNumber(position?.total_pnl);
+                const realized = normalizeNumber(position?.realized_pnl) || 0;
+                const unrealized = normalizeNumber(position?.unrealized_pnl) || 0;
+                const openPnl = totalPnl !== null ? totalPnl : realized + unrealized;
+
+                return {
+                    key,
+                    meta,
+                    accountLabel: accountName.toUpperCase(),
+                    equity: balance,
+                    dailyPnl,
+                    openPnl,
+                    winRateDisplay,
+                    winRateValue,
+                    tradesToday,
+                    positionSide: position?.side || 'FLAT',
+                    positionSize: position?.size || 0,
+                    entryPrice: normalizeNumber(position?.entry_price),
+                    currentPrice: normalizeNumber(position?.current_price),
+                    riskLevel: (stats.risk_level || 'unknown').toLowerCase(),
+                    canTrade: Boolean(stats.can_trade),
+                    durationMinutes: position?.duration_minutes || null
+                };
+            });
+
+            if (!leaderboardRows.length) {
+                container.innerHTML = '<div class="leaderboard-empty">No account data available</div>';
+                if (timestampEl) timestampEl.textContent = '--';
+                return;
+            }
+
+            leaderboardRows.sort((a, b) => {
+                const equityA = a.equity ?? -Infinity;
+                const equityB = b.equity ?? -Infinity;
+                if (equityA === equityB) {
+                    return b.dailyPnl - a.dailyPnl;
+                }
+                return equityB - equityA;
+            });
+
+            const winner = leaderboardRows[0];
+            const topDaily = leaderboardRows.reduce((best, current) =>
+                current.dailyPnl > best.dailyPnl ? current : best,
+            leaderboardRows[0]);
+            const bestWinRate = leaderboardRows.reduce((best, current) => {
+                const bestRate = best.winRateValue ?? -Infinity;
+                const currentRate = current.winRateValue ?? -Infinity;
+                return currentRate > bestRate ? current : best;
+            }, leaderboardRows[0]);
+            const openPositions = typeof data.total_positions === 'number'
+                ? data.total_positions
+                : leaderboardRows.filter(row => row.positionSide && row.positionSide !== 'FLAT').length;
+            const maxEquity = Math.max(...leaderboardRows.map(row => row.equity ?? 0));
+
+            const cardsHtml = leaderboardRows.slice(0, Math.min(leaderboardRows.length, 5)).map((row, index) => {
+                const accent = row.meta.accent || DEFAULT_MODEL_META.accent;
+                const percent = maxEquity > 0 ? Math.round(((row.equity ?? 0) / maxEquity) * 100) : 0;
+                const barWidth = Math.max(8, Math.min(percent, 100));
+                return `
+                    <div class="model-card" style="border-top: 3px solid ${accent};">
+                        <div class="model-rank-badge">#${index + 1}</div>
+                        <div class="model-card-header">
+                            <div class="model-icon" style="color: ${accent}; background: rgba(148, 163, 184, 0.12);">${row.meta.icon}</div>
+                            <div>
+                                <div class="model-name">${row.meta.displayName}</div>
+                                <div class="model-subtitle">${row.meta.llm}</div>
+                                <div class="text-small text-dim">Acct ${row.accountLabel}</div>
                             </div>
                         </div>
-                    `;
-                }
-            });
-            
-            if (!html) {
-                html = '<div style="text-align: center; padding: 40px;" class="text-dim">No open positions</div>';
+                        <div class="model-metrics">
+                            <div><span>Equity</span>${formatCurrency(row.equity)}</div>
+                            <div><span>Daily P&L</span><span class="${getValueClass(row.dailyPnl)}">${formatCurrency(row.dailyPnl)}</span></div>
+                            <div><span>Open P&L</span><span class="${getValueClass(row.openPnl)}">${formatCurrency(row.openPnl)}</span></div>
+                        </div>
+                        <div class="model-bar">
+                            <div class="model-bar-fill" style="background: ${accent}; width: ${barWidth}%;"></div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            const tableRows = leaderboardRows.map((row, index) => {
+                const accent = row.meta.accent || DEFAULT_MODEL_META.accent;
+                const entryDisplay = row.entryPrice !== null ? `$${formatPrice(row.entryPrice)}` : '--';
+                const currentDisplay = row.currentPrice !== null ? `$${formatPrice(row.currentPrice)}` : '--';
+                const positionTag = row.positionSide && row.positionSide !== 'FLAT'
+                    ? `<span class="position-tag ${getValueClass(row.openPnl)}">${row.positionSide} · ${row.positionSize} @ ${entryDisplay} → ${currentDisplay} <strong>${formatCurrency(row.openPnl)}</strong></span>`
+                    : '<span class="position-tag neutral">FLAT</span>';
+                const duration = row.durationMinutes ? `${row.durationMinutes}m` : '--';
+                const riskBadge = `<span class="risk-badge ${getRiskClass(row.riskLevel)}">${row.riskLevel.toUpperCase()}</span>`;
+                const statusBadge = `<span class="risk-badge ${row.canTrade ? 'risk-low' : 'risk-high'}">${row.canTrade ? 'ACTIVE' : 'LOCKED'}</span>`;
+
+                return `
+                    <tr>
+                        <td>
+                            <div class="leaderboard-model-cell">
+                                <div class="leaderboard-model-rank" style="background: ${accent}1f; color: ${accent};">${index + 1}</div>
+                                <div class="leaderboard-model-info">
+                                    <div class="model-name">${row.meta.displayName}</div>
+                                    <div class="leaderboard-model-sub">${row.meta.llm}</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td>${row.accountLabel}</td>
+                        <td>${formatCurrency(row.equity)}</td>
+                        <td class="${getValueClass(row.dailyPnl)}">${formatCurrency(row.dailyPnl)}</td>
+                        <td class="${getValueClass(row.openPnl)}">${formatCurrency(row.openPnl)}</td>
+                        <td>${row.winRateDisplay}</td>
+                        <td>${row.tradesToday}</td>
+                        <td>${positionTag}</td>
+                        <td>${riskBadge}</td>
+                        <td>${statusBadge}</td>
+                        <td>${duration}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            container.innerHTML = `
+                <div class="leaderboard-overview">
+                    <div class="leaderboard-winner" style="border-color: ${winner.meta.accent};">
+                        <h3>Winning Model</h3>
+                        <div class="winner-name">${winner.meta.displayName}</div>
+                        <div class="winner-llm">${winner.meta.llm}</div>
+                        <div class="text-small text-dim" style="margin-bottom: 8px;">Account ${winner.accountLabel}</div>
+                        <div class="winner-metrics">
+                            <div>
+                                <span>Total Equity</span>
+                                <strong>${formatCurrency(winner.equity)}</strong>
+                            </div>
+                            <div>
+                                <span>Daily P&L</span>
+                                <strong class="${getValueClass(winner.dailyPnl)}">${formatCurrency(winner.dailyPnl)}</strong>
+                            </div>
+                            <div>
+                                <span>Open P&L</span>
+                                <strong class="${getValueClass(winner.openPnl)}">${formatCurrency(winner.openPnl)}</strong>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="leaderboard-metrics">
+                        <div class="leaderboard-metric">
+                            <span>Top Daily P&L</span>
+                            <strong>${topDaily.meta.displayName} · ${formatCurrency(topDaily.dailyPnl)}</strong>
+                            <div class="text-small text-dim">Win Rate: ${topDaily.winRateDisplay}</div>
+                        </div>
+                        <div class="leaderboard-metric">
+                            <span>Best Win Rate</span>
+                            <strong>${bestWinRate.meta.displayName} · ${bestWinRate.winRateDisplay}</strong>
+                            <div class="text-small text-dim">Trades Today: ${bestWinRate.tradesToday}</div>
+                        </div>
+                        <div class="leaderboard-metric">
+                            <span>Exposure</span>
+                            <strong>${openPositions} ${openPositions === 1 ? 'open position' : 'open positions'}</strong>
+                            <div class="text-small text-dim">Total Daily P&L: ${formatCurrency(data.total_daily_pnl || 0)}</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="leaderboard-cards">
+                    ${cardsHtml}
+                </div>
+                <div class="leaderboard-table-wrapper">
+                    <table class="leaderboard-table">
+                        <thead>
+                            <tr>
+                                <th>Model</th>
+                                <th>Account</th>
+                                <th>Equity</th>
+                                <th>Daily P&amp;L</th>
+                                <th>Open P&amp;L</th>
+                                <th>Win Rate</th>
+                                <th>Trades</th>
+                                <th>Position</th>
+                                <th>Risk</th>
+                                <th>Status</th>
+                                <th>Duration</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tableRows}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            if (timestampEl) {
+                timestampEl.textContent = data.timestamp ? formatTime(data.timestamp) : '--';
             }
-            
-            container.innerHTML = html;
         }
 
         function updateQuickStats(data) {
-            const dailyPnl = data.total_daily_pnl || 0;
+            const totalEquityValue = normalizeNumber(data.total_equity);
+            const equityEl = document.getElementById('total-equity');
+            if (equityEl) {
+                equityEl.textContent = totalEquityValue !== null ? formatCurrency(totalEquityValue) : '--';
+            }
+
+            const dailyPnl = normalizeNumber(data.total_daily_pnl) || 0;
             document.getElementById('daily-pnl').textContent = formatCurrency(dailyPnl);
             document.getElementById('daily-pnl').className = `stat-value ${getValueClass(dailyPnl)}`;
-            
+
             document.getElementById('open-positions').textContent = data.total_positions || 0;
             
             let totalWinRate = 0;
