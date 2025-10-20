@@ -37,6 +37,7 @@ from supabase import create_client
 setup_logging()
 config = load_config()
 
+
 TV_PORT         = config['TV_PORT']
 WEBHOOK_SECRET  = config['WEBHOOK_SECRET']
 ACCOUNTS        = config['ACCOUNTS']
@@ -45,10 +46,15 @@ CT              = config['CT']
 GET_FLAT_START  = config['GET_FLAT_START']
 GET_FLAT_END    = config['GET_FLAT_END']
 
-AI_ENDPOINTS = {
-    "epsilon": config['N8N_AI_URL'],
-    "beta": config['N8N_AI_URL'],
-}
+AI_ENDPOINTS = config['AI_ENDPOINTS']
+
+def ai_url_for(account_name: str) -> str:
+    url = AI_ENDPOINTS.get(account_name)
+    if not url:
+        raise RuntimeError(
+            f"No AI endpoint for account '{account_name}'. Known: {list(AI_ENDPOINTS)}"
+        )
+    return url
 
 MARKET_SESSIONS = {
     'ASIAN': {
