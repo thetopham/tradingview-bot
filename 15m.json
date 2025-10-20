@@ -21,8 +21,8 @@
       "name": "Set 'response' value",
       "type": "n8n-nodes-base.set",
       "position": [
-        1160,
-        60
+        1168,
+        64
       ],
       "typeVersion": 3.3
     },
@@ -41,11 +41,11 @@
             },
             {
               "name": "tradingview-session-id",
-              "value": "3mj0z4rbt80q53ph30p82i1pu9k91vh7"
+              "value": "evm7y2hq9bq02v90hqp5i49ebh0wp9oi"
             },
             {
               "name": "tradingview-session-id-sign",
-              "value": "v3:hv1B6jvs2MSGaLCIPXxIsuPkoR73HOmY2ajBU7KNvBE="
+              "value": "v3:/v1bB08jupQzyOcA7spvXbHLyoLUfVyo5U7WaFa+u3g="
             }
           ]
         },
@@ -76,8 +76,8 @@
       "name": "Tradingview Chart",
       "type": "n8n-nodes-base.httpRequest",
       "position": [
-        580,
-        60
+        592,
+        64
       ],
       "typeVersion": 4.2,
       "retryOnFail": true,
@@ -100,7 +100,7 @@
       "type": "n8n-nodes-base.stickyNote",
       "position": [
         -640,
-        40
+        48
       ],
       "typeVersion": 1
     },
@@ -112,8 +112,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        920,
-        60
+        928,
+        64
       ],
       "id": "4242ef46-516a-4033-b09b-c8f75fe1d3be",
       "name": "HTTP Request"
@@ -121,7 +121,7 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "5m",
+        "path": "15m",
         "responseMode": "responseNode",
         "options": {}
       },
@@ -129,7 +129,7 @@
       "typeVersion": 2,
       "position": [
         0,
-        60
+        64
       ],
       "id": "e4259c91-3bd0-445d-92c9-9a8c8684abe2",
       "name": "Webhook",
@@ -140,8 +140,8 @@
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        20,
-        260
+        32,
+        272
       ],
       "id": "e0a378f3-f789-4f8e-8267-d72fa309fefa",
       "name": "When clicking ‘Test workflow’"
@@ -154,7 +154,7 @@
       "typeVersion": 1.1,
       "position": [
         0,
-        -140
+        -144
       ],
       "id": "493e1a07-716b-4012-b780-537a83876bdd",
       "name": "When Executed by Another Workflow"
@@ -162,7 +162,7 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "=You are an expert day trading analyst for the Micro E-mini S&P 500 (MES).\n\nAnalyze the attached chart image for the 15m timeframe.\nFirst, determine the market regime, then generate your trade signal and context using only information visible in the chart. ALWAYS consider higher timeframe trends when provided.\n\nStep 1: Market Regime & Trend Assessment\n- Classify the current market regime:\n  - strong_trend: Price making clear higher highs/lows (uptrend) or lower highs/lows (downtrend).\n  - weak_trend: Trend is losing momentum, pullbacks deeper, more divergences.\n  - range: Price bouncing between defined support and resistance.\n  - breakout: Sudden expansion beyond prior range or support/resistance.\n- Identify trend direction: up, down, or sideways.\n- If you are given higher timeframe context (e.g., from 1h, 4h), factor it in and avoid fading strong higher timeframe trends.\n\nStep 2: Signal Generation (Regime-Specific Logic)\n- If strong trend:\n  - Signal = trade WITH the trend on pullbacks to support/resistance/moving average.\n  - Ignore minor divergences unless confirmed by multiple timeframes.\n  - Only reverse on major exhaustion signals (e.g., strong divergence + momentum shift + major S/R rejection).\n- If weak/mature trend:\n  - Watch divergences closely.\n  - Consider counter-trend scalps at extremes.\n  - Tighten stops on trend trades.\n- If range/chop:\n  - Signal = fade extremes (buy support, sell resistance).\n  - Divergences are HIGH VALUE here.\n  - HOLD if price is in the middle of the range.\n- If breakout:\n  - Only trade in breakout direction after confirmation.\n  - Avoid fading unless breakout fails and price returns inside range.\n\nStep 3: Extract Visible Data (Be Concise, Use Nulls if Not Shown)\n- Up to 3 major support levels (lowest to highest)\n- Up to 3 major resistance levels (lowest to highest)\n- Entry price, stop loss, up to 3 take profits, all based on visible structure (set null if not visible)\n- Current price, recent high, recent low, percent of current price through visible range (0–100)\n- Momentum: accelerating, steady, decelerating\n- Volatility: high, medium, low (if visible)\n- Indicators (from chart):\n  - ATR Crayon: bullish/bearish/neutral/not_shown\n  - FSVZO: above_zero/below_zero/neutral/not_shown\n  - Phobos: positive_momentum/negative_momentum/neutral/not_shown\n  - Fisher: bullish_divergence/bearish_divergence/neutral/not_shown\n- Candle pattern: hammer, doji, engulfing, none (or not_shown)\n- Volume trend: increasing, decreasing, flat, not_shown\n\nStep 4: Provide Context & Reason\n- Brief price action summary (1-2 sentences)\n- Clearly explain your signal in context of regime, trend, indicators, and price action\n- List any major risk factors (e.g., \"Breakout is extended and at resistance; reversal risk if rejected.\")\n- Always include the chart URL\n\nFormatting\n- Use only information from the visible chart image and provided context.\n- If a data field is not visible, use null or \"not_shown\" as appropriate.\n- Respond with valid JSON only—no extra commentary, no markdown.\n\nJSON Output:\n{\n  \"timeframe\": \"15m\",\n  \"market_regime\": \"strong_trend|weak_trend|range|breakout\",\n  \"trend_direction\": \"up|down|sideways\",\n  \"trend_strength\": \"strong|moderate|weak|exhausted\",\n  \"signal\": \"BUY|SELL|HOLD\",\n  \"signal_type\": \"trend_continuation|reversal|range_fade|breakout\",\n  \"signal_confidence\": \"high|medium|low\",\n  \"entrylimit\": <float|null>,\n  \"tp1\": <float|null>,\n  \"tp2\": <float|null>,\n  \"tp3\": <float|null>,\n  \"sl\": <float|null>,\n  \"support\": [<float|null>, <float|null>, <float|null>],\n  \"resistance\": [<float|null>, <float|null>, <float|null>],\n  \"trade_location\": \"pullback|breakout|extreme|middle\",\n  \"current_price\": <float|null>,\n  \"recent_high\": <float|null>,\n  \"recent_low\": <float|null>,\n  \"percent_of_range\": <float 0-100|null>,\n  \"momentum\": \"accelerating|steady|decelerating|not_shown\",\n  \"momentum_alignment\": \"with_trend|against_trend|neutral|not_shown\",\n  \"volatility\": \"high|medium|low|not_shown\",\n  \"range_size\": <float|null>,\n  \"indicators\": {\n    \"ATR_crayon\": \"bullish|bearish|neutral|not_shown\",\n    \"FSVZO\": \"above_zero|below_zero|neutral|not_shown\",\n    \"Phobos\": \"positive_momentum|negative_momentum|neutral|not_shown\",\n    \"Fisher\": \"bullish_divergence|bearish_divergence|neutral|not_shown\"\n  },\n  \"candle_pattern\": \"hammer|doji|engulfing|none|not_shown\",\n  \"volume_trend\": \"increasing|decreasing|flat|not_shown\",\n  \"price_action_summary\": \"<1-2 sentences, price action recap>\",\n  \"setup_detected\": \"<pattern|none|not_shown>\",\n  \"reason\": \"<concise regime-driven explanation of your signal and trade idea>\",\n  \"risk_factors\": [\"<what could invalidate this signal>\"],\n  \"chart_time\": \"{{ $now }}\",\n  \"url\": \"{{ $json.response }}\"\n}\n",
+        "text": "=You are an expert day trading analyst for the Micro E-mini S&P 500 (MES).\n\nAnalyze the attached chart image for the 15m timeframe using a DUAL PERSPECTIVE approach.\n\nCRITICAL INSTRUCTION: Different aspects require different time windows:\n- Trend Direction: Focus on the LAST 8-10 candles (rightmost 20% of chart)\n- Support/Resistance: Use ENTIRE visible chart\n- Momentum: Last 5-6 candles\n- Trade Signals: Last 3-4 candles\n\nStep 1: Market Regime & Trend Assessment (RECENT ACTION FOCUS)\n- FOR TREND DIRECTION, analyze ONLY the last 8-10 candles:\n  - If price range of last 8 candles < 0.15% of current price = SIDEWAYS\n  - If price range of last 8 candles < 10 points = SIDEWAYS\n  - Recent action OVERRIDES historical trend patterns\n  \n- Classify the current market regime based on RECENT action:\n  - strong_trend: RECENT candles making clear higher highs/lows or lower highs/lows\n  - weak_trend: RECENT trend losing momentum, deeper pullbacks in last few bars\n  - range: RECENT price bouncing between levels, no directional progress\n  - breakout: RECENT expansion beyond prior range (last 3-5 candles)\n\n- Trend direction rules:\n  - up: ONLY if last 8 candles show higher highs AND higher lows\n  - down: ONLY if last 8 candles show lower highs AND lower lows  \n  - sideways: If last 8 candles are contained within a tight range OR no clear direction\n\nStep 2: Signal Generation (Based on RECENT Regime)\n- Strong trend: Trade WITH recent momentum on pullbacks\n- Weak/mature trend: Watch for exhaustion in recent candles\n- Range/chop: Fade extremes ONLY if recent action confirms\n- Breakout: Confirm with last 2-3 candles before signaling\n- If last 5+ candles show no directional progress = HOLD\n\nStep 3: Extract Data (Full Chart for Levels, Recent for Trends)\n- Support/Resistance: Use ENTIRE chart to identify major levels\n- Entry/Stop/Targets: Based on visible structure from full chart\n- Current price, recent high/low: From last 10 candles\n- Momentum: Based on last 5-6 candles ONLY\n- Range calculations: Use recent range (last 10 candles) vs daily range\n- Indicators: Current values but consider recent changes\n- Volume trend: Focus on last 5-8 bars\n\nStep 4: Context & Analysis\n- Price action summary: Emphasize what's happening NOW vs earlier\n- Signal explanation: \"Recent action shows X, despite earlier trend of Y\"\n- Risk factors: Include \"trend may be stalling\" if recent != historical\n- Distinguish between structural trend and current behavior\n\nIMPORTANT DISTINCTIONS:\n- A chart can have an UPTREND STRUCTURE but CURRENT SIDEWAYS ACTION\n- Recent sideways action = sideways trend, regardless of daily trend\n- Don't let historical price movement override current market behavior\n- If unsure between trending and sideways, default to sideways\n\nFormatting Rules:\n- Valid JSON only, no markdown\n- Use null for non-visible data\n- Be specific about timeframe references\n\nJSON Output:\n{\n  \"timeframe\": \"15m\",\n  \"market_regime\": \"strong_trend|weak_trend|range|breakout\",\n  \"trend_direction\": \"up|down|sideways\",\n  \"trend_strength\": \"strong|moderate|weak|exhausted\",\n  \"structural_bias\": \"bullish|bearish|neutral\",\n  \"recent_action\": \"trending|consolidating|reversing\",\n  \"signal\": \"BUY|SELL|HOLD\",\n  \"signal_type\": \"trend_continuation|reversal|range_fade|breakout\",\n  \"signal_confidence\": \"high|medium|low\",\n  \"entrylimit\": <float|null>,\n  \"tp1\": <float|null>,\n  \"tp2\": <float|null>,\n  \"tp3\": <float|null>,\n  \"sl\": <float|null>,\n  \"support\": [<float|null>, <float|null>, <float|null>],\n  \"resistance\": [<float|null>, <float|null>, <float|null>],\n  \"trade_location\": \"pullback|breakout|extreme|middle\",\n  \"current_price\": <float|null>,\n  \"recent_high\": <float|null>,\n  \"recent_low\": <float|null>,\n  \"recent_range\": <float|null>,\n  \"percent_of_range\": <float 0-100|null>,\n  \"momentum\": \"accelerating|steady|decelerating|flat\",\n  \"momentum_alignment\": \"with_trend|against_trend|neutral|not_shown\",\n  \"volatility\": \"high|medium|low|not_shown\",\n  \"range_size\": <float|null>,\n  \"indicators\": {\n    \"ATR_crayon\": \"bullish|bearish|neutral|not_shown\",\n    \"FSVZO\": \"above_zero|below_zero|neutral|not_shown\",\n    \"Phobos\": \"positive_momentum|negative_momentum|neutral|not_shown\",\n    \"Fisher\": \"bullish_divergence|bearish_divergence|neutral|not_shown\"\n  },\n  \"candle_pattern\": \"hammer|doji|engulfing|none|not_shown\",\n  \"volume_trend\": \"increasing|decreasing|flat|not_shown\",\n  \"price_action_summary\": \"<1-2 sentences focusing on RECENT action>\",\n  \"setup_detected\": \"<pattern|none|not_shown>\",\n  \"reason\": \"<explain signal based on RECENT action, note if differs from structural trend>\",\n  \"risk_factors\": [\"<what could invalidate this signal>\"],\n  \"trend_conflict\": \"<note if recent trend differs from structural trend>\",\n  \"chart_time\": \"{{ $now }}\",\n  \"url\": \"{{ $json.response }}\"\n}",
         "messages": {
           "messageValues": [
             {
@@ -175,8 +175,8 @@
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.6,
       "position": [
-        1400,
-        60
+        1408,
+        64
       ],
       "id": "b6b9125e-cae9-4be5-8428-95e9dd883476",
       "name": "Basic LLM Chain"
@@ -185,17 +185,17 @@
       "parameters": {
         "model": {
           "__rl": true,
-          "value": "chatgpt-4o-latest",
+          "value": "gpt-5-chat-latest",
           "mode": "list",
-          "cachedResultName": "chatgpt-4o-latest"
+          "cachedResultName": "gpt-5-chat-latest"
         },
         "options": {}
       },
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.2,
       "position": [
-        1420,
-        280
+        1344,
+        304
       ],
       "id": "63fce656-98b1-48be-89ab-5c099939a232",
       "name": "OpenAI Chat Model",
@@ -208,15 +208,14 @@
     },
     {
       "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ $json.text }}",
+        "respondWith": "allIncomingItems",
         "options": {}
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.2,
       "position": [
-        2140,
-        -20
+        2144,
+        -16
       ],
       "id": "f2bc1310-3638-4e78-b3db-c1a7bd32774f",
       "name": "Respond to Webhook1"
@@ -229,8 +228,8 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        2140,
-        200
+        2160,
+        144
       ],
       "id": "722dfaff-e2e6-47a5-a314-cd668a2f17fe",
       "name": "Supabase3",
@@ -248,8 +247,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1820,
-        60
+        1808,
+        64
       ],
       "id": "3101e872-4103-4a66-ab78-40c9923f8cb4",
       "name": "Code1"
@@ -277,7 +276,7 @@
           "fieldValues": [
             {
               "fieldId": "snapshot",
-              "fieldValue": "={{ $('Basic LLM Chain').item.json.text }}"
+              "fieldValue": "={{ $json }}"
             },
             {
               "fieldId": "timestamp",
@@ -289,8 +288,8 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        2140,
-        400
+        2192,
+        352
       ],
       "id": "f8c3a2c0-e2d7-4af3-aefb-70265bef76c8",
       "name": "Supabase1",
@@ -300,6 +299,21 @@
           "name": "Supabase account"
         }
       }
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2160,
+        544
+      ],
+      "id": "af7cd05d-fe84-4cb1-884e-39565c7267e7",
+      "name": "Edit Fields"
     }
   ],
   "pinData": {},
@@ -409,6 +423,11 @@
             "node": "Supabase1",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -418,7 +437,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "0b1acc1e-e062-4986-90d7-295d56299a41",
+  "versionId": "80986523-9e6b-4d3c-a234-2f202bce9e84",
   "meta": {
     "instanceId": "9783a33f8d5600da0ff08d35d1dc9051c104e0a37fceb74a2ffe1557dcda02bc"
   },
