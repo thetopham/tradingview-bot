@@ -199,17 +199,17 @@
       "parameters": {
         "model": {
           "__rl": true,
-          "value": "gpt-5-chat-latest",
+          "value": "gpt-5-mini",
           "mode": "list",
-          "cachedResultName": "gpt-5-chat-latest"
+          "cachedResultName": "gpt-5-mini"
         },
         "options": {}
       },
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.2,
       "position": [
-        2128,
-        240
+        2080,
+        272
       ],
       "id": "1dc69739-b906-43e7-8c4d-ef37d620ac0a",
       "name": "OpenAI Chat Model",
@@ -443,7 +443,7 @@
     "executionOrder": "v1",
     "callerPolicy": "workflowsFromSameOwner"
   },
-  "versionId": "4a7c34e7-a788-4acf-bda5-6e82f7464e1c",
+  "versionId": "dc308911-415f-41ab-a286-ed17f18b3b92",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "9783a33f8d5600da0ff08d35d1dc9051c104e0a37fceb74a2ffe1557dcda02bc"

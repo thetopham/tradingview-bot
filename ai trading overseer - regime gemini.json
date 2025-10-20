@@ -1,5 +1,5 @@
 {
-  "name": "GPT ai trading overseer - regime",
+  "name": "ai trading overseer - regime gemini",
   "nodes": [
     {
       "parameters": {
@@ -8,7 +8,7 @@
         "width": 507,
         "color": 7
       },
-      "id": "6a2649d3-45e0-42d2-a662-88f631426dac",
+      "id": "232582d5-c8d6-4f2e-b7b8-4e6db8804f4e",
       "name": "Sticky Note5",
       "type": "n8n-nodes-base.stickyNote",
       "position": [
@@ -20,7 +20,7 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "regime",
+        "path": "gemini-overseer",
         "responseMode": "responseNode",
         "options": {}
       },
@@ -30,9 +30,9 @@
         944,
         368
       ],
-      "id": "cbe7ef33-d1d7-4f3a-a929-cea67ee4bc55",
+      "id": "3b8dca2d-e3e0-431b-952e-6eeaad3664c2",
       "name": "Webhook",
-      "webhookId": "f8e1bc5e-0693-42d3-bb80-67d44a13255c"
+      "webhookId": "11c79640-c20f-4692-a075-75e0153bbb29"
     },
     {
       "parameters": {
@@ -46,7 +46,7 @@
         3360,
         192
       ],
-      "id": "d0bbf29e-e049-4231-881d-8ec8b34bbc32",
+      "id": "4d090be2-16e7-48ac-9608-08a7036d7c0d",
       "name": "Respond to Webhook"
     },
     {
@@ -64,10 +64,10 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.2,
       "position": [
-        2192,
-        592
+        2160,
+        928
       ],
-      "id": "886b4e0d-3e1f-4c65-9058-76557fe20ba1",
+      "id": "ad944afd-1d98-48d2-be62-1f0a104ebb8f",
       "name": "OpenAI Chat Model1",
       "credentials": {
         "openAiApi": {
@@ -84,7 +84,7 @@
         944,
         544
       ],
-      "id": "4ed97c80-2123-404b-b7fe-e63f606b7472",
+      "id": "6a88a68d-79d7-4828-ab89-a28950073ed4",
       "name": "When clicking ‘Test workflow’"
     },
     {
@@ -98,7 +98,7 @@
         2880,
         192
       ],
-      "id": "27a52fa0-c481-4b31-8988-bef414dfbf03",
+      "id": "8e50b749-eaaa-4142-b73f-187da79ec5e9",
       "name": "Supabase",
       "credentials": {
         "supabaseApi": {
@@ -117,7 +117,7 @@
         2608,
         192
       ],
-      "id": "79fce8f0-64c1-43c1-8400-5a21e1526198",
+      "id": "3e823f61-7c67-41fb-b8b0-96e8484a6383",
       "name": "Code"
     },
     {
@@ -130,7 +130,7 @@
         944,
         160
       ],
-      "id": "ac8a2908-2e0d-43ac-b7e6-d590a55fcb8d",
+      "id": "b1d367d4-eeab-49a8-8fb0-c58d7ed887fa",
       "name": "When Executed by Another Workflow"
     },
     {
@@ -153,21 +153,21 @@
         3152,
         192
       ],
-      "id": "8396e1bd-457a-4dfc-baf6-aa89bf7d8c2a",
+      "id": "d712cc18-8a31-41e1-98ca-e5e064d62386",
       "name": "Edit Fields"
     },
     {
       "parameters": {
-        "modelName": "models/gemini-2.5-pro-preview-05-06",
+        "modelName": "models/gemini-2.5-pro",
         "options": {}
       },
       "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
       "typeVersion": 1,
       "position": [
-        1712,
-        912
+        2160,
+        608
       ],
-      "id": "7436ceb3-c148-4d4e-90b2-b4cb2dd2dd7f",
+      "id": "2ffd2403-c67b-493b-bff4-314787d491a0",
       "name": "Google Gemini Chat Model",
       "credentials": {
         "googlePalmApi": {
@@ -194,7 +194,7 @@
         3888,
         464
       ],
-      "id": "6a38771d-824f-44b7-8ecc-0741f79e6361",
+      "id": "774d982c-75ee-42f1-99aa-6883bf44a26a",
       "retryOnFail": true,
       "credentials": {
         "googleCloudStorageOAuth2Api": {
@@ -278,7 +278,7 @@
         2944,
         480
       ],
-      "id": "6def145f-e4a5-4977-bcea-8c0f99c1892c",
+      "id": "1b4cf48b-d5f9-45ee-94b6-d779217c24c4",
       "name": "Edit Fields1"
     },
     {
@@ -289,7 +289,7 @@
         3200,
         464
       ],
-      "id": "f082f5c4-36fe-4755-994e-3ccee62f8550",
+      "id": "7891bae9-dd7c-4d06-94a1-ebddc230269d",
       "name": "Merge"
     },
     {
@@ -303,7 +303,7 @@
         3664,
         464
       ],
-      "id": "4aaf4901-b12e-4528-a65b-b8da5c8f7028",
+      "id": "baee47ce-b135-4b3e-a750-baba2cbc0bba",
       "name": "HTTP Request"
     },
     {
@@ -316,7 +316,7 @@
         3424,
         464
       ],
-      "id": "f0f13d73-0a22-4261-ab97-86beb45db488",
+      "id": "4eb517d6-0d00-4199-85ef-343942c052cc",
       "name": "Code1"
     },
     {
@@ -357,7 +357,7 @@
         4080,
         464
       ],
-      "id": "4bd02cf0-397e-4c9e-8dbe-76643e0dc4c7",
+      "id": "26a9f460-9b3c-4fa1-afa2-65649075475b",
       "name": "Edit Fields2"
     },
     {
@@ -370,7 +370,7 @@
         4288,
         464
       ],
-      "id": "7db6b6d0-332d-4e6e-9972-93e5358c82ca",
+      "id": "d105927c-ebc0-487a-bf98-ec1eb9fc6f23",
       "name": "Code2"
     },
     {
@@ -394,7 +394,7 @@
         4480,
         464
       ],
-      "id": "98036dae-0bff-48a7-baa4-64f211154d1c",
+      "id": "c98391a5-4c72-4347-a950-93810c3ba21a",
       "name": "Supabase1",
       "retryOnFail": true,
       "credentials": {
@@ -414,7 +414,7 @@
         4288,
         672
       ],
-      "id": "d1855a69-0b4f-4abb-ae9e-80acc20798b2",
+      "id": "b5bb5516-1d70-443d-a9cc-e08c282c63c1",
       "name": "Code3"
     },
     {
@@ -446,7 +446,7 @@
         4480,
         672
       ],
-      "id": "589a2285-76e6-4dea-ae42-45c6d0968a79",
+      "id": "cd110efc-fa7b-4888-93e7-2c874cc0c072",
       "name": "updates chart_analysis urls",
       "retryOnFail": true,
       "credentials": {
@@ -475,7 +475,7 @@
         2240,
         368
       ],
-      "id": "32635b42-c9fa-4dce-ba1a-eee35ee1cff9",
+      "id": "8781f61a-37c6-4894-862c-7aa27eac00cb",
       "name": "Basic LLM Chain"
     },
     {
@@ -489,7 +489,7 @@
         1968,
         368
       ],
-      "id": "a979d541-26b6-4545-b963-14229db12375",
+      "id": "13bec57b-5b1c-435f-ba24-dbc50008e9cd",
       "name": "HTTP Request1"
     },
     {
@@ -508,7 +508,7 @@
         1552,
         912
       ],
-      "id": "10a61d2c-1aa5-4cd7-9666-e0681a035a00",
+      "id": "3ab69285-9689-4564-89dc-a895eb33da13",
       "name": "Anthropic Chat Model",
       "credentials": {
         "anthropicApi": {
@@ -536,7 +536,7 @@
         1312,
         368
       ],
-      "id": "afd78529-9b5e-4991-a5f0-5fafe78ccfaf",
+      "id": "fff5fbee-a3ee-4505-a10b-22524f515f65",
       "name": "15m",
       "credentials": {
         "supabaseApi": {
@@ -564,7 +564,7 @@
         1728,
         368
       ],
-      "id": "f77218ec-0c78-4e22-8991-6030c5c42d7b",
+      "id": "88aab776-f6cc-4bce-bf2f-9d13cec5502d",
       "name": "5m",
       "credentials": {
         "supabaseApi": {
@@ -592,7 +592,7 @@
         1504,
         368
       ],
-      "id": "51f1a687-e1ce-4536-aacc-fd8d5137bbde",
+      "id": "4b7937e4-3faf-488d-b3a1-5188069b6397",
       "name": "30m",
       "credentials": {
         "supabaseApi": {
@@ -612,7 +612,7 @@
         1872,
         912
       ],
-      "id": "edca6241-4cab-4c4e-a116-ae91d3c4d679",
+      "id": "0361cb7b-5f6b-4c56-84d3-780f7ef364e2",
       "name": "xAI Grok Chat Model",
       "credentials": {
         "xAiApi": {
@@ -631,7 +631,7 @@
         2016,
         912
       ],
-      "id": "ffff900b-b94f-45a3-a3b6-cacc6a51869b",
+      "id": "6693ff0a-1b3e-44c8-91f7-c6192c98416b",
       "name": "DeepSeek Chat Model",
       "credentials": {
         "deepSeekApi": {
@@ -641,182 +641,7 @@
       }
     }
   ],
-  "pinData": {
-    "Webhook": [
-      {
-        "json": {
-          "headers": {
-            "host": "n8n.thetopham.com",
-            "user-agent": "python-requests/2.32.5",
-            "content-length": "2690",
-            "accept": "*/*",
-            "accept-encoding": "gzip, deflate",
-            "content-type": "application/json",
-            "via": "1.1 Caddy",
-            "x-forwarded-for": "143.198.99.69",
-            "x-forwarded-host": "n8n.thetopham.com",
-            "x-forwarded-proto": "https"
-          },
-          "params": {},
-          "query": {},
-          "body": {
-            "account": "epsilon",
-            "strategy": "pivot",
-            "signal": "BUY",
-            "symbol": "MES",
-            "size": 2,
-            "alert": "ATR crayon 1m LONG",
-            "market_analysis": {
-              "regime": "ranging",
-              "confidence": 55,
-              "supporting_factors": [
-                "Better trend alignment (100%)",
-                "3/3 sideways trends",
-                "Range-bound market"
-              ],
-              "risk_level": "medium",
-              "trend_details": {
-                "primary_trend": "sideways",
-                "alignment_score": 100,
-                "is_aligned": true,
-                "has_conflict": false,
-                "trends_by_timeframe": {
-                  "5m": "sideways",
-                  "15m": "sideways",
-                  "30m": "sideways"
-                },
-                "higher_tf_agreement": true,
-                "trend_strength": "strong",
-                "fast_vs_slow": "aligned"
-              },
-              "volatility_details": {
-                "volatility_regime": "low",
-                "range_percent": 0.2,
-                "is_expanding": false,
-                "is_contracting": true,
-                "intraday_atr": 10
-              },
-              "momentum_details": {
-                "average_momentum_score": 87.5,
-                "momentum_state": "strong",
-                "bullish_indicators": 0,
-                "bearish_indicators": 0,
-                "indicator_bias": "neutral",
-                "divergence_present": false,
-                "momentum_quality": "good"
-              }
-            },
-            "regime_rules": {
-              "preferred_signal": "BOTH",
-              "avoid_signal": null,
-              "stop_loss_multiplier": 0.75,
-              "take_profit_multiplier": 1,
-              "max_position_size": 2,
-              "entry_confirmation_required": true,
-              "preferred_entry": "range_extremes"
-            },
-            "timeframe_signals": {
-              "5m": "HOLD",
-              "15m": "BUY",
-              "30m": "BUY"
-            },
-            "chart_urls": {
-              "5m": {
-                "url": "https://r2.chart-img.com/20251118/tradingview/layout-chart/80db7379-e36e-4e56-9a60-6539f32e3335.jpeg",
-                "chart_time": "2025-10-19T01:22:20.374-06:00"
-              },
-              "15m": {
-                "url": "https://r2.chart-img.com/20251118/tradingview/layout-chart/055a5adf-9943-4b92-a1ad-c4abcc45ae0a.jpeg",
-                "chart_time": "2025-10-19T01:25:39.328-06:00"
-              },
-              "30m": {
-                "url": "https://r2.chart-img.com/20251118/tradingview/layout-chart/72702958-491f-40b1-ac72-e0774c109d4d.jpeg",
-                "chart_time": "2025-10-19T01:23:44.265-06:00"
-              }
-            },
-            "support": {
-              "5m": [
-                6585,
-                6545,
-                null
-              ],
-              "15m": [
-                6556,
-                6580,
-                6625
-              ],
-              "30m": [
-                6575,
-                6610,
-                null
-              ]
-            },
-            "resistance": {
-              "5m": [
-                6715,
-                6705,
-                6665
-              ],
-              "15m": [
-                6712,
-                6735,
-                6755
-              ],
-              "30m": [
-                6725,
-                6750,
-                6780
-              ]
-            },
-            "entry_quality": {
-              "quality_score": 40,
-              "factors": [
-                "Chart/OHLC disagreement",
-                "Low confidence",
-                "Range-bound (fade extremes)",
-                "Strong alignment (100%)"
-              ],
-              "recommendation": "NO_ENTRY",
-              "regime": "ranging",
-              "confidence": 55
-            },
-            "position_context": {
-              "current_position": {
-                "has_position": false,
-                "size": 0,
-                "side": null,
-                "entry_price": null,
-                "current_price": null,
-                "current_pnl": 0,
-                "unrealized_pnl": 0,
-                "realized_pnl": 0,
-                "duration_minutes": 0,
-                "stop_count": 0,
-                "target_count": 0
-              },
-              "account_metrics": {
-                "daily_pnl": 0,
-                "win_rate": 0,
-                "consecutive_losses": 0,
-                "open_positions": 0,
-                "risk_level": "low",
-                "can_trade": true
-              },
-              "risk_limits": {
-                "max_daily_loss": -500,
-                "profit_target": 500,
-                "max_consecutive_losses": 3
-              },
-              "warnings": [],
-              "suggestions": []
-            }
-          },
-          "webhookUrl": "https://n8n.thetopham.com/webhook/regime",
-          "executionMode": "production"
-        }
-      }
-    ]
-  },
+  "pinData": {},
   "connections": {
     "Webhook": {
       "main": [
@@ -836,13 +661,7 @@
     },
     "OpenAI Chat Model1": {
       "ai_languageModel": [
-        [
-          {
-            "node": "Basic LLM Chain",
-            "type": "ai_languageModel",
-            "index": 0
-          }
-        ]
+        []
       ]
     },
     "When clicking ‘Test workflow’": {
@@ -912,7 +731,13 @@
     },
     "Google Gemini Chat Model": {
       "ai_languageModel": [
-        []
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
       ]
     },
     "Edit Fields1": {
@@ -1084,12 +909,12 @@
     "callerPolicy": "workflowsFromSameOwner",
     "executionOrder": "v1"
   },
-  "versionId": "0d89e492-cb5e-43ac-ad58-fd9d6bc58f82",
+  "versionId": "110126d3-a674-4950-a945-5f625de3a862",
   "meta": {
     "templateId": "2569",
     "templateCredsSetupCompleted": true,
     "instanceId": "9783a33f8d5600da0ff08d35d1dc9051c104e0a37fceb74a2ffe1557dcda02bc"
   },
-  "id": "8YmLYQcDjKXJ0pAK",
+  "id": "nOi2347TGulbr2LH",
   "tags": []
 }

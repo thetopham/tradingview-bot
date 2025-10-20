@@ -1,5 +1,5 @@
 {
-  "name": "GPT ai trading overseer - regime",
+  "name": "GPT ai trading overseer - regime gpt",
   "nodes": [
     {
       "parameters": {
@@ -8,7 +8,7 @@
         "width": 507,
         "color": 7
       },
-      "id": "6a2649d3-45e0-42d2-a662-88f631426dac",
+      "id": "b4be8749-846c-4e94-8544-4f2e1e81193e",
       "name": "Sticky Note5",
       "type": "n8n-nodes-base.stickyNote",
       "position": [
@@ -20,7 +20,7 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "regime",
+        "path": "gpt-overseer",
         "responseMode": "responseNode",
         "options": {}
       },
@@ -30,9 +30,9 @@
         944,
         368
       ],
-      "id": "cbe7ef33-d1d7-4f3a-a929-cea67ee4bc55",
+      "id": "64407fa6-0f3c-447d-a372-96487a5c5f84",
       "name": "Webhook",
-      "webhookId": "f8e1bc5e-0693-42d3-bb80-67d44a13255c"
+      "webhookId": "84dbd406-676c-4027-aa59-2efc11826420"
     },
     {
       "parameters": {
@@ -46,7 +46,7 @@
         3360,
         192
       ],
-      "id": "d0bbf29e-e049-4231-881d-8ec8b34bbc32",
+      "id": "d425b31f-3e88-43ee-a611-a56d6c35706f",
       "name": "Respond to Webhook"
     },
     {
@@ -64,10 +64,10 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.2,
       "position": [
-        2192,
-        592
+        2160,
+        624
       ],
-      "id": "886b4e0d-3e1f-4c65-9058-76557fe20ba1",
+      "id": "b140596c-df07-4587-ab0d-30828541cc6f",
       "name": "OpenAI Chat Model1",
       "credentials": {
         "openAiApi": {
@@ -84,7 +84,7 @@
         944,
         544
       ],
-      "id": "4ed97c80-2123-404b-b7fe-e63f606b7472",
+      "id": "31d43c2d-e369-4354-a7c4-d385c0670e5f",
       "name": "When clicking ‘Test workflow’"
     },
     {
@@ -98,7 +98,7 @@
         2880,
         192
       ],
-      "id": "27a52fa0-c481-4b31-8988-bef414dfbf03",
+      "id": "51e68f22-2ffc-4a30-9075-1adc7fe5b368",
       "name": "Supabase",
       "credentials": {
         "supabaseApi": {
@@ -117,7 +117,7 @@
         2608,
         192
       ],
-      "id": "79fce8f0-64c1-43c1-8400-5a21e1526198",
+      "id": "d80785f5-de43-4595-a223-bb6d7670923a",
       "name": "Code"
     },
     {
@@ -130,7 +130,7 @@
         944,
         160
       ],
-      "id": "ac8a2908-2e0d-43ac-b7e6-d590a55fcb8d",
+      "id": "8142bd85-dc92-4a5a-acc3-d82245b90884",
       "name": "When Executed by Another Workflow"
     },
     {
@@ -153,7 +153,7 @@
         3152,
         192
       ],
-      "id": "8396e1bd-457a-4dfc-baf6-aa89bf7d8c2a",
+      "id": "ae0a8029-7fe0-4bd3-8079-25b2addfef26",
       "name": "Edit Fields"
     },
     {
@@ -167,7 +167,7 @@
         1712,
         912
       ],
-      "id": "7436ceb3-c148-4d4e-90b2-b4cb2dd2dd7f",
+      "id": "32ec7c96-0de2-42e6-8519-83f6ad5b031c",
       "name": "Google Gemini Chat Model",
       "credentials": {
         "googlePalmApi": {
@@ -194,7 +194,7 @@
         3888,
         464
       ],
-      "id": "6a38771d-824f-44b7-8ecc-0741f79e6361",
+      "id": "d59f8c55-1069-46e5-856f-d68ea33a197b",
       "retryOnFail": true,
       "credentials": {
         "googleCloudStorageOAuth2Api": {
@@ -278,7 +278,7 @@
         2944,
         480
       ],
-      "id": "6def145f-e4a5-4977-bcea-8c0f99c1892c",
+      "id": "05c48efd-da17-4d6b-bd90-da9e1c87b4df",
       "name": "Edit Fields1"
     },
     {
@@ -289,7 +289,7 @@
         3200,
         464
       ],
-      "id": "f082f5c4-36fe-4755-994e-3ccee62f8550",
+      "id": "f62dca23-3c7b-4c55-a568-56ab9fc35eb8",
       "name": "Merge"
     },
     {
@@ -303,7 +303,7 @@
         3664,
         464
       ],
-      "id": "4aaf4901-b12e-4528-a65b-b8da5c8f7028",
+      "id": "9459a464-c190-4966-83a6-e96f45ac4420",
       "name": "HTTP Request"
     },
     {
@@ -316,7 +316,7 @@
         3424,
         464
       ],
-      "id": "f0f13d73-0a22-4261-ab97-86beb45db488",
+      "id": "c92a26b1-e813-42d2-94d1-17e8cdfa2852",
       "name": "Code1"
     },
     {
@@ -357,7 +357,7 @@
         4080,
         464
       ],
-      "id": "4bd02cf0-397e-4c9e-8dbe-76643e0dc4c7",
+      "id": "3656d697-e426-44e0-95e2-ccabb2feed4e",
       "name": "Edit Fields2"
     },
     {
@@ -370,7 +370,7 @@
         4288,
         464
       ],
-      "id": "7db6b6d0-332d-4e6e-9972-93e5358c82ca",
+      "id": "54878539-ac3b-419e-9c17-3cd08f8f869f",
       "name": "Code2"
     },
     {
@@ -394,7 +394,7 @@
         4480,
         464
       ],
-      "id": "98036dae-0bff-48a7-baa4-64f211154d1c",
+      "id": "097a1cdc-3a56-4236-afcc-3964a0a1f2f7",
       "name": "Supabase1",
       "retryOnFail": true,
       "credentials": {
@@ -414,7 +414,7 @@
         4288,
         672
       ],
-      "id": "d1855a69-0b4f-4abb-ae9e-80acc20798b2",
+      "id": "bf673b61-5de9-4968-a1c6-5df6859d7c52",
       "name": "Code3"
     },
     {
@@ -446,7 +446,7 @@
         4480,
         672
       ],
-      "id": "589a2285-76e6-4dea-ae42-45c6d0968a79",
+      "id": "6f494a01-f00d-4299-b6b2-86129d890e36",
       "name": "updates chart_analysis urls",
       "retryOnFail": true,
       "credentials": {
@@ -475,7 +475,7 @@
         2240,
         368
       ],
-      "id": "32635b42-c9fa-4dce-ba1a-eee35ee1cff9",
+      "id": "5e3b3134-0474-4889-910e-f398750604c3",
       "name": "Basic LLM Chain"
     },
     {
@@ -489,7 +489,7 @@
         1968,
         368
       ],
-      "id": "a979d541-26b6-4545-b963-14229db12375",
+      "id": "53756236-ef35-49d2-9f25-e5408c01647d",
       "name": "HTTP Request1"
     },
     {
@@ -508,7 +508,7 @@
         1552,
         912
       ],
-      "id": "10a61d2c-1aa5-4cd7-9666-e0681a035a00",
+      "id": "9d50297b-7ff0-4b0a-9f41-d514d7cf803f",
       "name": "Anthropic Chat Model",
       "credentials": {
         "anthropicApi": {
@@ -536,7 +536,7 @@
         1312,
         368
       ],
-      "id": "afd78529-9b5e-4991-a5f0-5fafe78ccfaf",
+      "id": "2900c224-d821-4b49-90d9-a833c4c6e396",
       "name": "15m",
       "credentials": {
         "supabaseApi": {
@@ -564,7 +564,7 @@
         1728,
         368
       ],
-      "id": "f77218ec-0c78-4e22-8991-6030c5c42d7b",
+      "id": "8f38a31e-94cc-44c3-8049-ca805cd62241",
       "name": "5m",
       "credentials": {
         "supabaseApi": {
@@ -592,7 +592,7 @@
         1504,
         368
       ],
-      "id": "51f1a687-e1ce-4536-aacc-fd8d5137bbde",
+      "id": "49de3f66-128e-4670-a1f7-2e08e7975beb",
       "name": "30m",
       "credentials": {
         "supabaseApi": {
@@ -612,7 +612,7 @@
         1872,
         912
       ],
-      "id": "edca6241-4cab-4c4e-a116-ae91d3c4d679",
+      "id": "8776c273-079e-4670-a98e-0b8327716061",
       "name": "xAI Grok Chat Model",
       "credentials": {
         "xAiApi": {
@@ -631,7 +631,7 @@
         2016,
         912
       ],
-      "id": "ffff900b-b94f-45a3-a3b6-cacc6a51869b",
+      "id": "a08535c0-8c29-4877-bf9f-96c556e6c28c",
       "name": "DeepSeek Chat Model",
       "credentials": {
         "deepSeekApi": {
@@ -1084,12 +1084,12 @@
     "callerPolicy": "workflowsFromSameOwner",
     "executionOrder": "v1"
   },
-  "versionId": "0d89e492-cb5e-43ac-ad58-fd9d6bc58f82",
+  "versionId": "4ed63760-9d95-4f30-9730-b86a079ae1c6",
   "meta": {
     "templateId": "2569",
     "templateCredsSetupCompleted": true,
     "instanceId": "9783a33f8d5600da0ff08d35d1dc9051c104e0a37fceb74a2ffe1557dcda02bc"
   },
-  "id": "8YmLYQcDjKXJ0pAK",
+  "id": "F4MyqB2vOuBxvs7m",
   "tags": []
 }
