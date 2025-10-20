@@ -496,18 +496,22 @@ def get_account_health(account):
 
 @app.route("/market", methods=["GET"])
 def get_market_status():
-    """Get current market conditions and regime"""
+    """Get current market conditions and regime (resilient to None)."""
     try:
-        summary = get_market_conditions_summary()
+        summary = get_market_conditions_summary() or {}
         session_name, session_info = get_current_session()
         summary['session'] = {
             'name': session_name,
             'characteristics': session_info.get('characteristics', 'Unknown')
         }
+        # sane defaults if upstream omitted them
+        summary.setdefault('regime', 'unknown')
+        summary.setdefault('confidence', 0)
         return jsonify(summary), 200
     except Exception as e:
         logging.error(f"Error getting market status: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "regime": "unknown", "confidence": 0}), 200
+
 
 @app.route("/autonomous/toggle", methods=["POST"])
 def toggle_autonomous():
