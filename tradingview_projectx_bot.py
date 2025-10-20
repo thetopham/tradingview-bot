@@ -7,17 +7,19 @@ Handles webhooks, AI decisions, trade execution, and scheduled processing.
 """
 
 from datetime import time as dtime, timedelta
+from urllib.parse import urlparse
+
 from market_regime import MarketRegime
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from logging_config import setup_logging
 from config import load_config
 from api import (
-    flatten_contract, get_contract, ai_trade_decision, cancel_all_stops, 
+    flatten_contract, get_contract, ai_trade_decision, cancel_all_stops,
     search_pos, get_supabase_client, search_trades, search_open,
     get_market_conditions_summary, ai_trade_decision_with_regime,
     # Added for /contracts endpoints
-    search_contracts, get_active_contract_for_symbol_cached, 
+    search_contracts, get_active_contract_for_symbol_cached,
     get_active_contract_for_symbol,  # used in JSON response
     CONTRACT_CACHE_DURATION,
     # NEW: balances via ProjectX
@@ -57,6 +59,48 @@ def ai_url_for(account_name: str) -> str:
             f"No AI endpoint for account '{account_name}'. Known: {list(AI_ENDPOINTS)}"
         )
     return url
+
+def _format_ai_label(account_key: str) -> dict:
+    """Return display metadata for an AI overseer based on its endpoint."""
+    endpoint = AI_ENDPOINTS.get(account_key)
+    label = account_key.upper()
+    provider = None
+    slug = None
+    family = "Custom"
+
+    if endpoint:
+        parsed = urlparse(endpoint)
+        provider = parsed.netloc
+        path_parts = [part for part in parsed.path.split('/') if part]
+        if path_parts:
+            slug = path_parts[-1]
+            candidate = slug.replace('-', ' ').replace('_', ' ').strip()
+            if candidate:
+                label = ' '.join(word.capitalize() for word in candidate.split())
+
+        lower_endpoint = endpoint.lower()
+        if 'claude' in lower_endpoint:
+            family = 'Claude'
+        elif 'gpt' in lower_endpoint or 'openai' in lower_endpoint:
+            family = 'GPT'
+        elif 'gemini' in lower_endpoint:
+            family = 'Gemini'
+        elif 'groq' in lower_endpoint:
+            family = 'Groq'
+        elif 'deepseek' in lower_endpoint:
+            family = 'DeepSeek'
+
+    short_label = label.split()[0] if label else account_key.upper()
+
+    return {
+        'key': account_key,
+        'label': label,
+        'short_label': short_label,
+        'endpoint': endpoint,
+        'provider': provider,
+        'family': family,
+        'slug': slug,
+    }
 
 MARKET_SESSIONS = {
     'ASIAN': {
@@ -274,10 +318,13 @@ def get_positions_summary():
 
                 account_data = {
                     'position': None,
+                    'ai_model': _format_ai_label(account_name),
+                    'balances': None,
                     'daily_stats': {
                         'daily_pnl': account_state['daily_pnl'],
                         'trades_today': account_state['trade_count'],
                         'win_rate': f"{account_state['win_rate']:.1%}" if account_state['win_rate'] else "0.0%",
+                        'win_rate_raw': account_state['win_rate'],
                         'winning_trades': account_state['winning_trades'],
                         'losing_trades': account_state['losing_trades'],
                         'consecutive_losses': account_state['consecutive_losses'],
