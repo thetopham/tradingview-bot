@@ -59,8 +59,20 @@ def start_scheduler(app):
             cutoff = (datetime.utcnow() - timedelta(seconds=30)).isoformat()
             supabase.table('market_regime_cache').delete().lt('timestamp', cutoff).execute()
 
-            # Get n8n base URL (derived from legacy single var; OK for shared chart analysts)
-            n8n_base_url = config.get('N8N_AI_URL', '').split('/webhook/')[0]
+            # Get per-account AI URLs (same logic as tradingview_projectx_bot.py)
+            ai_endpoints = config.get("AI_ENDPOINTS", {})
+
+            # Use the first defined base URL as the shared chart/regime updater
+            if ai_endpoints:
+                first_url = next(iter(ai_endpoints.values()))
+                n8n_base_url = (first_url or "").split("/webhook/")[0].rstrip("/")
+            else:
+                n8n_base_url = ""
+                
+            if not n8n_base_url:
+                logging.error("[APScheduler] No N8N_AI_URL configured in AI_ENDPOINTS; skipping chart/regime fetch")
+                return
+            
 
             # ===== TRIGGER N8N CHART UPDATES WITH LONGER TIMEOUT =====
             timeframes = ['5m', '15m', '30m']
