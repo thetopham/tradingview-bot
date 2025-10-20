@@ -1297,7 +1297,7 @@
                     <div class="leaderboard-summary-item">
                         <span class="summary-label">Net P&L (Today)</span>
                         <span id="leaderboard-daily-pnl" class="summary-value">--</span>
-                        <span class="leaderboard-subtext">Daily results + open exposure</span>
+                        <span class="leaderboard-subtext">Net of fees + open exposure</span>
                     </div>
                 </div>
                 <div class="leaderboard-table">
@@ -1306,7 +1306,7 @@
                         <div>Model</div>
                         <div>Equity</div>
                         <div>Net P&amp;L</div>
-                        <div>Daily P&amp;L</div>
+                        <div>Daily Net P&amp;L</div>
                         <div>Win Rate</div>
                         <div>Status</div>
                     </div>
@@ -1486,46 +1486,60 @@
 
         const MODEL_METADATA = {
             alpha: {
-                displayName: 'Claude Overseer',
-                model: 'Claude 3.5 Sonnet',
+                displayName: 'Claude',
+                model: 'Claude Opus 4.1',
                 provider: 'Anthropic',
-                shortName: 'Claude 3.5',
+                shortName: 'Claude',
                 accent: '#f97316',
                 icon: '✶'
             },
             beta: {
-                displayName: 'GPT Overseer',
-                model: 'GPT-4.1',
+                displayName: 'GPT',
+                model: 'GPT 5',
                 provider: 'OpenAI',
-                shortName: 'GPT-4.1',
+                shortName: 'GPT 5',
                 accent: '#38bdf8',
                 icon: '⚙️'
             },
             gamma: {
-                displayName: 'Gemini Overseer',
-                model: 'Gemini 2.0 Flash',
+                displayName: 'Gemini',
+                model: 'Gemini 2.5',
                 provider: 'Google',
-                shortName: 'Gemini 2.0',
+                shortName: 'Gemini',
                 accent: '#8b5cf6',
                 icon: '🔷'
             },
             delta: {
-                displayName: 'Grok Overseer',
-                model: 'Grok 2',
+                displayName: 'Grok',
+                model: 'Grok 4',
                 provider: 'xAI',
-                shortName: 'Grok 2',
+                shortName: 'Grok',
                 accent: '#facc15',
                 icon: '⚡'
             },
             epsilon: {
-                displayName: 'DeepSeek Overseer',
-                model: 'DeepSeek CKT 19.1',
-                provider: 'DeepSeek',
-                shortName: 'DeepSeek',
+                displayName: 'Deepseek',
+                model: 'Deepseek v3.1',
+                provider: 'Deepseek',
+                shortName: 'Deepseek',
                 accent: '#22c55e',
                 icon: '🧠'
             }
         };
+
+        const PRACTICE_MARKERS = ['practice', 'sim', 'simulation', 'paper', 'demo'];
+
+        function isPracticeAccount(accountKey, accountData = {}) {
+            const keyLabel = (accountKey || '').toString().toLowerCase();
+            const balanceName = (accountData?.balances?.name || '').toLowerCase();
+            const displayName = (accountData?.label || accountData?.name || '').toLowerCase();
+
+            return PRACTICE_MARKERS.some(marker =>
+                keyLabel.includes(marker) ||
+                balanceName.includes(marker) ||
+                displayName.includes(marker)
+            );
+        }
         
         // State
         let refreshTimer;
@@ -1688,7 +1702,7 @@
             const fallbackName = accountData?.balances?.name || (accountKey ? accountKey.toUpperCase() : 'MODEL');
             return {
                 displayName: fallbackName,
-                model: 'Custom Overseer',
+                model: 'Custom Model',
                 provider: 'AI Strategy',
                 shortName: fallbackName,
                 accent: '#38bdf8',
@@ -1708,45 +1722,50 @@
             if (!rowsContainer || !modelsContainer) return;
 
             const accounts = data.accounts || {};
-            const entries = Object.entries(accounts).map(([accountKey, accountData]) => {
-                const meta = getModelMeta(accountKey, accountData);
-                const balance = safeNumber(accountData?.balances?.balance);
-                const dailyPnl = safeNumber(accountData?.daily_stats?.daily_pnl) ?? 0;
-                const openPnl = safeNumber(accountData?.position?.unrealized_pnl) ?? 0;
-                const netPnl = dailyPnl + openPnl;
-                const winRate = formatWinRate(accountData?.daily_stats?.win_rate);
-                const trades = Number(accountData?.daily_stats?.trades_today ?? accountData?.daily_stats?.trade_count ?? 0);
-                const safeTrades = Number.isFinite(trades) ? trades : 0;
-                const riskLevel = accountData?.daily_stats?.risk_level || 'unknown';
-                const lossStreak = safeNumber(accountData?.daily_stats?.consecutive_losses) ?? 0;
-                const position = accountData?.position;
+            const entries = Object.entries(accounts)
+                .filter(([accountKey, accountData]) => !isPracticeAccount(accountKey, accountData))
+                .map(([accountKey, accountData]) => {
+                    const meta = getModelMeta(accountKey, accountData);
+                    const balance = safeNumber(accountData?.balances?.balance);
+                    const dailyPnl = safeNumber(accountData?.daily_stats?.daily_pnl) ?? 0;
+                    const openPnl = safeNumber(accountData?.position?.unrealized_pnl) ?? 0;
+                    const netPnl = dailyPnl + openPnl;
+                    const winRate = formatWinRate(accountData?.daily_stats?.win_rate);
+                    const trades = Number(accountData?.daily_stats?.trades_today ?? accountData?.daily_stats?.trade_count ?? 0);
+                    const safeTrades = Number.isFinite(trades) ? trades : 0;
+                    const riskLevel = accountData?.daily_stats?.risk_level || 'unknown';
+                    const lossStreak = safeNumber(accountData?.daily_stats?.consecutive_losses) ?? 0;
+                    const position = accountData?.position;
 
-                let positionText = 'Flat — awaiting next signal';
-                const sizeValue = safeNumber(position?.size);
-                if (position && sizeValue && sizeValue > 0) {
-                    const entryPrice = formatPrice(position.entry_price);
-                    const entryDisplay = entryPrice === '--' ? '--' : `$${entryPrice}`;
-                    const durationValue = safeNumber(position.duration_minutes);
-                    const durationDisplay = durationValue !== null ? `${Math.round(durationValue)}m` : '--';
-                    const direction = (position.side || 'FLAT').toUpperCase();
-                    positionText = `${direction} ${position.size} @ ${entryDisplay} • ${durationDisplay}`;
-                }
+                    let positionText = 'Flat — awaiting next signal';
+                    const sizeValue = safeNumber(position?.size);
+                    if (position && sizeValue && sizeValue > 0) {
+                        const entryPrice = formatPrice(position.entry_price);
+                        const entryDisplay = entryPrice === '--' ? '--' : `$${entryPrice}`;
+                        const durationValue = safeNumber(position.duration_minutes);
+                        const durationDisplay = durationValue !== null ? `${Math.round(durationValue)}m` : '--';
+                        const direction = (position.side || 'FLAT').toUpperCase();
+                        positionText = `${direction} ${position.size} @ ${entryDisplay} • ${durationDisplay}`;
+                    }
 
-                return {
-                    key: accountKey,
-                    meta,
-                    balance,
-                    dailyPnl,
-                    openPnl,
-                    netPnl,
-                    winRate,
-                    trades: safeTrades,
-                    riskLevel,
-                    lossStreak,
-                    positionText,
-                    canTrade: !!accountData?.daily_stats?.can_trade
-                };
-            }).filter(Boolean);
+                    const dailyFees = safeNumber(accountData?.daily_stats?.daily_fees) ?? 0;
+
+                    return {
+                        key: accountKey,
+                        meta,
+                        balance,
+                        dailyPnl,
+                        dailyFees,
+                        openPnl,
+                        netPnl,
+                        winRate,
+                        trades: safeTrades,
+                        riskLevel,
+                        lossStreak,
+                        positionText,
+                        canTrade: !!accountData?.daily_stats?.can_trade
+                    };
+                }).filter(Boolean);
 
             entries.sort((a, b) => b.netPnl - a.netPnl);
 
@@ -1766,7 +1785,8 @@
                     const edgeValue = formatCurrency(Math.abs(edge));
                     const winInfo = entries[0].winRate || '--';
                     const directionText = edge === 0 ? `Tied at ${edgeValue}` : `${edge > 0 ? 'Leads' : 'Trails'} by ${edgeValue}`;
-                    winningEdgeEl.textContent = `${directionText} · ${winInfo} · ${entries[0].trades} trades`;
+                    const feeInfo = entries[0].dailyFees ? ` · Fees ${formatCurrency(-Math.abs(entries[0].dailyFees))}` : '';
+                    winningEdgeEl.textContent = `${directionText} · ${winInfo} · ${entries[0].trades} trades${feeInfo}`;
                 } else {
                     winningEdgeEl.textContent = 'Awaiting data...';
                 }
@@ -1826,7 +1846,7 @@
                         </div>
                         <div class="leaderboard-cell">
                             <div class="leaderboard-metric ${dailyClass}">${formatCurrency(entry.dailyPnl)}</div>
-                            <div class="leaderboard-subtext">Day performance</div>
+                            <div class="leaderboard-subtext">Net (after fees)</div>
                         </div>
                         <div class="leaderboard-cell">
                             <div class="leaderboard-metric">${entry.winRate || '--'}</div>
@@ -1856,7 +1876,7 @@
                                 <strong class="${getValueClass(entry.netPnl)}">${formatCurrency(entry.netPnl)}</strong>
                             </div>
                             <div class="model-metric">
-                                <span class="text-dim">Daily</span>
+                                <span class="text-dim">Daily Net</span>
                                 <strong class="${getValueClass(entry.dailyPnl)}">${formatCurrency(entry.dailyPnl)}</strong>
                             </div>
                         </div>
@@ -1875,10 +1895,12 @@
 
             let html = '';
             
-            Object.entries(accounts).forEach(([accountName, accountData]) => {
-                if (accountData.position) {
-                    const pos = accountData.position;
-                    const stats = accountData.daily_stats;
+            Object.entries(accounts)
+                .filter(([accountName, accountData]) => !isPracticeAccount(accountName, accountData))
+                .forEach(([accountName, accountData]) => {
+                    if (accountData.position) {
+                        const pos = accountData.position;
+                        const stats = accountData.daily_stats;
                     
                     html += `
                         <div class="position-item ${pos.side ? pos.side.toLowerCase() : ''}">
@@ -1909,7 +1931,7 @@
                                 <div class="position-metric-value">${pos.duration_minutes}m</div>
                             </div>
                             <div class="position-metric">
-                                <div class="position-metric-label">Daily P&L</div>
+                                <div class="position-metric-label">Daily Net P&L</div>
                                 <div class="position-metric-value ${getValueClass(stats.daily_pnl)}">
                                     ${formatCurrency(stats.daily_pnl)}
                                 </div>

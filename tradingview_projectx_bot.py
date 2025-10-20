@@ -7,6 +7,7 @@ Handles webhooks, AI decisions, trade execution, and scheduled processing.
 """
 
 from datetime import time as dtime, timedelta
+from typing import Optional
 from market_regime import MarketRegime
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
@@ -255,6 +256,23 @@ def get_positions_summary():
         except Exception as e:
             logging.warning(f"Account search failed (balances unavailable): {e}")
 
+        def _is_practice_account(name: str, balance_info: Optional[dict] = None) -> bool:
+            """Determine if an account should be hidden from dashboards (practice/demo)."""
+            tokens = (name or '').lower()
+            practice_markers = ('practice', 'sim', 'simulation', 'paper', 'demo')
+            if any(marker in tokens for marker in practice_markers):
+                return True
+
+            if balance_info:
+                for candidate_key in ('name', 'accountType', 'account_type', 'label'):
+                    candidate_val = balance_info.get(candidate_key)
+                    if isinstance(candidate_val, str) and any(
+                        marker in candidate_val.lower() for marker in practice_markers
+                    ):
+                        return True
+
+            return False
+
         summary = {
             'market_price': current_price,
             'price_source': price_source,
@@ -263,11 +281,18 @@ def get_positions_summary():
             'total_unrealized_pnl': 0,
             'total_realized_pnl': 0,
             'total_daily_pnl': 0,
+            'total_fees': 0.0,
             'total_equity': 0.0,          # <—— NEW rollup
             'timestamp': datetime.now(CT).isoformat()
         }
 
         for account_name, acct_id in ACCOUNTS.items():
+            bal_info = balances_by_id.get(acct_id)
+
+            if _is_practice_account(account_name, bal_info):
+                logging.debug(f"Skipping practice account {account_name}")
+                continue
+
             try:
                 position_state = pm.get_position_state(acct_id, cid)
                 account_state = pm.get_account_state(acct_id)
@@ -276,6 +301,8 @@ def get_positions_summary():
                     'position': None,
                     'daily_stats': {
                         'daily_pnl': account_state['daily_pnl'],
+                        'daily_fees': account_state.get('daily_fees', 0.0),
+                        'gross_pnl': account_state.get('gross_pnl', account_state['daily_pnl']),
                         'trades_today': account_state['trade_count'],
                         'win_rate': f"{account_state['win_rate']:.1%}" if account_state['win_rate'] else "0.0%",
                         'winning_trades': account_state['winning_trades'],
@@ -287,7 +314,6 @@ def get_positions_summary():
                 }
 
                 # Attach live broker balance if available
-                bal_info = balances_by_id.get(acct_id)
                 if bal_info:
                     try:
                         bal_val = float(bal_info.get("balance"))
@@ -303,6 +329,7 @@ def get_positions_summary():
                         summary['total_equity'] += bal_val
 
                 summary['total_daily_pnl'] += account_state['daily_pnl']
+                summary['total_fees'] += account_state.get('daily_fees', 0.0)
 
                 if position_state['has_position']:
                     if current_price and position_state['entry_price']:
