@@ -19,6 +19,11 @@
 - Keep loggers module-scoped (`logging.getLogger(__name__)`) and include context in every log message.
 - When touching configuration, update `env.example` and `config.py` together to prevent drift.
 
+## ExecPlans
+- When tackling complex features, risky refactors, or multi-iteration work, author an ExecPlan that complies with [`PLANS.md`](PLANS.md) before making code changes.
+- Keep ExecPlans as living documents: update the `Progress`, `Surprises & Discoveries`, `Decision Log`, and `Outcomes & Retrospective` sections as the implementation evolves.
+- Store ExecPlans in-repo (Markdown) so the next contributor can resume the work using only the plan and the working tree.
+
 ## Testing Guidelines
 - No formal test harness ships yet; validate changes with targeted webhook payloads and by observing Supabase/log output.
 - Add lightweight smoke checks when possible (e.g., helper functions callable via `python -m module test`). If you introduce `pytest`, place tests under `tests/` and mirror module names.
