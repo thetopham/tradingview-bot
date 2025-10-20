@@ -148,8 +148,18 @@ class PositionManager:
         today_start = datetime.now(CT).replace(hour=0, minute=0, second=0, microsecond=0)
         trades = search_trades(acct_id, today_start)
         
-        # Calculate daily P&L
-        daily_pnl = sum(float(t.get("profitAndLoss") or 0) for t in trades if t.get("profitAndLoss") is not None)
+        # Calculate daily P&L (gross before fees)
+        gross_pnl = sum(
+            float(t.get("profitAndLoss") or 0)
+            for t in trades
+            if t.get("profitAndLoss") is not None
+        )
+
+        # Aggregate brokerage / exchange fees so we can report net performance
+        fees_paid = sum(self._extract_trade_fees(t) for t in trades)
+
+        # Net daily P&L after fees
+        daily_pnl = gross_pnl - fees_paid
         
         # Count wins/losses
         winning_trades = [t for t in trades if float(t.get("profitAndLoss") or 0) > 0]
@@ -171,6 +181,8 @@ class PositionManager:
         
         return {
             'daily_pnl': daily_pnl,
+            'gross_pnl': gross_pnl,
+            'daily_fees': fees_paid,
             'trade_count': len(trades),
             'winning_trades': len(winning_trades),
             'losing_trades': len(losing_trades),
@@ -196,7 +208,7 @@ class PositionManager:
             return False
             
         return True
-    
+
     def _assess_account_risk(self, daily_pnl: float, consecutive_losses: int, open_positions: int) -> str:
         """Assess overall account risk level"""
         risk_score = 0
@@ -299,8 +311,42 @@ class PositionManager:
                 
             if len(position_state['stop_orders']) == 0:
                 suggestions.append("No stop loss detected - high risk")
-        
+
         context['warnings'] = warnings
         context['suggestions'] = suggestions
-    
+
         return context
+
+    @staticmethod
+    def _extract_trade_fees(trade: Dict) -> float:
+        """Return total brokerage/clearing fees for a trade record."""
+        if not isinstance(trade, dict):
+            return 0.0
+
+        def _to_float(value) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return 0.0
+
+        preferred_keys = [
+            'commissionAndFees',
+            'totalFees',
+            'brokerageFeesTotal',
+            'feesTotal',
+        ]
+        for key in preferred_keys:
+            if key in trade:
+                fee_value = _to_float(trade.get(key))
+                if fee_value:
+                    return abs(fee_value)
+
+        fee_sum = 0.0
+        for key, value in trade.items():
+            if not isinstance(key, str):
+                continue
+            lower_key = key.lower()
+            if 'fee' in lower_key or 'commission' in lower_key:
+                fee_sum += abs(_to_float(value))
+
+        return fee_sum
