@@ -19,7 +19,9 @@ from api import (
     # Added for /contracts endpoints
     search_contracts, get_active_contract_for_symbol_cached, 
     get_active_contract_for_symbol,  # used in JSON response
-    CONTRACT_CACHE_DURATION
+    CONTRACT_CACHE_DURATION,
+    # NEW: balances via ProjectX
+    search_accounts,  # <—— uses /api/Account/search
 )
 from strategies import run_bracket, run_brackmod, run_pivot
 from scheduler import start_scheduler
@@ -31,12 +33,12 @@ from datetime import datetime
 import logging
 import json
 import time
+import os
 from supabase import create_client
 
 # --- Logging/Config/Globals ---
 setup_logging()
 config = load_config()
-
 
 TV_PORT         = config['TV_PORT']
 WEBHOOK_SECRET  = config['WEBHOOK_SECRET']
@@ -93,13 +95,10 @@ def get_current_session(now=None):
     """Get current market session"""
     if now is None:
         now = datetime.now(CT)
-    
     current_time = now.time()
-    
     for session_name, session_info in MARKET_SESSIONS.items():
         start = session_info['start']
         end = session_info['end']
-        
         # Handle sessions that cross midnight
         if start > end:
             if current_time >= start or current_time < end:
@@ -107,9 +106,7 @@ def get_current_session(now=None):
         else:
             if start <= current_time < end:
                 return session_name, session_info
-    
     return 'OFF_HOURS', {'characteristics': 'Market closed'}
-
 
 AUTH_LOCK = threading.Lock()
 
@@ -126,31 +123,29 @@ def tv_webhook():
     data = request.get_json()
     if data.get("secret") != WEBHOOK_SECRET:
         return jsonify(error="unauthorized"), 403
-
     # Respond immediately to TradingView/n8n
     Thread(target=handle_webhook_logic, args=(data,)).start()
     return jsonify(status="accepted", msg="Processing started"), 202
-
 
 # --- STATIC DASHBOARD + DATA ENDPOINTS (UNCOMMENTED) ---
 
 @app.route("/")
 def serve_dashboard():
-    return send_from_directory('static', 'dashboard.html')
+    # serve ./static/dashboard.html
+    static_dir = os.path.join(os.path.dirname(__file__), "static")
+    return send_from_directory(static_dir, "dashboard.html")
 
 @app.route("/ai/latest-decision", methods=["GET"])
 def get_latest_ai_decision():
     """Get the latest AI trading decision from Supabase"""
     try:
         supabase = get_supabase_client()
-        
         # Order by ai_decision_id descending to get the latest
         result = supabase.table('ai_trading_log') \
             .select('*') \
             .order('ai_decision_id', desc=True) \
             .limit(1) \
             .execute()
-        
         if not result.data or len(result.data) == 0:
             # Fallback to timestamp ordering
             result = supabase.table('ai_trading_log') \
@@ -158,11 +153,9 @@ def get_latest_ai_decision():
                 .order('timestamp', desc=True) \
                 .limit(1) \
                 .execute()
-        
         if result.data and len(result.data) > 0:
             latest_decision = result.data[0]
             logging.info(f"Found AI decision with ai_decision_id: {latest_decision.get('ai_decision_id')}")
-            
             # Parse JSON-like string fields if needed
             json_string_fields = ['urls', 'support', 'resistance', 'trend']
             for field in json_string_fields:
@@ -173,7 +166,6 @@ def get_latest_ai_decision():
                             latest_decision[field] = json.loads(txt)
                     except json.JSONDecodeError:
                         logging.warning(f"Failed to parse {field} as JSON: {latest_decision[field]}")
-            
             # Coerce numeric fields
             for field in ['size', 'tp1', 'tp2', 'tp3', 'sl', 'entrylimit']:
                 if field in latest_decision and latest_decision[field] is not None:
@@ -181,11 +173,9 @@ def get_latest_ai_decision():
                         latest_decision[field] = float(latest_decision[field])
                     except (ValueError, TypeError):
                         pass
-            
             # Add display timestamp
             if 'timestamp' in latest_decision:
                 latest_decision['formatted_timestamp'] = latest_decision['timestamp']
-                
             return jsonify(latest_decision), 200
         else:
             return jsonify({
@@ -195,7 +185,6 @@ def get_latest_ai_decision():
                 "size": "--",
                 "reason": "No decisions in database"
             }), 404
-            
     except Exception as e:
         logging.error(f"Error fetching latest AI decision: {str(e)}")
         logging.error(f"Full error details: {repr(e)}")
@@ -211,10 +200,8 @@ def get_latest_analysis_all():
     """Get latest analysis for all timeframes from Supabase"""
     try:
         supabase = get_supabase_client()
-        
         timeframes = ['5m', '15m', '30m']  # align with your n8n workflows
         analysis_data = {}
-        
         for tf in timeframes:
             try:
                 result = supabase.table('latest_chart_analysis') \
@@ -224,48 +211,50 @@ def get_latest_analysis_all():
                     .order('timestamp', desc=True) \
                     .limit(1) \
                     .execute()
-                
                 if result.data:
                     record = result.data[0]
                     snapshot = record.get('snapshot')
-                    
                     if isinstance(snapshot, str):
                         try:
                             snapshot = json.loads(snapshot)
                         except:
                             snapshot = {}
-                    
                     if snapshot:
                         analysis_data[tf] = snapshot
                     else:
                         logging.warning(f"No snapshot data for timeframe {tf}")
-                        
             except Exception as e:
                 logging.error(f"Error fetching {tf} data: {e}")
-        
         return jsonify(analysis_data), 200
-        
     except Exception as e:
         logging.error(f"Error fetching analysis data: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/positions/summary", methods=["GET"])
 def get_positions_summary():
-    """Get a summary of all positions with proper account data"""
+    """Get a summary of all positions with proper account data + broker balances"""
     try:
         from position_manager import PositionManager
         from api import get_contract, get_current_market_price
-        
+
         pm = PositionManager(ACCOUNTS)
         cid = get_contract('MES')
-        
+
         # Current market price
         try:
             current_price, price_source = get_current_market_price(symbol="MES")
-        except:
+        except Exception:
             current_price = None
             price_source = "unavailable"
-        
+
+        # --- NEW: one call to get all accounts + balances from ProjectX
+        balances_by_id = {}
+        try:
+            # { account_id: {"name":..., "balance": float, "canTrade": bool, "isVisible": bool}, ... }
+            balances_by_id = search_accounts(only_active=True)
+        except Exception as e:
+            logging.warning(f"Account search failed (balances unavailable): {e}")
+
         summary = {
             'market_price': current_price,
             'price_source': price_source,
@@ -274,14 +263,15 @@ def get_positions_summary():
             'total_unrealized_pnl': 0,
             'total_realized_pnl': 0,
             'total_daily_pnl': 0,
+            'total_equity': 0.0,          # <—— NEW rollup
             'timestamp': datetime.now(CT).isoformat()
         }
-        
+
         for account_name, acct_id in ACCOUNTS.items():
             try:
                 position_state = pm.get_position_state(acct_id, cid)
                 account_state = pm.get_account_state(acct_id)
-                
+
                 account_data = {
                     'position': None,
                     'daily_stats': {
@@ -295,9 +285,25 @@ def get_positions_summary():
                         'risk_level': account_state['risk_level']
                     }
                 }
-                
+
+                # Attach live broker balance if available
+                bal_info = balances_by_id.get(acct_id)
+                if bal_info:
+                    try:
+                        bal_val = float(bal_info.get("balance"))
+                    except (TypeError, ValueError):
+                        bal_val = None
+                    account_data['balances'] = {
+                        'balance': bal_val,
+                        'canTrade': bal_info.get('canTrade'),
+                        'isVisible': bal_info.get('isVisible'),
+                        'name': bal_info.get('name'),
+                    }
+                    if isinstance(bal_val, float):
+                        summary['total_equity'] += bal_val
+
                 summary['total_daily_pnl'] += account_state['daily_pnl']
-                
+
                 if position_state['has_position']:
                     if current_price and position_state['entry_price']:
                         contract_multiplier = 5  # MES multiplier
@@ -309,7 +315,7 @@ def get_positions_summary():
                             unrealized_pnl = 0
                     else:
                         unrealized_pnl = position_state.get('unrealized_pnl', 0)
-                    
+
                     account_data['position'] = {
                         'size': position_state['size'],
                         'side': position_state['side'],
@@ -322,13 +328,13 @@ def get_positions_summary():
                         'stops': len(position_state['stop_orders']),
                         'targets': len(position_state['limit_orders'])
                     }
-                    
+
                     summary['total_positions'] += 1
                     summary['total_unrealized_pnl'] += unrealized_pnl
                     summary['total_realized_pnl'] += position_state.get('realized_pnl', 0)
-                
+
                 summary['accounts'][account_name] = account_data
-                
+
             except Exception as e:
                 logging.error(f"Error getting data for account {account_name}: {e}")
                 summary['accounts'][account_name] = {
@@ -342,15 +348,19 @@ def get_positions_summary():
                         'risk_level': 'unknown'
                     }
                 }
-        
+
         summary['summary'] = {
             'total_pnl': summary['total_unrealized_pnl'] + summary['total_realized_pnl'],
             'positions_open': summary['total_positions'],
             'market_status': 'OPEN' if not in_get_flat(datetime.now(CT)) else 'FLAT_WINDOW'
         }
-        
+
+        # If no balances were fetched, avoid returning 0.0 which can be misleading
+        if not balances_by_id:
+            summary['total_equity'] = None
+
         return jsonify(summary), 200
-        
+
     except Exception as e:
         logging.error(f"Error getting positions summary: {e}")
         return jsonify({"error": str(e)}), 500
@@ -372,24 +382,24 @@ def get_account_positions(account):
     try:
         from position_manager import PositionManager
         from api import get_contract
-        
+
         acct_id = ACCOUNTS.get(account.lower())
         if not acct_id:
             return jsonify({"error": f"Unknown account: {account}"}), 404
-        
+
         pm = PositionManager(ACCOUNTS)
         cid = get_contract('MES')
-        
+
         position_state = pm.get_position_state(acct_id, cid)
         account_state = pm.get_account_state(acct_id)
-        
+
         return jsonify({
             "account": account,
             "position": position_state,
             "account_metrics": account_state,
             "timestamp": datetime.now(CT).isoformat()
         }), 200
-        
+
     except Exception as e:
         logging.error(f"Error getting account positions: {e}")
         return jsonify({"error": str(e)}), 500
@@ -401,26 +411,26 @@ def get_position_suggestions(account):
         data = request.get_json()
         if data.get("secret") != WEBHOOK_SECRET:
             return jsonify(error="unauthorized"), 403
-        
+
         from position_manager import PositionManager
         from api import get_contract
-        
+
         acct_id = ACCOUNTS.get(account.lower())
         if not acct_id:
             return jsonify({"error": f"Unknown account: {account}"}), 404
-        
+
         pm = PositionManager(ACCOUNTS)
         cid = get_contract('MES')
-        
+
         context = pm.get_position_context_for_ai(acct_id, cid)
-        
+
         return jsonify({
             "account": account,
             "context": context,
             "message": "Position context provided - AI should make all trading decisions",
             "timestamp": datetime.now(CT).isoformat()
         }), 200
-        
+
     except Exception as e:
         logging.error(f"Error getting position suggestions: {e}")
         return jsonify({"error": str(e)}), 500
@@ -432,25 +442,25 @@ def scan_opportunities():
         data = request.get_json()
         if data.get("secret") != WEBHOOK_SECRET:
             return jsonify(error="unauthorized"), 403
-        
+
         from position_manager import PositionManager
-        
+
         pm = PositionManager(ACCOUNTS)
         opportunities = []
-        
+
         for account_name, acct_id in ACCOUNTS.items():
             # Placeholder: implement scan inside PositionManager if desired
             # opportunity = pm.scan_for_opportunities(acct_id, account_name)
             opportunity = None
             if opportunity:
                 opportunities.append(opportunity)
-        
+
         return jsonify({
             "opportunities": opportunities,
             "count": len(opportunities),
             "timestamp": datetime.now(CT).isoformat()
         }), 200
-        
+
     except Exception as e:
         logging.error(f"Error scanning opportunities: {e}")
         return jsonify({"error": str(e)}), 500
@@ -460,26 +470,26 @@ def get_account_health(account):
     """Get account health metrics"""
     try:
         from position_manager import PositionManager
-        
+
         acct_id = ACCOUNTS.get(account.lower())
         if not acct_id:
             return jsonify({"error": f"Unknown account: {account}"}), 404
-        
+
         pm = PositionManager(ACCOUNTS)
         account_state = pm.get_account_state(acct_id)
-        
+
         account_state['thresholds'] = {
             'max_daily_loss': pm.max_daily_loss,
             'profit_target': pm.profit_target,
             'max_consecutive_losses': pm.max_consecutive_losses
         }
-        
+
         return jsonify({
             "account": account,
             "health": account_state,
             "timestamp": datetime.now(CT).isoformat()
         }), 200
-        
+
     except Exception as e:
         logging.error(f"Error getting account health: {e}")
         return jsonify({"error": str(e)}), 500
@@ -522,12 +532,12 @@ def get_realtime_positions():
     try:
         from position_manager import PositionManager
         from api import get_contract, get_current_market_price
-        
+
         pm = PositionManager(ACCOUNTS)
         cid = get_contract('MES')
-        
+
         current_price, price_source = get_current_market_price(symbol="MES")
-        
+
         results = {
             'market_price': current_price,
             'price_source': price_source,
@@ -536,10 +546,10 @@ def get_realtime_positions():
             'total_realized_pnl': 0,
             'timestamp': datetime.now(CT).isoformat()
         }
-        
+
         for account_name, acct_id in ACCOUNTS.items():
             position_state = pm.get_position_state(acct_id, cid)
-            
+
             if position_state['has_position']:
                 account_info = {
                     'position': {
@@ -559,7 +569,7 @@ def get_realtime_positions():
                 results['total_realized_pnl'] += position_state.get('realized_pnl', 0)
             else:
                 account_info = {'position': None}
-            
+
             account_state = pm.get_account_state(acct_id)
             account_info['daily_stats'] = {
                 'daily_pnl': account_state['daily_pnl'],
@@ -568,17 +578,17 @@ def get_realtime_positions():
                 'can_trade': account_state['can_trade'],
                 'risk_level': account_state['risk_level']
             }
-            
+
             results['accounts'][account_name] = account_info
-        
+
         results['summary'] = {
             'total_pnl': results['total_unrealized_pnl'] + results['total_realized_pnl'],
             'positions_open': sum(1 for acc in results['accounts'].values() if acc['position']),
             'market_status': 'OPEN' if not in_get_flat(datetime.now(CT)) else 'FLAT_WINDOW'
         }
-        
+
         return jsonify(results), 200
-        
+
     except Exception as e:
         logging.error(f"Error getting real-time positions: {e}")
         return jsonify({"error": str(e)}), 500
@@ -589,26 +599,25 @@ def get_position_context(account):
     try:
         from position_manager import PositionManager
         from api import get_contract
-        
+
         acct_id = ACCOUNTS.get(account.lower())
         if not acct_id:
             return jsonify({"error": f"Unknown account: {account}"}), 404
-        
+
         pm = PositionManager(ACCOUNTS)
         cid = get_contract('MES')
-        
+
         context = pm.get_position_context_for_ai(acct_id, cid)
-        
+
         return jsonify({
             "account": account,
             "position_context": context,
             "timestamp": datetime.now(CT).isoformat()
         }), 200
-        
+
     except Exception as e:
         logging.error(f"Error getting position context: {e}")
         return jsonify({"error": str(e)}), 500
-
 
 # --- CONTRACTS ENDPOINTS ---
 
@@ -618,7 +627,7 @@ def get_symbol_contracts(symbol):
     try:
         contracts = search_contracts(symbol.upper())
         active = [c for c in contracts if c.get("activeContract")]
-        
+
         return jsonify({
             "symbol": symbol,
             "total_contracts": len(contracts),
@@ -626,7 +635,7 @@ def get_symbol_contracts(symbol):
             "contracts": contracts,
             "selected": get_active_contract_for_symbol(symbol.upper()) if active else None
         }), 200
-        
+
     except Exception as e:
         logging.error(f"Error getting contracts: {e}")
         return jsonify({"error": str(e)}), 500
@@ -641,13 +650,13 @@ def get_current_contracts():
             contract_id = get_active_contract_for_symbol_cached(symbol)
             if contract_id:
                 result[symbol] = contract_id
-        
+
         return jsonify({
             "contracts": result,
             "cache_duration_seconds": CONTRACT_CACHE_DURATION,
             "timestamp": datetime.now(CT).isoformat()
         }), 200
-        
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -681,20 +690,20 @@ def handle_webhook_logic(data):
             return
 
         now = datetime.now(CT)
-        
+
         # Check if in get-flat window
         if in_get_flat(now):
             logging.info("In get-flat window, no trades processed")
             return
-        
+
         # Get current market session
         session_name, session_info = get_current_session(now)
         logging.info(f"Current session: {session_name} - {session_info['characteristics']}")
-        
+
         # Log market conditions periodically
         if not hasattr(handle_webhook_logic, 'last_market_log'):
             handle_webhook_logic.last_market_log = now - timedelta(minutes=6)
-        
+
         if now - handle_webhook_logic.last_market_log > timedelta(minutes=5):
             get_market_conditions_summary()
             handle_webhook_logic.last_market_log = now
@@ -705,15 +714,15 @@ def handle_webhook_logic(data):
             ai_decision = ai_trade_decision_with_regime(
                 acct, strat, sig, sym, size, alert, ai_url
             )
-            
+
             regime = ai_decision.get('regime', 'unknown')
             regime_confidence = ai_decision.get('regime_confidence', 0)
             logging.info(f"Market regime: {regime} (confidence: {regime_confidence}%)")
-            
+
             if ai_decision.get("signal", "").upper() not in ("BUY", "SELL"):
                 logging.info(f"AI blocked trade: {ai_decision.get('reason', 'No reason')}")
                 return
-                
+
             # Overwrite with AI decision
             strat = ai_decision.get("strategy", strat)
             sig = ai_decision.get("signal", sig)
@@ -729,7 +738,7 @@ def handle_webhook_logic(data):
         # Check current positions before entry
         positions = search_pos(acct_id)
         open_pos = [p for p in positions if p["contractId"] == cid and p.get("size", 0) != 0]
-        
+
         if not open_pos:
             cancel_all_stops(acct_id, cid)
         else:
@@ -738,7 +747,7 @@ def handle_webhook_logic(data):
 
         # --- Strategy Dispatch ---
         logging.info(f"Executing {strat} strategy: {sig} {size} {sym} in {regime} regime")
-        
+
         if strat == "bracket":
             run_bracket(acct_id, sym, sig, size, alert, ai_decision_id)
         elif strat == "brackmod":
@@ -747,7 +756,7 @@ def handle_webhook_logic(data):
             run_pivot(acct_id, sym, sig, size, alert, ai_decision_id)
         else:
             logging.error(f"Unknown strategy '{strat}'")
-            
+
     except Exception as e:
         import traceback
         logging.error(f"Exception in handle_webhook_logic: {e}\n{traceback.format_exc()}")
@@ -771,7 +780,7 @@ if __name__ == "__main__":
             get_token_expiry=get_token_expiry,
             authenticate=authenticate,
             auth_lock=AUTH_LOCK
-        ) 
+        )
         scheduler = start_scheduler(app)
         app.logger.info("Starting server.")
         app.run(host="0.0.0.0", port=TV_PORT, threaded=True)
