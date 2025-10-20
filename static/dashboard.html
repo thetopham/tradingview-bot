@@ -260,6 +260,251 @@
             box-shadow: var(--shadow-md);
         }
 
+        /* Leaderboard */
+        .leaderboard-card {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .leaderboard-card::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at top right, rgba(59, 130, 246, 0.12), transparent 55%);
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
+        .leaderboard-summary {
+            position: relative;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+            z-index: 1;
+        }
+
+        .leaderboard-summary-item {
+            padding: 16px 20px;
+            border-radius: 16px;
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.6));
+            box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08);
+        }
+
+        .summary-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            color: var(--text-secondary);
+        }
+
+        .summary-value {
+            display: block;
+            margin-top: 6px;
+            font-size: 1.6rem;
+            font-weight: 700;
+        }
+
+        .leaderboard-table {
+            position: relative;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 18px;
+            overflow: hidden;
+            z-index: 1;
+        }
+
+        .leaderboard-row {
+            display: grid;
+            grid-template-columns: 60px minmax(220px, 2fr) minmax(140px, 1fr) minmax(140px, 1fr) minmax(140px, 1fr) minmax(130px, 1fr) minmax(160px, 1.2fr);
+            gap: 12px;
+            align-items: center;
+            padding: 18px 22px;
+            position: relative;
+            background: rgba(15, 23, 42, 0.6);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+        }
+
+        .leaderboard-row:last-child {
+            border-bottom: none;
+        }
+
+        .leaderboard-row::before {
+            content: '';
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: 5px;
+            background: linear-gradient(180deg, var(--accent, var(--accent-blue)), transparent);
+            opacity: 0.9;
+        }
+
+        .leaderboard-row:nth-child(even) {
+            background: rgba(15, 23, 42, 0.8);
+        }
+
+        .leaderboard-row.leaderboard-top {
+            background: linear-gradient(90deg, rgba(59, 130, 246, 0.18), rgba(15, 23, 42, 0.6));
+        }
+
+        .leaderboard-header {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 1.1px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            background: rgba(15, 23, 42, 0.85);
+        }
+
+        .leaderboard-header::before {
+            display: none;
+        }
+
+        .leaderboard-cell {
+            position: relative;
+        }
+
+        .leaderboard-cell .model-name {
+            font-weight: 700;
+            font-size: 1.05rem;
+        }
+
+        .leaderboard-cell .model-sub {
+            margin-top: 4px;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }
+
+        .leaderboard-cell .model-position {
+            margin-top: 10px;
+            font-size: 0.75rem;
+            color: var(--text-dim);
+        }
+
+        .leaderboard-metric {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .leaderboard-subtext {
+            margin-top: 6px;
+            font-size: 0.75rem;
+            color: var(--text-dim);
+        }
+
+        .leaderboard-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            background: rgba(59, 130, 246, 0.12);
+            color: var(--accent-blue);
+        }
+
+        .leaderboard-status.positive {
+            background: rgba(16, 185, 129, 0.12);
+            color: var(--accent-green);
+        }
+
+        .leaderboard-status.negative {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--accent-red);
+        }
+
+        .leaderboard-models {
+            position: relative;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 18px;
+            margin-top: 26px;
+            z-index: 1;
+        }
+
+        .model-card {
+            position: relative;
+            padding: 18px;
+            border-radius: 18px;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            background: linear-gradient(135deg, rgba(24, 31, 46, 0.95), rgba(11, 16, 26, 0.85));
+            overflow: hidden;
+        }
+
+        .model-card::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at top right, rgba(255, 255, 255, 0.1), transparent 55%);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .model-card:hover::after {
+            opacity: 1;
+        }
+
+        .model-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: var(--accent, var(--accent-blue));
+        }
+
+        .model-chip::before {
+            content: attr(data-icon);
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(148, 163, 184, 0.12);
+            color: inherit;
+        }
+
+        .model-metrics {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .model-metric {
+            font-size: 0.85rem;
+        }
+
+        .model-metric strong {
+            display: block;
+            margin-top: 4px;
+            font-size: 1rem;
+        }
+
+        .model-bar {
+            margin-top: 16px;
+            height: 6px;
+            border-radius: 999px;
+            background: rgba(148, 163, 184, 0.2);
+            overflow: hidden;
+        }
+
+        .model-bar span {
+            display: block;
+            height: 100%;
+            background: var(--accent, var(--accent-blue));
+            border-radius: 999px;
+        }
+
+        .leaderboard-empty {
+            padding: 36px;
+            text-align: center;
+            color: var(--text-dim);
+        }
+
         .card-header {
             display: flex;
             justify-content: space-between;
@@ -998,9 +1243,9 @@
                 <div class="stat-label">Daily P&L</div>
                 <div id="daily-pnl" class="stat-value">--</div>
             </div>
-           <div class="stat-card">
-              <div class="stat-label">Total Equity</div>
-              <div id="total-equity" class="stat-value">--</div>
+            <div class="stat-card">
+                <div class="stat-label">Total Equity</div>
+                <div id="total-equity" class="stat-value">--</div>
             </div>
 
             <div class="stat-card">
@@ -1027,6 +1272,49 @@
 
         <!-- Main Content -->
         <div class="main-content">
+            <!-- AI Model Leaderboard -->
+            <div class="card leaderboard-card">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <svg class="card-icon" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M10 2a8 8 0 00-5.657 13.657A8 8 0 0016 10a8 8 0 00-6-7.743V2z" />
+                        </svg>
+                        AI LLM Leaderboard
+                    </h2>
+                    <span id="leaderboard-updated" class="text-small text-dim">--</span>
+                </div>
+                <div class="leaderboard-summary">
+                    <div class="leaderboard-summary-item">
+                        <span class="summary-label">Winning Model</span>
+                        <span id="leaderboard-winning-model" class="summary-value">--</span>
+                        <span id="leaderboard-winning-edge" class="leaderboard-subtext">Awaiting data...</span>
+                    </div>
+                    <div class="leaderboard-summary-item">
+                        <span class="summary-label">Total Equity</span>
+                        <span id="leaderboard-total-equity" class="summary-value">--</span>
+                        <span class="leaderboard-subtext">Sum of broker balances</span>
+                    </div>
+                    <div class="leaderboard-summary-item">
+                        <span class="summary-label">Net P&L (Today)</span>
+                        <span id="leaderboard-daily-pnl" class="summary-value">--</span>
+                        <span class="leaderboard-subtext">Daily results + open exposure</span>
+                    </div>
+                </div>
+                <div class="leaderboard-table">
+                    <div class="leaderboard-row leaderboard-header">
+                        <div>Rank</div>
+                        <div>Model</div>
+                        <div>Equity</div>
+                        <div>Net P&amp;L</div>
+                        <div>Daily P&amp;L</div>
+                        <div>Win Rate</div>
+                        <div>Status</div>
+                    </div>
+                    <div id="leaderboard-rows"></div>
+                </div>
+                <div id="leaderboard-models" class="leaderboard-models"></div>
+            </div>
+
             <!-- Market Sessions Timeline -->
             <div class="card">
                 <div class="card-header">
@@ -1195,6 +1483,49 @@
          const REFRESH_INTERVAL = 5000;
          const ALERT_DURATION = 8000;
          const SOUND_ENABLED_KEY = 'trading_dashboard_sound';
+
+        const MODEL_METADATA = {
+            alpha: {
+                displayName: 'Claude Overseer',
+                model: 'Claude 3.5 Sonnet',
+                provider: 'Anthropic',
+                shortName: 'Claude 3.5',
+                accent: '#f97316',
+                icon: '✶'
+            },
+            beta: {
+                displayName: 'GPT Overseer',
+                model: 'GPT-4.1',
+                provider: 'OpenAI',
+                shortName: 'GPT-4.1',
+                accent: '#38bdf8',
+                icon: '⚙️'
+            },
+            gamma: {
+                displayName: 'Gemini Overseer',
+                model: 'Gemini 2.0 Flash',
+                provider: 'Google',
+                shortName: 'Gemini 2.0',
+                accent: '#8b5cf6',
+                icon: '🔷'
+            },
+            delta: {
+                displayName: 'Grok Overseer',
+                model: 'Grok 2',
+                provider: 'xAI',
+                shortName: 'Grok 2',
+                accent: '#facc15',
+                icon: '⚡'
+            },
+            epsilon: {
+                displayName: 'DeepSeek Overseer',
+                model: 'DeepSeek CKT 19.1',
+                provider: 'DeepSeek',
+                shortName: 'DeepSeek',
+                accent: '#22c55e',
+                icon: '🧠'
+            }
+        };
         
         // State
         let refreshTimer;
@@ -1268,6 +1599,7 @@
             try {
                 const data = await fetchJSON('/positions/summary');
                 updatePositionsDisplay(data);
+                updateLeaderboardDisplay(data);
                 updateQuickStats(data);
                 return data;
             } catch (error) {
@@ -1346,10 +1678,201 @@
             }
         }
 
+        function getModelMeta(accountKey, accountData = {}) {
+            const key = (accountKey || '').toLowerCase();
+            const template = MODEL_METADATA[key];
+            if (template) {
+                return { ...template };
+            }
+
+            const fallbackName = accountData?.balances?.name || (accountKey ? accountKey.toUpperCase() : 'MODEL');
+            return {
+                displayName: fallbackName,
+                model: 'Custom Overseer',
+                provider: 'AI Strategy',
+                shortName: fallbackName,
+                accent: '#38bdf8',
+                icon: '🤖'
+            };
+        }
+
+        function updateLeaderboardDisplay(data) {
+            const rowsContainer = document.getElementById('leaderboard-rows');
+            const modelsContainer = document.getElementById('leaderboard-models');
+            const updatedElement = document.getElementById('leaderboard-updated');
+            const winningModelEl = document.getElementById('leaderboard-winning-model');
+            const winningEdgeEl = document.getElementById('leaderboard-winning-edge');
+            const totalEquityEl = document.getElementById('leaderboard-total-equity');
+            const dailyPnlEl = document.getElementById('leaderboard-daily-pnl');
+
+            if (!rowsContainer || !modelsContainer) return;
+
+            const accounts = data.accounts || {};
+            const entries = Object.entries(accounts).map(([accountKey, accountData]) => {
+                const meta = getModelMeta(accountKey, accountData);
+                const balance = safeNumber(accountData?.balances?.balance);
+                const dailyPnl = safeNumber(accountData?.daily_stats?.daily_pnl) ?? 0;
+                const openPnl = safeNumber(accountData?.position?.unrealized_pnl) ?? 0;
+                const netPnl = dailyPnl + openPnl;
+                const winRate = formatWinRate(accountData?.daily_stats?.win_rate);
+                const trades = Number(accountData?.daily_stats?.trades_today ?? accountData?.daily_stats?.trade_count ?? 0);
+                const safeTrades = Number.isFinite(trades) ? trades : 0;
+                const riskLevel = accountData?.daily_stats?.risk_level || 'unknown';
+                const lossStreak = safeNumber(accountData?.daily_stats?.consecutive_losses) ?? 0;
+                const position = accountData?.position;
+
+                let positionText = 'Flat — awaiting next signal';
+                const sizeValue = safeNumber(position?.size);
+                if (position && sizeValue && sizeValue > 0) {
+                    const entryPrice = formatPrice(position.entry_price);
+                    const entryDisplay = entryPrice === '--' ? '--' : `$${entryPrice}`;
+                    const durationValue = safeNumber(position.duration_minutes);
+                    const durationDisplay = durationValue !== null ? `${Math.round(durationValue)}m` : '--';
+                    const direction = (position.side || 'FLAT').toUpperCase();
+                    positionText = `${direction} ${position.size} @ ${entryDisplay} • ${durationDisplay}`;
+                }
+
+                return {
+                    key: accountKey,
+                    meta,
+                    balance,
+                    dailyPnl,
+                    openPnl,
+                    netPnl,
+                    winRate,
+                    trades: safeTrades,
+                    riskLevel,
+                    lossStreak,
+                    positionText,
+                    canTrade: !!accountData?.daily_stats?.can_trade
+                };
+            }).filter(Boolean);
+
+            entries.sort((a, b) => b.netPnl - a.netPnl);
+
+            const totalDailyPnl = entries.reduce((sum, entry) => sum + entry.dailyPnl, 0);
+            const totalNetPnl = entries.reduce((sum, entry) => sum + entry.netPnl, 0);
+            const trackedEquity = entries.reduce((sum, entry) => sum + (entry.balance !== null ? entry.balance : 0), 0);
+            const totalEquityValue = safeNumber(data.total_equity);
+            const equityDisplay = totalEquityValue !== null ? totalEquityValue : (trackedEquity > 0 ? trackedEquity : null);
+
+            if (winningModelEl) {
+                winningModelEl.textContent = entries.length ? entries[0].meta.displayName : '--';
+            }
+
+            if (winningEdgeEl) {
+                if (entries.length) {
+                    const edge = entries.length > 1 ? entries[0].netPnl - entries[1].netPnl : entries[0].netPnl;
+                    const edgeValue = formatCurrency(Math.abs(edge));
+                    const winInfo = entries[0].winRate || '--';
+                    const directionText = edge === 0 ? `Tied at ${edgeValue}` : `${edge > 0 ? 'Leads' : 'Trails'} by ${edgeValue}`;
+                    winningEdgeEl.textContent = `${directionText} · ${winInfo} · ${entries[0].trades} trades`;
+                } else {
+                    winningEdgeEl.textContent = 'Awaiting data...';
+                }
+            }
+
+            if (totalEquityEl) {
+                totalEquityEl.textContent = equityDisplay !== null ? formatCurrency(equityDisplay) : '--';
+            }
+
+            if (dailyPnlEl) {
+                if (entries.length) {
+                    dailyPnlEl.textContent = formatCurrency(totalNetPnl);
+                    dailyPnlEl.className = `summary-value ${getValueClass(totalNetPnl)}`;
+                } else {
+                    dailyPnlEl.textContent = '--';
+                    dailyPnlEl.className = 'summary-value';
+                }
+            }
+
+            if (updatedElement) {
+                updatedElement.textContent = data.timestamp ? `Updated ${formatTime(data.timestamp)}` : '--';
+            }
+
+            if (!entries.length) {
+                rowsContainer.innerHTML = '<div class="leaderboard-empty">No account data available</div>';
+                modelsContainer.innerHTML = '';
+                return;
+            }
+
+            rowsContainer.innerHTML = entries.map((entry, index) => {
+                const rank = index + 1;
+                const netClass = getValueClass(entry.netPnl);
+                const dailyClass = getValueClass(entry.dailyPnl);
+                const openClass = getValueClass(entry.openPnl);
+                const statusClass = entry.canTrade ? 'positive' : 'negative';
+                const statusLabel = entry.canTrade ? 'ACTIVE' : 'PAUSED';
+                const riskLabel = formatLabel(entry.riskLevel);
+                const streakLabel = entry.lossStreak > 0 ? ` · Loss streak ${entry.lossStreak}` : '';
+
+                return `
+                    <div class="leaderboard-row ${rank === 1 ? 'leaderboard-top' : ''}" style="--accent: ${entry.meta.accent};">
+                        <div class="leaderboard-cell">
+                            <div class="leaderboard-metric">${rank}</div>
+                        </div>
+                        <div class="leaderboard-cell">
+                            <div class="model-name">${entry.meta.displayName}</div>
+                            <div class="model-sub">${entry.meta.model} · ${entry.meta.provider}</div>
+                            <div class="model-position">${entry.positionText}</div>
+                        </div>
+                        <div class="leaderboard-cell">
+                            <div class="leaderboard-metric">${entry.balance !== null ? formatCurrency(entry.balance) : '--'}</div>
+                            <div class="leaderboard-subtext">Broker equity</div>
+                        </div>
+                        <div class="leaderboard-cell">
+                            <div class="leaderboard-metric ${netClass}">${formatCurrency(entry.netPnl)}</div>
+                            <div class="leaderboard-subtext">Open: <span class="${openClass}">${formatCurrency(entry.openPnl)}</span></div>
+                        </div>
+                        <div class="leaderboard-cell">
+                            <div class="leaderboard-metric ${dailyClass}">${formatCurrency(entry.dailyPnl)}</div>
+                            <div class="leaderboard-subtext">Day performance</div>
+                        </div>
+                        <div class="leaderboard-cell">
+                            <div class="leaderboard-metric">${entry.winRate || '--'}</div>
+                            <div class="leaderboard-subtext">Trades: ${entry.trades}${streakLabel}</div>
+                        </div>
+                        <div class="leaderboard-cell">
+                            <div class="leaderboard-status ${statusClass}">${statusLabel}</div>
+                            <div class="leaderboard-subtext">${riskLabel}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            const cardsHtml = entries.map(entry => {
+                const totalForShare = equityDisplay && equityDisplay > 0 ? equityDisplay : trackedEquity;
+                const share = totalForShare > 0 && entry.balance !== null ? (entry.balance / totalForShare) * 100 : 0;
+                const shareValue = share > 0 ? share : 0;
+                const shareText = shareValue > 0 ? `${shareValue.toFixed(1)}% of tracked equity` : 'Awaiting balance';
+                const barWidth = shareValue > 0 ? Math.min(100, Math.max(8, shareValue)) : 8;
+
+                return `
+                    <div class="model-card" style="--accent: ${entry.meta.accent};">
+                        <div class="model-chip" data-icon="${entry.meta.icon || '🤖'}">${entry.meta.shortName || entry.meta.displayName}</div>
+                        <div class="model-metrics">
+                            <div class="model-metric">
+                                <span class="text-dim">Net P&L</span>
+                                <strong class="${getValueClass(entry.netPnl)}">${formatCurrency(entry.netPnl)}</strong>
+                            </div>
+                            <div class="model-metric">
+                                <span class="text-dim">Daily</span>
+                                <strong class="${getValueClass(entry.dailyPnl)}">${formatCurrency(entry.dailyPnl)}</strong>
+                            </div>
+                        </div>
+                        <div class="leaderboard-subtext" style="margin-top: 12px;">${shareText}</div>
+                        <div class="model-bar"><span style="width: ${barWidth}%"></span></div>
+                    </div>
+                `;
+            }).join('');
+
+            modelsContainer.innerHTML = cardsHtml;
+        }
+
         function updatePositionsDisplay(data) {
             const container = document.getElementById('positions-content');
             const accounts = data.accounts || {};
-            
+
             let html = '';
             
             Object.entries(accounts).forEach(([accountName, accountData]) => {
@@ -1414,29 +1937,60 @@
         }
 
         function updateQuickStats(data) {
-            const dailyPnl = data.total_daily_pnl || 0;
-            document.getElementById('daily-pnl').textContent = formatCurrency(dailyPnl);
-            document.getElementById('daily-pnl').className = `stat-value ${getValueClass(dailyPnl)}`;
-            
-            document.getElementById('open-positions').textContent = data.total_positions || 0;
-            
-            let totalWinRate = 0;
-            let accountCount = 0;
+            const dailyElement = document.getElementById('daily-pnl');
+            const dailyPnl = safeNumber(data.total_daily_pnl) ?? 0;
+            if (dailyElement) {
+                dailyElement.textContent = formatCurrency(dailyPnl);
+                dailyElement.className = `stat-value ${getValueClass(dailyPnl)}`;
+            }
+
+            const equityElement = document.getElementById('total-equity');
+            if (equityElement) {
+                const equityValue = safeNumber(data.total_equity);
+                equityElement.textContent = equityValue !== null ? formatCurrency(equityValue) : '--';
+                equityElement.className = 'stat-value';
+            }
+
+            const openPositionsEl = document.getElementById('open-positions');
+            if (openPositionsEl) {
+                openPositionsEl.textContent = data.total_positions || 0;
+            }
+
+            const winRates = [];
             Object.values(data.accounts || {}).forEach(account => {
-                if (account.daily_stats && account.daily_stats.win_rate) {
-                    const winRate = parseFloat(account.daily_stats.win_rate) || 0;
-                    if (winRate > 0) {
-                        totalWinRate += winRate;
-                        accountCount++;
+                const rawRate = account?.daily_stats?.win_rate;
+                if (rawRate !== null && rawRate !== undefined) {
+                    let numeric;
+                    if (typeof rawRate === 'string') {
+                        numeric = safeNumber(rawRate.replace('%', ''));
+                    } else {
+                        numeric = safeNumber(rawRate <= 1 ? rawRate * 100 : rawRate);
+                    }
+                    if (numeric !== null && numeric >= 0) {
+                        winRates.push(numeric);
                     }
                 }
             });
-            
-            document.getElementById('win-rate').textContent = accountCount > 0 ? 
-                `${(totalWinRate / accountCount).toFixed(1)}%` : '--';
-            
-            if (data.market_price) {
-                document.getElementById('current-price').textContent = `$${data.market_price.toFixed(2)}`;
+
+            const winRateEl = document.getElementById('win-rate');
+            if (winRateEl) {
+                if (winRates.length) {
+                    const average = winRates.reduce((sum, rate) => sum + rate, 0) / winRates.length;
+                    winRateEl.textContent = `${average.toFixed(1)}%`;
+                } else {
+                    winRateEl.textContent = '--';
+                }
+            }
+
+            const currentPriceEl = document.getElementById('current-price');
+            const currentPrice = safeNumber(data.market_price);
+            if (currentPriceEl && currentPrice !== null) {
+                currentPriceEl.textContent = `$${currentPrice.toFixed(2)}`;
+            }
+
+            const dataAgeEl = document.getElementById('data-age');
+            if (dataAgeEl) {
+                dataAgeEl.textContent = computeDataAgeText(data.timestamp);
             }
         }
 
@@ -1672,16 +2226,29 @@
         }
 
         // Utility Functions
+        function safeNumber(value) {
+            if (value === null || value === undefined) return null;
+            if (typeof value === 'number') {
+                return Number.isFinite(value) ? value : null;
+            }
+            const cleaned = String(value).replace(/[^0-9.+-]/g, '');
+            if (!cleaned) return null;
+            const numeric = Number(cleaned);
+            return Number.isFinite(numeric) ? numeric : null;
+        }
+
         function formatCurrency(value) {
-            if (value === null || value === undefined) return '--';
-            const isNegative = value < 0;
-            const formatted = Math.abs(value).toFixed(2);
-            return isNegative ? `-$${formatted}` : `$${formatted}`;
+            const numeric = safeNumber(value);
+            if (numeric === null) return '--';
+            const isNegative = numeric < 0;
+            const formatted = Math.abs(numeric).toFixed(2);
+            return `${isNegative ? '-' : ''}$${formatted}`;
         }
 
         function formatPrice(value) {
-            if (value === null || value === undefined) return '--';
-            return value.toFixed(2);
+            const numeric = safeNumber(value);
+            if (numeric === null) return '--';
+            return numeric.toFixed(2);
         }
 
         function formatTime(timestamp) {
@@ -1690,9 +2257,53 @@
         }
 
         function getValueClass(value) {
-            if (value > 0) return 'positive';
-            if (value < 0) return 'negative';
+            const numeric = safeNumber(value);
+            if (numeric === null) return 'neutral';
+            if (numeric > 0) return 'positive';
+            if (numeric < 0) return 'negative';
             return 'neutral';
+        }
+
+        function formatWinRate(rate) {
+            if (rate === null || rate === undefined) return '--';
+            if (typeof rate === 'string') {
+                const trimmed = rate.trim();
+                if (!trimmed) return '--';
+                return trimmed.endsWith('%') ? trimmed : `${trimmed}%`;
+            }
+            const numeric = Number(rate);
+            if (!Number.isFinite(numeric)) return '--';
+            if (numeric <= 1 && numeric >= 0) {
+                return `${(numeric * 100).toFixed(1)}%`;
+            }
+            return `${numeric.toFixed(1)}%`;
+        }
+
+        function formatLabel(value) {
+            if (!value) return '--';
+            return value.toString().split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+        }
+
+        function computeDataAgeText(timestamp) {
+            if (!timestamp) return '--';
+            const parsed = new Date(timestamp);
+            if (Number.isNaN(parsed.getTime())) return '--';
+            const diffMs = Date.now() - parsed.getTime();
+            if (diffMs < 0) return '0s';
+            const diffSec = Math.round(diffMs / 1000);
+            if (diffSec < 60) {
+                return `${diffSec}s`;
+            }
+            const diffMin = diffMs / 60000;
+            if (diffMin < 60) {
+                return diffMin < 10 ? `${diffMin.toFixed(1)}m` : `${Math.round(diffMin)}m`;
+            }
+            const diffHours = diffMs / 3600000;
+            if (diffHours < 24) {
+                return diffHours < 10 ? `${diffHours.toFixed(1)}h` : `${Math.round(diffHours)}h`;
+            }
+            const diffDays = diffMs / 86400000;
+            return `${diffDays.toFixed(1)}d`;
         }
 
         function getTrendArrow(trend) {
