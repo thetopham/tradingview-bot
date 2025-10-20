@@ -14,6 +14,23 @@ from dateutil import parser
 from market_regime import MarketRegime
 from supabase import create_client, Client
 from typing import Dict, List, Optional, Tuple
+from threading import RLock
+_CACHE = {}
+_CACHE_LOCK = RLock()
+
+def _cache_get(key: str):
+    with _CACHE_LOCK:
+        rec = _CACHE.get(key)
+        if not rec: return None
+        val, exp = rec
+        if exp < time.time():
+            _CACHE.pop(key, None)
+            return None
+        return val
+
+def _cache_set(key: str, val, ttl: float):
+    with _CACHE_LOCK:
+        _CACHE[key] = (val, time.time() + ttl)
 
 session = requests.Session()
 config = load_config()
