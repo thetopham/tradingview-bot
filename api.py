@@ -1056,6 +1056,18 @@ def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url)
             payload['initiated_by'] = strat.get('initiated_by', 'unknown')
         resp = session.post(ai_url, json=payload, timeout=240)
         resp.raise_for_status()
+        raw_body = resp.text.strip() if resp.text is not None else ""
+        if not raw_body:
+            logging.warning("AI response empty body; defaulting to HOLD decision")
+            return {
+                "strategy": strat,
+                "signal": "HOLD",
+                "account": account,
+                "reason": "AI response was empty",
+                "regime": regime['primary_regime'],
+                "entry_quality": entry_quality,
+                "error": False
+            }
         try:
             data = resp.json()
         except Exception as e:
@@ -1066,6 +1078,7 @@ def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url)
                 "account": account,
                 "reason": f"AI response parsing error: {str(e)}",
                 "regime": regime['primary_regime'],
+                "entry_quality": entry_quality,
                 "error": True
             }
         data['regime'] = regime['primary_regime']

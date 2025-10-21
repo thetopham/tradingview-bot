@@ -708,6 +708,14 @@ def handle_webhook_logic(data):
             logging.error(f"Unknown account '{acct}'")
             return
 
+        if not strat:
+            logging.info(f"No strategy provided for account {acct}; skipping trade execution")
+            return
+
+        if not sig:
+            logging.info(f"No signal provided for account {acct}; skipping trade execution")
+            return
+
         acct_id = ACCOUNTS[acct]
         cid = get_contract(sym)
         if not cid:
