@@ -25,7 +25,13 @@ class PositionManager:
         # Risk parameters (for context only)
         self.max_daily_loss = config.get('MAX_DAILY_LOSS', -500.0)
         self.profit_target = config.get('DAILY_PROFIT_TARGET', 500.0)
-        self.max_consecutive_losses = config.get('MAX_CONSECUTIVE_LOSSES', 3)
+        raw_max_consecutive_losses = config.get('MAX_CONSECUTIVE_LOSSES', 3)
+        if raw_max_consecutive_losses is not None and raw_max_consecutive_losses <= 0:
+            self.logger.info("Consecutive loss guard disabled via MAX_CONSECUTIVE_LOSSES <= 0")
+            self.max_consecutive_losses = None
+        else:
+            self.max_consecutive_losses = raw_max_consecutive_losses
+        self.consecutive_loss_guard_enabled = self.max_consecutive_losses is not None
     
     def get_position_state(self, acct_id: int, cid: str) -> Dict:
         """
@@ -203,7 +209,7 @@ class PositionManager:
             self.logger.info(f"Daily profit target reached: {daily_pnl}")
             return False
             
-        if consecutive_losses >= self.max_consecutive_losses:
+        if self.consecutive_loss_guard_enabled and consecutive_losses >= self.max_consecutive_losses:
             self.logger.warning(f"Max consecutive losses reached: {consecutive_losses}")
             return False
             
@@ -224,10 +230,18 @@ class PositionManager:
                 risk_score += 1
         
         # Check consecutive losses
-        if consecutive_losses >= self.max_consecutive_losses - 1:
-            risk_score += 2
-        elif consecutive_losses >= 2:
-            risk_score += 1
+        if self.consecutive_loss_guard_enabled and self.max_consecutive_losses is not None:
+            if consecutive_losses >= self.max_consecutive_losses:
+                risk_score += 2
+            elif self.max_consecutive_losses > 1 and consecutive_losses >= self.max_consecutive_losses - 1:
+                risk_score += 1
+            elif consecutive_losses >= 2:
+                risk_score += 1
+        else:
+            if consecutive_losses >= 3:
+                risk_score += 2
+            elif consecutive_losses >= 2:
+                risk_score += 1
             
         # Check position concentration
         if open_positions > 3:
@@ -274,7 +288,8 @@ class PositionManager:
             'risk_limits': {
                 'max_daily_loss': self.max_daily_loss,
                 'profit_target': self.profit_target,
-                'max_consecutive_losses': self.max_consecutive_losses
+                'max_consecutive_losses': self.max_consecutive_losses,
+                'consecutive_loss_guard_enabled': self.consecutive_loss_guard_enabled
             }
         }
     
