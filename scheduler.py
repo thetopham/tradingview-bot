@@ -143,12 +143,12 @@ def start_scheduler(app):
         for idx, account_name in enumerate(ACCOUNTS.keys()):
             data = {
                 "secret": WEBHOOK_SECRET,
-                "strategy": "",
-                "account": account_name,   # was "beta"; now loop all accounts
-                "signal": "",
+                "strategy": "brackmod",
+                "account": account_name,   # loop all accounts
+                "signal": "hold",
                 "symbol": "MES",
                 "size": 3,
-                "alert": "APScheduler 5m - candle close",
+                "alert": "APScheduler 5m",
             }
             try:
                 if idx:
