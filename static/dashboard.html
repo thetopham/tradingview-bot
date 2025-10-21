@@ -634,6 +634,13 @@
             font-variant-numeric: tabular-nums;
         }
 
+        .position-metric-subtext {
+            margin-top: 4px;
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            letter-spacing: 0.02em;
+        }
+
         /* AI Signal - More prominent */
         .ai-signal {
             display: flex;
@@ -1894,63 +1901,84 @@
             const accounts = data.accounts || {};
 
             let html = '';
-            
+
             Object.entries(accounts)
                 .filter(([accountName, accountData]) => !isPracticeAccount(accountName, accountData))
                 .forEach(([accountName, accountData]) => {
                     if (accountData.position) {
                         const pos = accountData.position;
-                        const stats = accountData.daily_stats;
-                    
-                    html += `
+                        const stats = accountData.daily_stats || {};
+                        const meta = getModelMeta(accountName, accountData);
+                        const formattedName = `${meta.icon ? `${meta.icon} ` : ''}${meta.displayName || formatLabel(accountName)}`;
+                        const modelDetails = [meta.model, meta.provider].filter(Boolean).join(' · ');
+                        const positionSize = pos.size ?? '--';
+                        const positionSide = (pos.side || '--').toUpperCase();
+                        const entryPrice = formatPrice(pos.entry_price);
+                        const entryDisplay = entryPrice === '--' ? '--' : `$${entryPrice}`;
+                        const currentPrice = formatPrice(pos.current_price);
+                        const currentDisplay = currentPrice === '--' ? '--' : `$${currentPrice}`;
+                        const totalPnlValue = safeNumber(pos.total_pnl);
+                        const totalPnlClass = getValueClass(totalPnlValue);
+                        const durationValue = safeNumber(pos.duration_minutes);
+                        const durationDisplay = durationValue !== null ? `${Math.round(durationValue)}m` : '--';
+                        const dailyPnlValue = safeNumber(stats.daily_pnl);
+                        const dailyPnlClass = getValueClass(dailyPnlValue);
+                        const dailyPnlDisplay = formatCurrency(dailyPnlValue);
+                        const winRateDisplay = formatWinRate(stats.win_rate);
+                        const canTrade = !!stats.can_trade;
+                        const statusClass = canTrade ? 'positive' : 'negative';
+                        const statusLabel = canTrade ? 'ACTIVE' : 'LOCKED';
+
+                        html += `
                         <div class="position-item ${pos.side ? pos.side.toLowerCase() : ''}">
                             <div class="position-metric">
-                                <div class="position-metric-label">Account</div>
-                                <div class="position-metric-value">${accountName.toUpperCase()}</div>
+                                <div class="position-metric-label">Model</div>
+                                <div class="position-metric-value">${formattedName}</div>
+                                ${modelDetails ? `<div class="position-metric-subtext">${modelDetails}</div>` : ''}
                             </div>
                             <div class="position-metric">
                                 <div class="position-metric-label">Position</div>
-                                <div class="position-metric-value">${pos.size} ${pos.side || '--'}</div>
+                                <div class="position-metric-value">${positionSize} ${positionSide}</div>
                             </div>
                             <div class="position-metric">
                                 <div class="position-metric-label">Entry</div>
-                                <div class="position-metric-value">$${formatPrice(pos.entry_price)}</div>
+                                <div class="position-metric-value">${entryDisplay}</div>
                             </div>
                             <div class="position-metric">
                                 <div class="position-metric-label">Current</div>
-                                <div class="position-metric-value">$${formatPrice(pos.current_price)}</div>
+                                <div class="position-metric-value">${currentDisplay}</div>
                             </div>
                             <div class="position-metric">
                                 <div class="position-metric-label">P&L</div>
-                                <div class="position-metric-value ${getValueClass(pos.total_pnl)}">
-                                    ${formatCurrency(pos.total_pnl)}
+                                <div class="position-metric-value ${totalPnlClass}">
+                                    ${formatCurrency(totalPnlValue)}
                                 </div>
                             </div>
                             <div class="position-metric">
                                 <div class="position-metric-label">Duration</div>
-                                <div class="position-metric-value">${pos.duration_minutes}m</div>
+                                <div class="position-metric-value">${durationDisplay}</div>
                             </div>
                             <div class="position-metric">
                                 <div class="position-metric-label">Daily Net P&L</div>
-                                <div class="position-metric-value ${getValueClass(stats.daily_pnl)}">
-                                    ${formatCurrency(stats.daily_pnl)}
+                                <div class="position-metric-value ${dailyPnlClass}">
+                                    ${dailyPnlDisplay}
                                 </div>
                             </div>
                             <div class="position-metric">
                                 <div class="position-metric-label">Win Rate</div>
-                                <div class="position-metric-value">${stats.win_rate}</div>
+                                <div class="position-metric-value">${winRateDisplay}</div>
                             </div>
                             <div class="position-metric">
                                 <div class="position-metric-label">Status</div>
-                                <div class="position-metric-value ${stats.can_trade ? 'positive' : 'negative'}">
-                                    ${stats.can_trade ? 'ACTIVE' : 'LOCKED'}
+                                <div class="position-metric-value ${statusClass}">
+                                    ${statusLabel}
                                 </div>
                             </div>
                         </div>
                     `;
                 }
             });
-            
+
             if (!html) {
                 html = '<div style="text-align: center; padding: 40px;" class="text-dim">No open positions</div>';
             }
