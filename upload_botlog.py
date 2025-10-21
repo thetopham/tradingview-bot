@@ -11,9 +11,9 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- Config derived from env so it can't drift ---
-ACTIVE_LOG = os.getenv("LOG_FILE", "/tmp/tradingview_bot.log")
+ACTIVE_LOG = os.getenv("LOG_FILE", "/tmp/tradingview_projectx_bot.log")
 log_dir = os.path.dirname(ACTIVE_LOG) or "."
-log_base = os.path.basename(ACTIVE_LOG)              # e.g. tradingview_bot.log
+log_base = os.path.basename(ACTIVE_LOG)              # e.g. tradingview_projectx_bot.log
 log_pattern = os.path.join(log_dir, log_base + "*")  # matches .log, .log.1, .log.2, etc.
 
 BUCKET = "botlogs"
