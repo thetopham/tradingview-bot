@@ -4,7 +4,7 @@ Simplified position context provider for AI trading decisions
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 from api import search_pos, search_open, search_trades, get_contract
@@ -71,7 +71,7 @@ class PositionManager:
             try:
                 from dateutil import parser
                 entry_time = parser.parse(creation_time)
-                duration = (datetime.now(datetime.timezone.utc) - entry_time).total_seconds() / 60
+                duration = (datetime.now(timezone.utc) - entry_time).total_seconds() / 60
             except:
                 duration = 0
         else:
