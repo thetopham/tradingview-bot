@@ -762,16 +762,6 @@ def handle_webhook_logic(data):
             return
 
         acct_id = ACCOUNTS[acct]
-        cid = get_contract(sym)
-
-        # Manual flatten (close all) signal
-        if sig == "FLAT":
-            flatten_account_positions(acct_id, cid, sym)
-            return
-
-        if not cid:
-            logging.error(f"Could not determine contract ID for symbol {sym}")
-            return
 
         now = datetime.now(CT)
 
@@ -793,6 +783,7 @@ def handle_webhook_logic(data):
             handle_webhook_logic.last_market_log = now
 
         # --- AI Overseer OR Direct Trading ---
+        ai_decision = None
         if acct in AI_ENDPOINTS:
             ai_url = AI_ENDPOINTS[acct]
             ai_decision = ai_trade_decision_with_regime(
@@ -803,34 +794,81 @@ def handle_webhook_logic(data):
             regime_confidence = ai_decision.get('regime_confidence', 0)
             logging.info(f"Market regime: {regime} (confidence: {regime_confidence}%)")
 
-            if ai_decision.get("signal", "").upper() not in ("BUY", "SELL"):
-                logging.info(f"AI blocked trade: {ai_decision.get('reason', 'No reason, probably HOLD')}")
-                return
-
-            # Overwrite with AI decision
-            strat = ai_decision.get("strategy", strat)
-            sig = ai_decision.get("signal", sig)
-            sym = ai_decision.get("symbol", sym)
-            size = ai_decision.get("size", size)
+            # Merge / normalize
+            strat = (ai_decision.get("strategy", strat) or "bracket").lower()
+            sig   = (ai_decision.get("signal", sig)   or "HOLD").upper()
+            sym   = ai_decision.get("symbol", sym)
+            size  = ai_decision.get("size", size)
             alert = ai_decision.get("alert", alert)
             ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
+
+            # allow BUY/SELL/HOLD to continue; block anything else
+            if sig not in ("BUY", "SELL", "HOLD"):
+                logging.info(
+                    f"AI decided {sig}; no action. Reason: {ai_decision.get('reason', 'n/a')}"
+                )
+                return
         else:
             # NON-AI ACCOUNT - simple decision ID for tracking
             ai_decision_id = int(time.time() * 1000) % (2**62)
             logging.info(f"Non-AI account {acct} - proceeding with manual trade")
 
-        # Check current positions before entry
-        positions = search_pos(acct_id)
-        open_pos = [p for p in positions if p["contractId"] == cid and p.get("size", 0) != 0]
+        # --- FLAT handling for manual or AI decisions ---
+        if sig == "FLAT":
+            try:
+                primary_cid = get_contract(sym)  # may be None; sweeper tolerates it
+            except Exception:
+                primary_cid = None
+            flatten_account_positions(acct_id, primary_cid, sym)
+            if ai_decision:
+                logging.info(
+                    f"AI-initiated FLAT complete for account {acct} ({sym}) decision_id={ai_decision_id}"
+                )
+            else:
+                logging.info(
+                    f"Manual FLAT complete for account {acct} ({sym})"
+                )
+            return
 
-        if not open_pos:
+        # Resolve contract (best effort; HOLD can still proceed without it)
+        try:
+            cid = get_contract(sym)
+        except Exception:
+            cid = None
+        if not cid and sig in ("BUY", "SELL"):
+            logging.error("Could not determine contract ID for symbol %s; aborting entry", sym)
+            return
+
+        # Check current positions before acting
+        positions = search_pos(acct_id) or []
+        open_pos = [
+            p for p in positions if cid and p.get("contractId") == cid and p.get("size", 0) != 0
+        ]
+        total_size = sum(p.get("size", 0) for p in open_pos) if open_pos else 0
+
+        # If no open position, clean up protective stops (optional safety)
+        if not open_pos and cid:
             cancel_all_stops(acct_id, cid)
-        else:
-            total_size = sum(p.get("size", 0) for p in open_pos)
-            logging.info(f"Current position size: {total_size}")
 
-        # --- Strategy Dispatch ---
-        logging.info(f"Executing {strat} strategy: {sig} {size} {sym} in {regime} regime")
+        # --- NEW: HOLD branch (no new orders) ---
+        if sig == "HOLD":
+            if cid:
+                if open_pos:
+                    logging.info(
+                        f"HOLD with open position (size {total_size}) -> leaving existing brackets/stops as-is."
+                    )
+                else:
+                    logging.info(
+                        "HOLD while flat -> canceled protective stops (if any) and took no action."
+                    )
+            else:
+                logging.info("HOLD with unknown contract -> no action.")
+            return
+
+        # --- Strategy Dispatch for BUY/SELL only ---
+        logging.info(
+            f"Executing {strat} strategy: {sig} {size} {sym} in {regime} regime (pos={total_size})"
+        )
 
         if strat == "bracket":
             run_bracket(acct_id, sym, sig, size, alert, ai_decision_id)
