@@ -140,11 +140,15 @@ def start_scheduler(app):
 
         # Then run the normal webhook (without any trade signals) FOR ALL ACCOUNTS
         # Stagger 0..N-1 seconds to reduce any downstream race conditions
-        for idx, account_name in enumerate(ACCOUNTS.keys()):
+        non_practice_accounts = [
+            name for name in ACCOUNTS.keys() if name.lower() != "practice"
+        ]
+
+        for idx, account_name in enumerate(non_practice_accounts):
             data = {
                 "secret": WEBHOOK_SECRET,
                 "strategy": "brackmod",
-                "account": account_name,   # loop all accounts
+                "account": account_name,   # loop all funded accounts (skip practice)
                 "signal": "hold",
                 "symbol": "MES",
                 "size": 3,
