@@ -408,6 +408,22 @@ def check_for_phantom_orders(acct_id, cid):
         if not has_protective:
             logging.warning(f"Phantom position detected! No stop/limit attached. Positions: {positions}, Orders: {open_orders}")
             flatten_contract(acct_id, cid, timeout=10)
+    else:
+        phantom_orders = [
+            o for o in open_orders
+            if o.get("status") == 1 and o.get("type") in (1, 4)
+        ]
+        if phantom_orders:
+            logging.warning(
+                "Phantom protective orders detected without position! Contract %s, Orders: %s",
+                cid,
+                phantom_orders,
+            )
+            for order in phantom_orders:
+                try:
+                    cancel(acct_id, order["id"])
+                except Exception as exc:
+                    logging.error("Failed to cancel phantom order %s: %s", order.get("id"), exc)
 
 # log results to supabase
 def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta=None):
