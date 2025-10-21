@@ -1,6 +1,7 @@
 from supabase import create_client
 import datetime, time, glob, os, re, sys
 from dotenv import load_dotenv
+from datetime import timezone
 
 load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -21,7 +22,7 @@ DAYS_TO_KEEP = int(os.getenv("BOTLOG_DAYS_TO_KEEP", "7"))
 MIN_BYTES_TO_UPLOAD = int(os.getenv("BOTLOG_MIN_BYTES", "128"))  # skip tiny/empty files
 
 now = time.time()
-utcnow = datetime.datetime.utcnow()
+utcnow = datetime.datetime.now(timezone.utc)
 
 print(f"\nACTIVE_LOG={ACTIVE_LOG}")
 print(f"Glob pattern={log_pattern}")
