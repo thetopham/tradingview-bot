@@ -802,8 +802,8 @@ def handle_webhook_logic(data):
             alert = ai_decision.get("alert", alert)
             ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
 
-            # allow BUY/SELL/HOLD to continue; block anything else
-            if sig not in ("BUY", "SELL", "HOLD"):
+            # allow BUY/SELL/HOLD/FLAT to continue; block anything else
+            if sig not in ("BUY", "SELL", "HOLD", "FLAT"):
                 logging.info(
                     f"AI decided {sig}; no action. Reason: {ai_decision.get('reason', 'n/a')}"
                 )
