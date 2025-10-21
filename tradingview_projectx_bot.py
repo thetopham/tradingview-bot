@@ -705,7 +705,7 @@ def handle_webhook_logic(data):
             logging.info(f"Market regime: {regime} (confidence: {regime_confidence}%)")
             
             if ai_decision.get("signal", "").upper() not in ("BUY", "SELL"):
-                logging.info(f"AI blocked trade: {ai_decision.get('reason', 'No reason')}")
+                logging.info(f"AI blocked trade: {ai_decision.get('reason', 'No reason, probably HOLD')}")
                 return
                 
             # Overwrite with AI decision
