@@ -1,0 +1,920 @@
+{
+  "name": "ai trading overseer - regime gemini",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Start here: Step-by Step Youtube Tutorial :star:\n\n[![Technical Analyst AI Agent using LLM Vision](https://img.youtube.com/vi/yjBHheCB6Ek/sddefault.jpg)](https://youtu.be/yjBHheCB6Ek)\n",
+        "height": 550,
+        "width": 507,
+        "color": 7
+      },
+      "id": "232582d5-c8d6-4f2e-b7b8-4e6db8804f4e",
+      "name": "Sticky Note5",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        144,
+        224
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gemini-overseer",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        944,
+        368
+      ],
+      "id": "3b8dca2d-e3e0-431b-952e-6eeaad3664c2",
+      "name": "Webhook",
+      "webhookId": "11c79640-c20f-4692-a075-75e0153bbb29"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"strategy\": \"{{ $('Code').item.json.strategy }}\",\n  \"signal\": \"{{ $('Code').item.json.signal }}\",\n  \"timestamp\": \"{{ $('Code').item.json.timestamp }}\",\n  \"symbol\": \"{{ $('Code').item.json.symbol }}\",\n  \"account\": \"{{ $('Code').item.json.account }}\",\n  \"size\": {{ $('Code').item.json.size }},\n  \"ai_decision_id\": \"{{ $json.ai_decision_id }}\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.2,
+      "position": [
+        3360,
+        192
+      ],
+      "id": "4d090be2-16e7-48ac-9608-08a7036d7c0d",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5",
+          "mode": "list",
+          "cachedResultName": "gpt-5"
+        },
+        "options": {
+          "reasoningEffort": "medium"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        2160,
+        928
+      ],
+      "id": "ad944afd-1d98-48d2-be62-1f0a104ebb8f",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "hOvrgCZvpztkucKb",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        944,
+        544
+      ],
+      "id": "6a88a68d-79d7-4828-ab89-a28950073ed4",
+      "name": "When clicking ‘Test workflow’"
+    },
+    {
+      "parameters": {
+        "tableId": "ai_trading_log",
+        "dataToSend": "autoMapInputData"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2880,
+        192
+      ],
+      "id": "8e50b749-eaaa-4142-b73f-187da79ec5e9",
+      "name": "Supabase",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $input.first().json.text;\n\n// Strip code block markers, leading/trailing quotes, and whitespace\nraw = raw.trim()\n    .replace(/^```json\\s*/i, '')\n    .replace(/^```\\s*/i, '')\n    .replace(/```$/i, '')\n    .replace(/^'|'$/g, '');\n\nreturn [ JSON.parse(raw) ];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2608,
+        192
+      ],
+      "id": "3e823f61-7c67-41fb-b8b0-96e8484a6383",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        944,
+        160
+      ],
+      "id": "b1d367d4-eeab-49a8-8fb0-c58d7ed887fa",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7d733105-b0e5-4590-ba13-b908adce16f5",
+              "name": "ai_decision_id",
+              "value": "={{ $json.ai_decision_id }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3152,
+        192
+      ],
+      "id": "d712cc18-8a31-41e1-98ca-e5e064d62386",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "resource": "object",
+        "operation": "create",
+        "bucketName": "tradingview-chart",
+        "objectName": "=charts/{{ $json.id }}/{{ $json.timeframe }}.jpg",
+        "createData": {},
+        "createQuery": {},
+        "encryptionHeaders": {},
+        "requestOptions": {}
+      },
+      "name": "Upload to GCS",
+      "type": "n8n-nodes-base.googleCloudStorage",
+      "typeVersion": 1,
+      "position": [
+        3888,
+        464
+      ],
+      "id": "774d982c-75ee-42f1-99aa-6883bf44a26a",
+      "retryOnFail": true,
+      "credentials": {
+        "googleCloudStorageOAuth2Api": {
+          "id": "kT6LnTnLCRqZwDOj",
+          "name": "Google Cloud Storage account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e0d240b7-b268-482c-991f-095f2a8d02fd",
+              "name": "urls['1m']",
+              "value": "={{ $json.urls['1m'] }}",
+              "type": "string"
+            },
+            {
+              "id": "4147d304-bbd3-449e-93aa-f04536862b9b",
+              "name": "urls['5m']",
+              "value": "={{ $json.urls['5m'] }}",
+              "type": "string"
+            },
+            {
+              "id": "ab9f8eed-00fa-4df8-a04e-6d2925a67f27",
+              "name": "urls['15m']",
+              "value": "={{ $json.urls['15m'] }}",
+              "type": "string"
+            },
+            {
+              "id": "af6b2387-5097-40cb-8418-69a3fa536eb8",
+              "name": "urls['30m']",
+              "value": "={{ $json.urls['30m'] }}",
+              "type": "string"
+            },
+            {
+              "id": "23f0fae8-29d8-4a71-a31d-b2348c729b6f",
+              "name": "urls['1h']",
+              "value": "={{ $json.urls['1h'] }}",
+              "type": "string"
+            },
+            {
+              "id": "248d85d5-3bdc-4ecd-bb40-6bf25046d7c4",
+              "name": "urls['4h']",
+              "value": "={{ $json.urls['4h'] }}",
+              "type": "string"
+            },
+            {
+              "id": "f8dc95a6-072c-4da8-a8b2-093dcb631114",
+              "name": "=urls['6h']",
+              "value": "={{ $json.urls['6h'] }}",
+              "type": "string"
+            },
+            {
+              "id": "bb86568b-ad6e-418a-80aa-ad7a4cafbd71",
+              "name": "urls['1D']",
+              "value": "={{ $json.urls['1D'] }}",
+              "type": "string"
+            },
+            {
+              "id": "44e9d891-3d63-49e0-a00c-ddcf37f53493",
+              "name": "urls['1W']",
+              "value": "={{ $json.urls['1W'] }}",
+              "type": "string"
+            },
+            {
+              "id": "69c1823d-a907-4a16-a655-cc70d516dc1f",
+              "name": "urls['1M']",
+              "value": "={{ $json.urls['1M'] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2944,
+        480
+      ],
+      "id": "1b4cf48b-d5f9-45ee-94b6-d779217c24c4",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.1,
+      "position": [
+        3200,
+        464
+      ],
+      "id": "7891bae9-dd7c-4d06-94a1-ebddc230269d",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3664,
+        464
+      ],
+      "id": "baee47ce-b135-4b3e-a750-baba2cbc0bba",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// --- Code1: build items with url + chart_time pulled from nodes \"5m\",\"15m\",\"30m\"\n\n// Parse urls\nlet urls = $json.urls;\ntry {\n  if (typeof urls === 'string') {\n    urls = JSON.parse(urls);\n    if (typeof urls === 'string') urls = JSON.parse(urls);\n  }\n} catch (_) {}\n\nconst id = $json.ai_decision_id || $json.timestamp || 'unknown_id';\n\n// Fallback time if none is found anywhere\nconst fallbackTime = (() => {\n  const t = $json.timestamp || $json.chart_time;\n  const d = t ? new Date(t) : new Date();\n  return isNaN(+d) ? new Date().toISOString() : d.toISOString();\n})();\n\n// Helper: get chart_time from a named node’s first item (like $(\"5m\").first().json.snapshot.chart_time)\nconst getCT = (nodeName) => {\n  try {\n    const arr = $items(nodeName, 0) || [];     // all items from that node\n    const n = arr[0]?.json;\n    const t = n?.snapshot?.chart_time ?? n?.chart_time ?? n?.time ?? null;\n    if (!t) return undefined;\n    const d = new Date(t);\n    return isNaN(+d) ? undefined : d.toISOString();\n  } catch {\n    return undefined;\n  }\n};\n\n// Preload chart_time lookups from upstream nodes\nconst CT = {\n  '5m':  getCT('5m'),\n  '15m': getCT('15m'),\n  '30m': getCT('30m'),\n};\n\n// Emit helper\nconst out = [];\nconst push = (tf, url, chart_time) => {\n  if (typeof url === 'string' && /^https?:\\/\\//i.test(url)) {\n    const chosen = chart_time || CT[tf] || fallbackTime;\n    out.push({ json: { timeframe: tf, url, chart_time: chosen, id } });\n  }\n};\n\n// Case A: object map { \"5m\": {url, chart_time?}, ... } – emit in fixed order\nif (urls && !Array.isArray(urls) && typeof urls === 'object') {\n  ['5m','15m','30m'].forEach(tf => {\n    const entry = urls[tf];\n    if (!entry) return;\n    if (typeof entry === 'string') push(tf, entry, undefined);\n    else if (entry && typeof entry.url === 'string') push(tf, entry.url, entry.chart_time);\n  });\n}\n// Case B: array of strings/objects – force labels 5m/15m/30m\nelse if (Array.isArray(urls)) {\n  const labels = ['5m','15m','30m'];\n  urls.slice(0, 3).forEach((u, i) => {\n    const url = (typeof u === 'string') ? u : u?.url;\n    const ctime = (typeof u === 'object') ? u?.chart_time : undefined;\n    push(labels[i], url, ctime);\n  });\n}\n\nreturn out;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3424,
+        464
+      ],
+      "id": "4eb517d6-0d00-4199-85ef-343942c052cc",
+      "name": "Code1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "27b01d5c-b00a-4266-b6aa-ae9a2472d2db",
+              "name": "url",
+              "value": "=https://storage.googleapis.com/tradingview-chart/charts/{{ $('Code1').item.json.id }}/{{ $('Code1').item.json.timeframe }}.jpg",
+              "type": "string"
+            },
+            {
+              "id": "6d0b4721-0211-4acb-9d58-882bd7bfe0a8",
+              "name": "timeframe",
+              "value": "={{ $('HTTP Request').item.json.timeframe }}",
+              "type": "string"
+            },
+            {
+              "id": "45c55a40-6d76-4234-9217-b249ec4d4656",
+              "name": "id",
+              "value": "={{ $('Code1').item.json.id }}",
+              "type": "number"
+            },
+            {
+              "id": "b5c9f6f5-0d42-4303-9716-9c88bf061b12",
+              "name": "chart_time",
+              "value": "={{ $('Code1').item.json.chart_time }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        4080,
+        464
+      ],
+      "id": "26a9f460-9b3c-4fa1-afa2-65649075475b",
+      "name": "Edit Fields2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = {};\nfor (const item of items) {\n  // Use the actual field names\n  out[item.json.timeframe] = item.json.url;\n}\nreturn [\n  {\n    json: {\n      id: items[0].json.id,\n      urls: out\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4288,
+        464
+      ],
+      "id": "d105927c-ebc0-487a-bf98-ec1eb9fc6f23",
+      "name": "Code2"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "ai_trading_log",
+        "filterType": "string",
+        "filterString": "=ai_decision_id=eq.{{ $json.id }}\n",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "urls",
+              "fieldValue": "={{ JSON.stringify($json.urls) }}\n"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        4480,
+        464
+      ],
+      "id": "c98391a5-4c72-4347-a950-93810c3ba21a",
+      "name": "Supabase1",
+      "retryOnFail": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "items.forEach(item => {\n  if (item.json.chart_time) {\n    // Replace T with space\n    let time = item.json.chart_time.replace('T', ' ');\n    // Remove timezone if present (matches +00:00 or -06:00 or Z at the end)\n    time = time.replace(/([+-]\\d{2}:\\d{2}|Z)$/, '');\n    // Trim any spaces at the end\n    item.json.chart_time = time.trim();\n  }\n});\nreturn items;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4288,
+        672
+      ],
+      "id": "b5bb5516-1d70-443d-a9cc-e08c282c63c1",
+      "name": "Code3"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "chart_analysis",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "chart_time",
+              "condition": "eq",
+              "keyValue": "={{ $json.chart_time }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "url",
+              "fieldValue": "={{ $json.url }}\n"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        4480,
+        672
+      ],
+      "id": "cd110efc-fa7b-4888-93e7-2c874cc0c072",
+      "name": "updates chart_analysis urls",
+      "retryOnFail": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Today is {{ $now }}.\n\nYou are the lead trading analyst for MES. You have received comprehensive market analysis data from individual analysts, the regime detection system AND current position context.\n\n**Analyst Reports:**\n5m report: {{ JSON.stringify($('5m').item.json.snapshot, null, 2) }}\n15m report: {{ JSON.stringify($('15m').item.json.snapshot, null, 2) }}\n30m report: {{ JSON.stringify($('30m').item.json.snapshot, null, 2) }}\n\n**LEVEL SELECTION RULES:**\n- Use 5m levels for entry, stop loss, and first target (most precise)\n- If 5m confidence is low, defer to 15m levels\n- Round all prices to nearest 0.25\n- Ensure stop loss gives at least 2:1 reward/risk on TP1\n\n**POSITION CONTEXT:**\n{{ $('Webhook').item.json.body.position_context ? JSON.stringify($('Webhook').item.json.body.position_context, null, 2) : 'No position context provided' }}\n\n**CRITICAL POSITION RULES:**\n1. **ACCOUNT RISK MANAGEMENT:**\n   - If position_context.account_metrics.can_trade = false, ALWAYS return HOLD\n   - If risk_level = \"high\", maximum size = 1\n   - If consecutive_losses >= 2, be extra cautious\n\n2. **EXISTING POSITION MANAGEMENT:**\n   - If we have a position (has_position = true):\n     * Same direction signal: Consider adding (max total size = 3)\n     * Opposite direction signal: HOLD unless strong reversal setup\n     * If current_pnl < -20, consider flattening on any opposite signal\n     * If current_pnl > 20, can be more aggressive with adds\n\n3. **NO POSITION RULES:**\n   - Fresh trades only on high confidence setups (>70%)\n   - Reduce size if account has recent losses\n   - Check warnings array for risk factors\n\n**REGIME ANALYSIS PROVIDED:**\n- Overall Regime: {{ $('Webhook').item.json.body.market_analysis.regime }}\n- Confidence: {{ $('Webhook').item.json.body.market_analysis.confidence }}%\n- Risk Level: {{ $('Webhook').item.json.body.market_analysis.risk_level }}\n- Supporting Factors: {{ $('Webhook').item.json.body.market_analysis.supporting_factors.join(', ') }}\n\n**ENTRY QUALITY ASSESSMENT:**\n- Quality Score: {{ $('Webhook').item.json.body.entry_quality.quality_score }}/100\n- Recommendation: {{ $('Webhook').item.json.body.entry_quality.recommendation }}\n- Factors: {{ $('Webhook').item.json.body.entry_quality.factors.join(', ') }}\n\nQuality-based sizing rules:\n- If entry quality is below 60, reduce position size by 1\n- If entry quality is below 40, consider HOLD instead\n\n**TIMEFRAME ALIGNMENT:**\n- Trend Alignment Score: {{ $('Webhook').item.json.body.market_analysis.trend_details.alignment_score }}%\n- Primary Trend: {{ $('Webhook').item.json.body.market_analysis.trend_details.primary_trend }}\n- Has Conflicts: {{ $('Webhook').item.json.body.market_analysis.trend_details.has_conflict }}\n\n**INDIVIDUAL TIMEFRAME SIGNALS:**\n{{ JSON.stringify($('Webhook').item.json.body.timeframe_signals) }}\n\n**DECISION HIERARCHY:**\n1. **SAFETY FIRST - HOLD IF:**\n   - Account cannot trade (can_trade = false) - CHECK FIRST!\n   - Position warnings exist and confidence < 80%\n   - Reversing a profitable position without strong setup\n   - Confidence < 60% OR Risk Level = \"high\"\n   - Trend alignment < 50% (conflicting timeframes)\n\n2. **STRONG SIGNALS - SIZE 3:**\n   - Only if no current position OR adding to winner\n   - Confidence > 80% AND trend alignment > 70%\n   - Account risk_level = \"low\"\n   - No recent consecutive losses\n\n3. **MODERATE SIGNALS - SIZE 2:**\n   - Standard conditions\n   - Account risk_level = \"low\" or \"medium\"\n   - Current position size < 2\n\n4. **MINIMUM SIGNALS - SIZE 1:**\n   - Account risk_level = \"high\"\n   - Consecutive losses > 0\n   - Any position warnings\n   - Autonomous trades\n\n**STRATEGY SELECTION (regime-aware):**\n- **brackmod (range scalp / tight risk):**\n  - Use when regime ∈ {ranging, choppy} or when confidence is modest but you still want a quick 1–2 partial scale-outs.\n  - Goal: take the edge, realize early, minimize exposure in noisy tape.\n\n- **bracket (trend-friendly scalps):**\n  - Use when regime ∈ {trending_up, trending_down} and momentum is steady (not explosive).\n  - Goal: multi-TP laddering with room for pullbacks; let winners run via farther TP3.\n\n- **pivot (ride + flip):**\n  - Use when regime = breakout or when trend is strong & aligned (alignment > 70%, confidence > 80%).\n  - Goal: hold until the next opposing signal; allow full reversals when structure flips.\n\n**YOUR TASK:**\n1. Check position context FIRST - if can_trade = false, return HOLD\n2. Evaluate existing position impact on new signal\n3. Adjust size based on account metrics and risk\n4. Review the 5m chart image to validate current price action\n5. Use the provided regime analysis \n6. Make final trading decision based on hierarchy above\n\n**Respond with valid JSON only** (no extra text):\n{\n  \"strategy\": \"bracket|brackmod|pivot\",\n  \"signal\": \"BUY|SELL|HOLD|FLAT\",\n  \"alert\": \"{{ $('Webhook').item.json.body.alert }}\",\n  \"timestamp\": \"{{ $now }}\",\n  \"entrylimit\": <float|null>,\n  \"tp1\": <float|null>,\n  \"tp2\": <float|null>,\n  \"tp3\": <float|null>,\n  \"sl\": <float|null>,\n  \"symbol\": \"CON.F.US.MES.Z25\",\n  \"account\": \"{{ $('Webhook').item.json.body.account }}\",\n  \"size\": <1|2|3>,\n  \"reason\": \"Decision based on position context and regime: [specific rationale]\",\n  \"position_aware_notes\": \"Current position: [size/side/pnl]. Account state: [metrics]. Decision: [rationale]\",\n  \"risk_assessment\": \"Account risk: [level], Daily P&L: [amount], Action: [size adjustment]\",\n  \"regime_notes\": \"Applied hierarchy rule [1|2|3|4]: [why this rule triggered]\",\n  \"sizing_rationale\": \"Size [1|2|3] based on [position/account/regime factors]\",\n  \"trend\": {\n    \"5m\": \"{{ $('Webhook').item.json.body.market_analysis.trend_details.trends_by_timeframe['5m'] || 'unknown' }}\",\n    \"15m\": \"{{ $('Webhook').item.json.body.market_analysis.trend_details.trends_by_timeframe['15m'] || 'unknown' }}\",\n    \"30m\": \"{{ $('Webhook').item.json.body.market_analysis.trend_details.trends_by_timeframe['30m'] || 'unknown' }}\"\n  },\n  \"urls\": {{ JSON.stringify($('Webhook').item.json.body.chart_urls) }},\n  \"support\": {{ JSON.stringify($('Webhook').item.json.body.support) }},\n  \"resistance\": {{ JSON.stringify($('Webhook').item.json.body.resistance) }}\n}",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "messageType": "imageBinary"
+            }
+          ]
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [
+        2240,
+        368
+      ],
+      "id": "8781f61a-37c6-4894-862c-7aa27eac00cb",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('5m').item.json.snapshot.url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1968,
+        368
+      ],
+      "id": "13bec57b-5b1c-435f-ba24-dbc50008e9cd",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-opus-4-20250514",
+          "mode": "list",
+          "cachedResultName": "Claude Opus 4"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        1552,
+        912
+      ],
+      "id": "3ab69285-9689-4564-89dc-a895eb33da13",
+      "name": "Anthropic Chat Model",
+      "credentials": {
+        "anthropicApi": {
+          "id": "SYGdKwRCUXN1yoB4",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "latest_chart_analysis",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "timeframe",
+              "keyValue": "15m"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1312,
+        368
+      ],
+      "id": "fff5fbee-a3ee-4505-a10b-22524f515f65",
+      "name": "15m",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "latest_chart_analysis",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "timeframe",
+              "keyValue": "5m"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1728,
+        368
+      ],
+      "id": "88aab776-f6cc-4bce-bf2f-9d13cec5502d",
+      "name": "5m",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "latest_chart_analysis",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "timeframe",
+              "keyValue": "30m"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1504,
+        368
+      ],
+      "id": "4b7937e4-3faf-488d-b3a1-5188069b6397",
+      "name": "30m",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "grok-4-fast-reasoning",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatXAiGrok",
+      "typeVersion": 1,
+      "position": [
+        1872,
+        912
+      ],
+      "id": "0361cb7b-5f6b-4c56-84d3-780f7ef364e2",
+      "name": "xAI Grok Chat Model",
+      "credentials": {
+        "xAiApi": {
+          "id": "JeRKtSY3Lr8eQ6II",
+          "name": "xAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        2016,
+        912
+      ],
+      "id": "6693ff0a-1b3e-44c8-91f7-c6192c98416b",
+      "name": "DeepSeek Chat Model",
+      "credentials": {
+        "deepSeekApi": {
+          "id": "ZUzUvD1Qap3vjZy7",
+          "name": "DeepSeek account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-pro",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        2176,
+        576
+      ],
+      "id": "7cdfa20c-b574-4121-a87c-df7406c7c517",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "F4FVFeD0uuK5mXJ7",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "15m",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Webhook": {
+      "main": [
+        []
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        []
+      ]
+    },
+    "When clicking ‘Test workflow’": {
+      "main": [
+        [
+          {
+            "node": "15m",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Supabase",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "15m",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Code1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Upload to GCS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to GCS": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields2": {
+      "main": [
+        [
+          {
+            "node": "Code2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code2": {
+      "main": [
+        [
+          {
+            "node": "Supabase1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase1": {
+      "main": [
+        []
+      ]
+    },
+    "Code3": {
+      "main": [
+        [
+          {
+            "node": "updates chart_analysis urls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model": {
+      "ai_languageModel": [
+        []
+      ]
+    },
+    "15m": {
+      "main": [
+        [
+          {
+            "node": "30m",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5m": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "30m": {
+      "main": [
+        [
+          {
+            "node": "5m",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "xAI Grok Chat Model": {
+      "ai_languageModel": [
+        []
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1"
+  },
+  "versionId": "b7ddf7ad-130b-4e18-b19f-c7ed345f4f57",
+  "meta": {
+    "templateId": "2569",
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9783a33f8d5600da0ff08d35d1dc9051c104e0a37fceb74a2ffe1557dcda02bc"
+  },
+  "id": "nOi2347TGulbr2LH",
+  "tags": []
+}

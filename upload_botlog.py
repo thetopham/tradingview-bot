@@ -1,79 +1,107 @@
 from supabase import create_client
-import datetime
-import time
-import glob
-import os
-import re
+import datetime, time, glob, os, re, sys
 from dotenv import load_dotenv
+from datetime import timezone
 
-# Load environment variables
 load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+if not SUPABASE_URL or not SUPABASE_KEY:
+    print("Missing SUPABASE_URL or SUPABASE_KEY in env"); sys.exit(1)
+
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Config
-log_dir = '/tmp/'
-log_base = 'tradingview_projectx_bot.log'
-log_pattern = os.path.join(log_dir, log_base + '*')  # matches .log, .log.1, .log.2, etc.
-BUCKET = 'botlogs'
-DAYS_TO_KEEP = 7
+# --- Config derived from env so it can't drift ---
+ACTIVE_LOG = os.getenv("LOG_FILE", "/tmp/tradingview_projectx_bot.log")
+log_dir = os.path.dirname(ACTIVE_LOG) or "."
+log_base = os.path.basename(ACTIVE_LOG)              # e.g. tradingview_projectx_bot.log
+log_pattern = os.path.join(log_dir, log_base + "*")  # matches .log, .log.1, .log.2, etc.
+
+BUCKET = "botlogs"
+DAYS_TO_KEEP = int(os.getenv("BOTLOG_DAYS_TO_KEEP", "7"))
+MIN_BYTES_TO_UPLOAD = int(os.getenv("BOTLOG_MIN_BYTES", "128"))  # skip tiny/empty files
 
 now = time.time()
-utcnow = datetime.datetime.utcnow()
+utcnow = datetime.datetime.now(timezone.utc)
 
+print(f"\nACTIVE_LOG={ACTIVE_LOG}")
+print(f"Glob pattern={log_pattern}")
+
+# --- 1) Local cleanup (old rotated files) ---
 print("\n--- Local log cleanup ---")
-# 1. Local cleanup
 for filepath in glob.glob(log_pattern):
-    if filepath.endswith('.log'):
-        continue  # Always keep the active file
-    if os.path.getmtime(filepath) < now - DAYS_TO_KEEP * 86400:
-        try:
+    if filepath.endswith(".log"):
+        continue  # keep the active file
+    try:
+        mtime = os.path.getmtime(filepath)
+        if mtime < now - DAYS_TO_KEEP * 86400:
             os.remove(filepath)
             print(f"Deleted old local log: {filepath}")
-        except Exception as e:
-            print(f"Failed to delete {filepath}: {e}")
+    except Exception as e:
+        print(f"Failed to delete {filepath}: {e}")
 
+# --- 2) Upload logs to Supabase Storage ---
 print("\n--- Log upload to Supabase Storage ---")
-# 2. Upload logs to Supabase Storage
-for filepath in glob.glob(log_pattern):
+uploaded = 0
+for filepath in sorted(glob.glob(log_pattern)):
     try:
+        size = os.path.getsize(filepath)
+        print(f"Found {filepath} ({size} bytes)")
+        if size < MIN_BYTES_TO_UPLOAD:
+            print(f"Skip (too small): {filepath}")
+            continue
+
         mod_time = datetime.datetime.fromtimestamp(os.path.getmtime(filepath))
         ts = mod_time.strftime("%Y-%m-%d-%H-%M-%S")
-        suffix = 'active' if filepath.endswith('.log') else filepath.split('.log.')[-1]
-        storage_path = f'{log_base}-{ts}-{suffix}.log'
-        with open(filepath, 'rb') as f:
-            res = supabase.storage.from_(BUCKET).upload(storage_path, f, {"content-type": "text/plain"})
-            print(f"Uploaded {filepath} as {storage_path}: {res}")
+
+        # suffix: "active" for .log, otherwise rotation index (e.g., "1","2",…)
+        if filepath.endswith(".log"):
+            suffix = "active"
+        else:
+            # handles ...log.1, ...log.2.gz etc.
+            suffix = filepath.split(".log.", 1)[-1].replace("/", "_")
+
+        storage_name = f"{log_base}-{ts}-{suffix}.log"
+        with open(filepath, "rb") as f:
+            # upsert=True so re-runs don't fail if same name
+            res = supabase.storage.from_(BUCKET).upload(
+                storage_name, f, {"content-type": "text/plain", "upsert": "true"}
+            )
+        print(f"Uploaded {filepath} → {storage_name}: {res}")
+        uploaded += 1
     except Exception as e:
         print(f"Failed to upload {filepath}: {e}")
 
+print(f"Uploaded {uploaded} file(s).")
+
+# --- 3) Remote cleanup (older than DAYS_TO_KEEP) ---
 print("\n--- Supabase Storage cleanup ---")
-# 3. Supabase Storage cleanup
-# List all files in the bucket (limit=1000; increase if needed)
 try:
-    files = supabase.storage.from_(BUCKET).list('', {'limit': 1000})
-    # RegEx to extract timestamp from filename
-    pattern = re.compile(r'tradingview_projectx_bot\.log-(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})')
+    files = supabase.storage.from_(BUCKET).list("", {"limit": 1000})
+    pattern = re.compile(rf"{re.escape(log_base)}-(\d{{4}}-\d{{2}}-\d{{2}}-\d{{2}}-\d{{2}}-\d{{2}})")
     cutoff = utcnow - datetime.timedelta(days=DAYS_TO_KEEP)
 
+    to_delete = []
     for f in files:
-        name = f['name']  # filename only
-        match = pattern.search(name)
-        if not match:
+        name = f["name"]
+        m = pattern.search(name)
+        if not m:
             continue
-        # Parse timestamp
         try:
-            ts = datetime.datetime.strptime(match.group(1), "%Y-%m-%d-%H-%M-%S")
+            ts = datetime.datetime.strptime(m.group(1), "%Y-%m-%d-%H-%M-%S")
         except Exception:
             continue
         if ts < cutoff:
-            try:
-                supabase.storage.from_(BUCKET).remove(name)
-                print(f"Deleted old storage log: {name}")
-            except Exception as e:
-                print(f"Failed to delete from storage {name}: {e}")
+            to_delete.append(name)
+
+    if to_delete:
+        # supabase-py remove expects a list
+        supabase.storage.from_(BUCKET).remove(to_delete)
+        for n in to_delete:
+            print(f"Deleted old storage log: {n}")
+    else:
+        print("No remote files eligible for deletion.")
 except Exception as e:
-    print(f"Failed to list or clean up storage files: {e}")
+    print(f"Failed remote cleanup: {e}")
 
 print("\n--- Log sync and cleanup complete ---")

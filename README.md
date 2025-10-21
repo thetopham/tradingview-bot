@@ -20,6 +20,45 @@ This project implements a Python-based webhook designed to receive trading alert
 
 ---
 
+## 🚀 Quick Start
+
+1. **Copy the environment template**
+   ```bash
+   cp env.example .env
+   ```
+2. **Create & activate a virtual environment, then install dependencies**
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # On Windows use "venv\\Scripts\\activate"
+   pip install -r requirements.txt
+   ```
+3. **Launch the webhook service**
+   ```bash
+   python tradingview_projectx_bot.py
+   ```
+4. **Verify the service is listening**
+   ```bash
+   curl http://localhost:5000/healthz
+   ```
+   A JSON payload containing `{"status": "ok"}` confirms the Flask app is running and reporting Chicago timestamps.【F:tradingview_projectx_bot.py†L99-L118】
+5. **Send a sample webhook** (replace `WEBHOOK_SECRET` with your `.env` secret):
+   ```bash
+   curl -X POST http://localhost:5000/webhook \
+     -H "Content-Type: application/json" \
+     -d '{
+       "secret": "WEBHOOK_SECRET",
+       "strategy": "brackmod",
+       "signal": "BUY",
+       "symbol": "MES",
+       "size": 1
+     }'
+   ```
+   The endpoint immediately returns `202 Accepted` while trade handling continues on a background thread.【F:tradingview_projectx_bot.py†L113-L140】
+
+Once those steps succeed you can point TradingView alerts at the `/webhook` endpoint and begin iterating on strategies or AI-assisted routing.
+
+---
+
 ## Core Functionality
 
 The bot operates as a webhook service, processing signals from TradingView to execute trades on ProjectX. Key functionalities include:
@@ -42,6 +81,21 @@ The bot operates as a webhook service, processing signals from TradingView to ex
     - A utility script to manually or automatically upload local log files (e.g., `bot.log`) to a designated channel or storage (like a Discord channel) for monitoring and debugging.
 - **Phantom Order Sweeper**:
     - A scheduled task that periodically checks for and cancels any "phantom" orders on ProjectX. These are orders that might have been orphaned due to disconnections or errors, ensuring the account state remains clean.
+
+---
+
+## 🤖 AI Trading Decision Flow
+
+The AI-assisted path builds several guardrails before any order is released to ProjectX. The sequence below shows how alerts propagate from TradingView through the n8n regime workflow and back into the bot:
+
+1. **Alert intake & async dispatch** – The Flask webhook validates the shared secret and hands the payload to `handle_webhook_logic` on a background thread so TradingView or n8n immediately receive a `202` response.【F:tradingview_projectx_bot.py†L113-L122】
+2. **Pre-trade guardrails** – `handle_webhook_logic` normalizes the strategy, account, symbol, and size, then enforces several early exits: unknown accounts, missing contracts, manual `FLAT` commands, or time windows where trading is disallowed. It also tags the current market session and periodically logs regime snapshots for monitoring.【F:tradingview_projectx_bot.py†L671-L717】
+3. **Hybrid regime intelligence (n8n)** – AI-enabled accounts route through `ai_trade_decision_with_regime`, which first calls `fetch_multi_timeframe_analysis` using the n8n base URL. That helper aggregates 1-minute Supabase OHLC data into 5/15/30 minute bars, merges any stored chart snapshots, and falls back to live n8n `/webhook/<timeframe>` endpoints when local data is missing. All analyses are cached in Supabase to reduce duplicate n8n executions.【F:api.py†L1121-L1294】【F:api.py†L701-L1010】
+4. **Regime-aware risk filters** – The regime result drives several blocking decisions before the AI model is even called: account risk checks from `PositionManager`, entry-quality scoring that punishes choppy or low-confidence conditions, and regime rules that suppress conflicting signals (e.g., forcing HOLDs when the regime says not to trade).【F:api.py†L1140-L1205】【F:api.py†L1026-L1109】
+5. **AI adjudication & sizing** – Only after those gates does the bot send the enriched payload (regime snapshot, chart URLs, support/resistance levels, position context) to the n8n/OpenAI webhook. The returned decision is annotated with regime metadata and then clipped against regime-defined maximum size or risk-based recommendations before execution continues.【F:api.py†L1207-L1294】
+6. **Strategy execution** – If the AI authorizes a BUY/SELL, `handle_webhook_logic` overwrites the original alert with AI guidance, clears existing protective orders when appropriate, and dispatches to the configured strategy (`bracket`, `brackmod`, or `pivot`). Otherwise the trade is blocked and the reason is logged for observability.【F:tradingview_projectx_bot.py†L718-L766】
+
+The result is a closed-loop flow where TradingView alerts are tempered by a hybrid regime detector, n8n-hosted AI reasoning, and on-bot risk checks before the execution modules touch ProjectX.
 
 ---
 
@@ -133,6 +187,14 @@ ACCOUNT_MYACCOUNT=100001
 PROJECTX_ACCOUNT_ID=100001 # Optional: Specify default account ID to use if 'account' field is missing in webhook
 ```
 
+### Risk Controls
+
+Several environment variables provide guardrails around daily performance and streaks. Adjust them in your `.env` file as needed:
+
+- `MAX_DAILY_LOSS`: When the day's P&L drops below this negative threshold the bot stops trading that account.
+- `DAILY_PROFIT_TARGET`: Once the account earns at least this much profit for the day, new trades are paused to preserve gains.
+- `MAX_CONSECUTIVE_LOSSES`: Caps how many losing trades can occur in a row before trading is halted. Set this value to `0` to disable the consecutive-loss lockout entirely (useful if you need to re-enable an account after a losing streak).
+
 ---
 
 ## ▶️ Running the Bot
@@ -159,6 +221,31 @@ The bot will start listening on the port specified by the `TV_PORT` environment 
 **Production:**
 
 For a production environment, it's recommended to use a more robust WSGI server like Gunicorn. See the `🛡️ Deployment with Gunicorn and systemd` and `🌐 Nginx Setup for Reverse Proxy and SSL` sections for details.
+
+---
+
+## 🔌 Service Endpoints
+
+The Flask app exposes several helper endpoints in addition to the primary `/webhook` hook. All JSON requests that change state must include the same `secret` you configured in `.env`.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/healthz` | Lightweight uptime probe returning the bot status and current Chicago timestamp.【F:tradingview_projectx_bot.py†L99-L112】 |
+| `POST` | `/webhook` | TradingView/n8n alert ingestion. Returns immediately while the trade executes asynchronously.【F:tradingview_projectx_bot.py†L113-L141】 |
+| `GET` | `/positions/summary` | Aggregated view of all configured accounts, including market price, open exposure, and cumulative P&L.【F:tradingview_projectx_bot.py†L248-L331】 |
+| `GET` | `/positions` | Raw ProjectX position snapshot for every account (mirrors `api.get_all_positions_summary`).【F:tradingview_projectx_bot.py†L332-L347】 |
+| `GET` | `/positions/&lt;account&gt;` | Position plus health metrics for a single friendly account key (e.g., `eval`).【F:tradingview_projectx_bot.py†L348-L382】 |
+| `POST` | `/positions/&lt;account&gt;/manage` | Returns enriched context so an AI agent can decide what to do with an open position. Requires the webhook secret.【F:tradingview_projectx_bot.py†L383-L421】 |
+| `POST` | `/scan` | Calls `PositionManager.scan_for_opportunities`; currently a stub until the scanner is implemented, so expect empty payloads.【F:tradingview_projectx_bot.py†L422-L456】 |
+| `GET` | `/account/&lt;account&gt;/health` | Daily P&L, win-rate, and configured risk guard rails for the chosen account.【F:tradingview_projectx_bot.py†L457-L482】 |
+| `GET` | `/market` | Latest market regime summary plus the detected trading session.【F:tradingview_projectx_bot.py†L483-L514】 |
+| `POST` | `/autonomous/toggle` | Placeholder toggle for hands-free trading modes; currently echoes the requested flag.【F:tradingview_projectx_bot.py†L515-L540】 |
+| `GET` | `/positions/realtime` | Real-time P&L snapshot for every account using the latest market price feed.【F:tradingview_projectx_bot.py†L541-L606】 |
+| `GET` | `/position-context/&lt;account&gt;` | Convenience endpoint exposing the same AI context without triggering suggestions.【F:tradingview_projectx_bot.py†L607-L636】 |
+| `GET` | `/contracts/&lt;symbol&gt;` | Lists available ProjectX contracts for a given symbol and highlights the active one.【F:tradingview_projectx_bot.py†L637-L669】 |
+| `GET` | `/contracts/current` | Returns cached active contracts for the symbols defined in code (MES/ES/NQ/MNQ).【F:tradingview_projectx_bot.py†L670-L688】 |
+
+These routes make it easy to wire dashboards, cron jobs, or external tooling around the bot without touching TradingView.
 
 ---
 
@@ -283,7 +370,6 @@ PROJECTX_ACCOUNT_ID= # Optional: Specify default account ID
 
 ---
 
-## 🌐 Nginx Setup for Reverse Proxy and SSL
 ## 🌐 Nginx Setup for Reverse Proxy and SSL
 
 For production, you should run the Flask app behind Nginx, which will handle HTTPS and proxy requests to Gunicorn.
@@ -423,7 +509,6 @@ To send alerts from TradingView to your bot:
 
 3.  **Reload systemd, Enable and Start the Service**:
 
-   ```bash
     ```bash
     sudo systemctl daemon-reload
     sudo systemctl enable tradingview_bot.service
@@ -432,6 +517,42 @@ To send alerts from TradingView to your bot:
     # To see logs:
     # sudo journalctl -u tradingview_bot.service -f
     ```
+
+---
+
+## 🔁 Background Jobs & Automation
+
+`scheduler.py` wires APScheduler into the Flask app so routine hygiene tasks happen without manual input:
+
+- **5-minute candle watcher** – Triggers fresh chart downloads via n8n for several timeframes, clears stale regime cache entries, and pings the webhook once the updates land. Skips the window where accounts must be flat before the session close.【F:scheduler.py†L22-L97】
+- **Quarter-hour market analysis** – Pulls the consolidated regime snapshot, logging warnings when risk is elevated (e.g., choppy conditions above 80% confidence).【F:scheduler.py†L99-L131】
+- **Two-minute position monitor** – Re-uses `PositionManager` to log open exposure, flag deep losses, and highlight stale trades across all configured accounts.【F:scheduler.py†L133-L177】
+
+Feel free to extend these jobs—just ensure they respect the `in_get_flat` guardrails to avoid unwanted trades in restricted time blocks.【F:scheduler.py†L36-L44】【F:scheduler.py†L74-L90】
+
+---
+
+## 🏗️ Architecture & Data Flow
+
+- **Entry Points**: `tradingview_projectx_bot.py` initializes logging, loads configuration from `.env`, authenticates with ProjectX, launches the SignalR market feed listener, starts the APScheduler background jobs, and serves the Flask API (health check, position snapshots, market status, webhook).
+- **Alert Handling**: `/webhook` accepts TradingView payloads, validates `WEBHOOK_SECRET`, and hands them to `handle_webhook_logic` on a background thread. The handler resolves accounts/contracts via `config.py` + `api.get_contract`, blocks trading during the get-flat window, and dispatches strategies from `strategies.py`.
+- **Strategy Layer**: `run_bracket`, `run_brackmod`, and `run_pivot` submit ProjectX orders, derive fills, and apply market-regime-adjusted stop/target levels. Each trade session is tracked through `signalr_listener.track_trade`, which later logs outcomes to Supabase.
+- **External Services**:
+  - ProjectX REST calls live in `api.py`; `auth.py` keeps JWTs fresh; `state.py` holds the shared `requests.Session`.
+  - Supabase stores trade logs, market-regime cache, tv_datafeed bars, and uploaded bot logs. `upload_botlog.py` can sync `/tmp/tradingview_projectx_bot.log*` into the `botlogs` bucket.
+  - n8n AI endpoints (mapped in `.env`) enrich alerts with regime insight and can veto trades for AI-managed accounts (`epsilon`, `beta` by convention).
+- **Background Jobs** (`scheduler.py`): Hourly trim orphaned metadata, warn at 15:02 CT, auto-flatten all MES exposure at 15:07 CT, and refresh contract caches daily at 06:00 CT. Additional monitoring hooks are commented out but document prior automation.
+- **Market Context**: `market_regime.py`, `market_regime_ohlc.py`, and `market_regime_hybrid.py` fuse OHLC indicators with AI chart analysis. `api.get_market_conditions_summary` exposes a normalized snapshot for logs, endpoints, and strategy adjustments.
+- **Live State Sync**: `signalr_listener.py` subscribes to TopstepX SignalR feeds per configured account, mirrors stop orders (`ensure_stops_match_position`), reconstructs metadata on restart, and triggers Supabase logging when positions close. Ensure `ACCOUNT_*` variables match funded accounts before enabling it.
+- **Risk & Positions**: `PositionManager` computes account metrics (daily P&L, risk level, consecutive losses) and serves `/positions/<account>/manage` and `/account/<account>/health`. Note: `scan_for_opportunities` referenced in the API is not implemented—avoid using `/scan` until it exists.
+
+---
+
+## 🤝 Contributing
+
+- Start with `AGENTS.md` for a compact contributor playbook covering structure, workflows, and PR expectations.
+- Use feature branches and keep commits focused; note new environment variables and manual validation steps in each PR.
+- When proposing larger changes (new strategies, schedulers, or external integrations), open a draft PR early and tag reviewers in `AGENTS.md`’s contact guidance if applicable.
 
 ---
 
@@ -462,7 +583,5 @@ The developers and contributors of this software assume no liability for any fin
 ---
 
 <sup>MIT License</sup>
-
-
 
 

@@ -4,3 +4,8 @@ python-dotenv
 APScheduler
 pytz
 gunicorn
+python-dateutil
+signalrcore
+supabase
+flask-cors
+numpy
