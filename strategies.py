@@ -45,7 +45,7 @@ def round_stop_away_from_entry(entry: float, side: int, stop: float) -> float:
     return round(ticks * TICK, 2)
 
 def ensure_live_stop(acct_id: int, cid: str, exit_side: int, size: int, target_price: float,
-                     entry_price: float, side: int, retries: int = 1, wait_s: float = 0.4) -> dict:
+                     entry_price: float, side: int, retries: int = 1, wait_s: float = 1.0) -> dict:
     """
     Place a stop (rounded correctly) and verify it appears in open orders.
     Retry once with re-rounded price if it doesn't.
