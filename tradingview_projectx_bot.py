@@ -693,6 +693,50 @@ def get_current_contracts():
         return jsonify({"error": str(e)}), 500
 
 
+def flatten_account_positions(acct_id: int, primary_cid: Optional[str], symbol: Optional[str]) -> None:
+    """Flatten all open positions for an account, prioritizing the provided contract."""
+    flattened_contracts = []
+
+    if primary_cid:
+        if flatten_contract(acct_id, primary_cid, timeout=10):
+            flattened_contracts.append(primary_cid)
+        else:
+            logging.error(
+                "Manual flatten for %s failed on primary contract %s", acct_id, primary_cid
+            )
+    else:
+        logging.warning(
+            "Manual flatten for %s: symbol '%s' did not resolve to a contract; scanning all open positions",
+            acct_id,
+            symbol,
+        )
+
+    try:
+        positions = search_pos(acct_id) or []
+    except Exception as exc:
+        logging.error("Manual flatten for %s: unable to query positions (%s)", acct_id, exc)
+        positions = []
+
+    for pos in positions:
+        pos_cid = pos.get("contractId")
+        size = pos.get("size", 0)
+        if not pos_cid or pos_cid in flattened_contracts or not size:
+            continue
+        if flatten_contract(acct_id, pos_cid, timeout=10):
+            flattened_contracts.append(pos_cid)
+        else:
+            logging.error("Manual flatten for %s failed on contract %s", acct_id, pos_cid)
+
+    if flattened_contracts:
+        logging.info(
+            "Manual flatten complete for %s -> flattened %s",
+            acct_id,
+            ", ".join(flattened_contracts),
+        )
+    else:
+        logging.info("Manual flatten for %s: no open positions found", acct_id)
+
+
 def handle_webhook_logic(data):
     try:
         strat = data.get("strategy", "bracket").lower()
@@ -719,14 +763,14 @@ def handle_webhook_logic(data):
 
         acct_id = ACCOUNTS[acct]
         cid = get_contract(sym)
-        if not cid:
-            logging.error(f"Could not determine contract ID for symbol {sym}")
-            return
 
         # Manual flatten (close all) signal
         if sig == "FLAT":
-            flatten_contract(acct_id, cid, timeout=10)
-            logging.info(f"Manual flatten signal processed for {acct_id} {cid}")
+            flatten_account_positions(acct_id, cid, sym)
+            return
+
+        if not cid:
+            logging.error(f"Could not determine contract ID for symbol {sym}")
             return
 
         now = datetime.now(CT)
