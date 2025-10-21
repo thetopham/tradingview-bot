@@ -187,6 +187,14 @@ ACCOUNT_MYACCOUNT=100001
 PROJECTX_ACCOUNT_ID=100001 # Optional: Specify default account ID to use if 'account' field is missing in webhook
 ```
 
+### Risk Controls
+
+Several environment variables provide guardrails around daily performance and streaks. Adjust them in your `.env` file as needed:
+
+- `MAX_DAILY_LOSS`: When the day's P&L drops below this negative threshold the bot stops trading that account.
+- `DAILY_PROFIT_TARGET`: Once the account earns at least this much profit for the day, new trades are paused to preserve gains.
+- `MAX_CONSECUTIVE_LOSSES`: Caps how many losing trades can occur in a row before trading is halted. Set this value to `0` to disable the consecutive-loss lockout entirely (useful if you need to re-enable an account after a losing streak).
+
 ---
 
 ## ▶️ Running the Bot
