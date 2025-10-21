@@ -67,27 +67,31 @@ class PositionManager:
 
         # Get position age
         creation_time = positions[0].get("creationTimestamp")
+        entry_time = None
+        duration = 0
         if creation_time:
             try:
                 from dateutil import parser
+
                 entry_time = parser.parse(creation_time)
+                if entry_time.tzinfo is None:
+                    entry_time = entry_time.replace(tzinfo=timezone.utc)
+
                 duration = (datetime.now(timezone.utc) - entry_time).total_seconds() / 60
-            except:
+            except Exception:
+                entry_time = None
                 duration = 0
-        else:
-            duration = 0
 
         # Categorize orders
         stop_orders = [o for o in open_orders if o["type"] == 4 and o["status"] == 1]
         limit_orders = [o for o in open_orders if o["type"] == 1 and o["status"] == 1]
 
         # IMPORTANT: Only get trades AFTER position entry time to avoid old P&L
-        if creation_time:
+        if entry_time:
             try:
-                entry_time = parser.parse(creation_time)
                 # Only get trades after this position was opened
                 trades = search_trades(acct_id, entry_time)
-            except:
+            except Exception:
                 trades = []
         else:
             trades = []
