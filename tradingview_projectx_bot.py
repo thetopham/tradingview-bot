@@ -114,6 +114,7 @@ AUTH_LOCK = threading.Lock()
 app = Flask(__name__)
 CORS(app)  # Enable CORS for the dashboard
 
+
 # --- Health Check Route (optional, but recommended for uptime monitoring) ---
 @app.route("/healthz")
 def healthz():
