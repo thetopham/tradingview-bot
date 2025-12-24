@@ -12,6 +12,8 @@ def load_config():
         'USER_NAME': os.getenv("PROJECTX_USERNAME"),
         'API_KEY': os.getenv("PROJECTX_API_KEY"),
         'WEBHOOK_SECRET': os.getenv("WEBHOOK_SECRET"),
+        'TRADING_ENABLED': os.getenv("TRADING_ENABLED", "false").lower() == "true",
+        'DEFAULT_TRADE_SIZE': int(os.getenv("DEFAULT_TRADE_SIZE", 1)),
 
         # legacy single/dual endpoints (kept for backward-compat)
         'N8N_AI_URL': os.getenv("N8N_AI_URL"),
