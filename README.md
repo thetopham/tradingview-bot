@@ -68,10 +68,8 @@ The bot operates as a webhook service, processing signals from TradingView to ex
     - **Authentication**: Securely connects to the ProjectX API using credentials stored in the `.env` file.
     - **Order Placement**: Places market orders and bracket orders (stop-loss and take-profit) based on the trading strategy.
     - **Position Management**: Monitors and manages open positions, including flattening positions when required (e.g., on a FLAT signal or during specific market hours).
-- **Trading Strategies**:
-    - **Bracket**: Standard bracket order with predefined stop-loss and take-profit levels.
-    - **Brackmod**: A modified bracket strategy allowing dynamic adjustments based on market conditions or AI input.
-    - **Pivot**: Trades based on pivot points, often integrated with AI analysis for entry and exit signals.
+- **Trading Strategy**:
+    - **Server-side bracket**: A single execution path that submits one Topstep bracket template per decision. The bot no longer micromanages stops/TPs; templates live on Topstep and the AI only selects action/intent/size/template.
 - **AI-Driven Decision-Making**:
     - Integrates with an n8n workflow that calls an AI service (e.g., OpenAI).
     - The AI analyzes market data and provides trade recommendations (e.g., hold, modify, or close position), which the bot can act upon.
@@ -79,8 +77,8 @@ The bot operates as a webhook service, processing signals from TradingView to ex
     - Records detailed information about each trade (entry price, exit price, profit/loss, strategy used) to a Supabase database for analysis and record-keeping.
 - **`upload_botlog.py` Script**:
     - A utility script to manually or automatically upload local log files (e.g., `bot.log`) to a designated channel or storage (like a Discord channel) for monitoring and debugging.
-- **Phantom Order Sweeper**:
-    - A scheduled task that periodically checks for and cancels any "phantom" orders on ProjectX. These are orders that might have been orphaned due to disconnections or errors, ensuring the account state remains clean.
+- **OHLC Data Foundation**:
+    - Multi-timeframe OHLC aggregation (5m/15m/30m/1h/4h/1D) fuels AI reasoning and regime detection without any screenshot or GPT-Vision dependency.
 
 ---
 
@@ -90,12 +88,12 @@ The AI-assisted path builds several guardrails before any order is released to P
 
 1. **Alert intake & async dispatch** – The Flask webhook validates the shared secret and hands the payload to `handle_webhook_logic` on a background thread so TradingView or n8n immediately receive a `202` response.【F:tradingview_projectx_bot.py†L113-L122】
 2. **Pre-trade guardrails** – `handle_webhook_logic` normalizes the strategy, account, symbol, and size, then enforces several early exits: unknown accounts, missing contracts, manual `FLAT` commands, or time windows where trading is disallowed. It also tags the current market session and periodically logs regime snapshots for monitoring.【F:tradingview_projectx_bot.py†L671-L717】
-3. **Hybrid regime intelligence (n8n)** – AI-enabled accounts route through `ai_trade_decision_with_regime`, which first calls `fetch_multi_timeframe_analysis` using the n8n base URL. That helper aggregates 1-minute Supabase OHLC data into 5/15/30 minute bars, merges any stored chart snapshots, and falls back to live n8n `/webhook/<timeframe>` endpoints when local data is missing. All analyses are cached in Supabase to reduce duplicate n8n executions.【F:api.py†L1121-L1294】【F:api.py†L701-L1010】
-4. **Regime-aware risk filters** – The regime result drives several blocking decisions before the AI model is even called: account risk checks from `PositionManager`, entry-quality scoring that punishes choppy or low-confidence conditions, and regime rules that suppress conflicting signals (e.g., forcing HOLDs when the regime says not to trade).【F:api.py†L1140-L1205】【F:api.py†L1026-L1109】
-5. **AI adjudication & sizing** – Only after those gates does the bot send the enriched payload (regime snapshot, chart URLs, support/resistance levels, position context) to the n8n/OpenAI webhook. The returned decision is annotated with regime metadata and then clipped against regime-defined maximum size or risk-based recommendations before execution continues.【F:api.py†L1207-L1294】
-6. **Strategy execution** – If the AI authorizes a BUY/SELL, `handle_webhook_logic` overwrites the original alert with AI guidance, clears existing protective orders when appropriate, and dispatches to the configured strategy (`bracket`, `brackmod`, or `pivot`). Otherwise the trade is blocked and the reason is logged for observability.【F:tradingview_projectx_bot.py†L718-L766】
+3. **OHLC-only regime intelligence** – AI-enabled accounts route through `ai_trade_decision_with_regime`, which calls `fetch_multi_timeframe_analysis` to build multi-timeframe OHLC arrays (5m/15m/30m/1h/4h/1D) from Supabase. No screenshots or n8n chart fallbacks are used; Supabase caching keeps duplicate fetches minimal.【F:api.py†L618-L706】【F:api.py†L817-L935】
+4. **Regime-aware risk filters** – The regime result drives several blocking decisions before the AI model is even called: account risk checks from `PositionManager`, entry-quality scoring that punishes choppy or low-confidence conditions, and regime rules that suppress conflicting actions.【F:api.py†L872-L935】
+5. **AI adjudication & sizing** – After those gates the bot sends only OHLC data, regime context, and position metadata to the AI webhook. The response is normalized to allowed fields (action/intent/size/bracket template) and clipped against regime-defined maximum size before execution continues.【F:api.py†L884-L935】
+6. **Strategy execution** – If the AI authorizes a BUY/SELL, `handle_webhook_logic` dispatches to the unified server-side bracket executor without any local SL/TP placement or polling loops. HOLD/FLAT intents exit early with no ProjectX calls.【F:tradingview_projectx_bot.py†L730-L820】【F:strategies.py†L41-L111】
 
-The result is a closed-loop flow where TradingView alerts are tempered by a hybrid regime detector, n8n-hosted AI reasoning, and on-bot risk checks before the execution modules touch ProjectX.
+The result is a closed-loop flow where TradingView alerts are tempered by OHLC-driven regime detection, n8n-hosted AI reasoning, and on-bot risk checks before the execution modules touch ProjectX.
 
 ---
 

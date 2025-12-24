@@ -18,13 +18,13 @@ from api import (
     search_pos, get_supabase_client, search_trades, search_open,
     get_market_conditions_summary, ai_trade_decision_with_regime,
     # Added for /contracts endpoints
-    search_contracts, get_active_contract_for_symbol_cached, 
+    search_contracts, get_active_contract_for_symbol_cached,
     get_active_contract_for_symbol,  # used in JSON response
     CONTRACT_CACHE_DURATION,
     # NEW: balances via ProjectX
     search_accounts,  # <—— uses /api/Account/search
 )
-from strategies import run_bracket, run_brackmod, run_pivot
+from strategies import execute_bracket_strategy, ALLOWED_ACTIONS, ALLOWED_INTENTS
 from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token
 from signalr_listener import launch_signalr_listener
@@ -741,10 +741,12 @@ def handle_webhook_logic(data):
     try:
         strat = data.get("strategy", "bracket").lower()
         acct  = (data.get("account") or DEFAULT_ACCOUNT).lower()
-        sig   = data.get("signal", "").upper()
+        action = data.get("signal", "").upper()
+        intent = data.get("intent") or data.get("position_action")
         sym   = data.get("symbol", config['DEFAULT_SYMBOL'])  # Use default symbol if not provided
         size  = int(data.get("size", 1))
         alert = data.get("alert", "")
+        bracket_template = data.get("bracket_template")
         ai_decision_id = data.get("ai_decision_id", None)
         regime = "unknown"
         regime_confidence = 0
@@ -757,8 +759,8 @@ def handle_webhook_logic(data):
             logging.info(f"No strategy provided for account {acct}; skipping trade execution")
             return
 
-        if not sig:
-            logging.info(f"No signal provided for account {acct}; skipping trade execution")
+        if not action:
+            logging.info(f"No action provided for account {acct}; skipping trade execution")
             return
 
         acct_id = ACCOUNTS[acct]
@@ -787,7 +789,7 @@ def handle_webhook_logic(data):
         if acct in AI_ENDPOINTS:
             ai_url = AI_ENDPOINTS[acct]
             ai_decision = ai_trade_decision_with_regime(
-                acct, strat, sig, sym, size, alert, ai_url
+                acct, strat, action, sym, size, alert, ai_url
             )
 
             regime = ai_decision.get('regime', 'unknown')
@@ -796,16 +798,18 @@ def handle_webhook_logic(data):
 
             # Merge / normalize
             strat = (ai_decision.get("strategy", strat) or "bracket").lower()
-            sig   = (ai_decision.get("signal", sig)   or "HOLD").upper()
+            action = (ai_decision.get("action") or ai_decision.get("signal") or action or "HOLD").upper()
+            intent = ai_decision.get("intent") or ai_decision.get("position_action") or intent
             sym   = ai_decision.get("symbol", sym)
             size  = ai_decision.get("size", size)
             alert = ai_decision.get("alert", alert)
+            bracket_template = ai_decision.get("bracket_template") or bracket_template
             ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
 
             # allow BUY/SELL/HOLD/FLAT to continue; block anything else
-            if sig not in ("BUY", "SELL", "HOLD", "FLAT"):
+            if action not in ("BUY", "SELL", "HOLD", "FLAT"):
                 logging.info(
-                    f"AI decided {sig}; no action. Reason: {ai_decision.get('reason', 'n/a')}"
+                    f"AI decided {action}; no action. Reason: {ai_decision.get('reason', 'n/a')}"
                 )
                 return
         else:
@@ -814,7 +818,7 @@ def handle_webhook_logic(data):
             logging.info(f"Non-AI account {acct} - proceeding with manual trade")
 
         # --- FLAT handling for manual or AI decisions ---
-        if sig == "FLAT":
+        if action == "FLAT":
             try:
                 primary_cid = get_contract(sym)  # may be None; sweeper tolerates it
             except Exception:
@@ -835,7 +839,7 @@ def handle_webhook_logic(data):
             cid = get_contract(sym)
         except Exception:
             cid = None
-        if not cid and sig in ("BUY", "SELL"):
+        if not cid and action in ("BUY", "SELL"):
             logging.error("Could not determine contract ID for symbol %s; aborting entry", sym)
             return
 
@@ -846,12 +850,8 @@ def handle_webhook_logic(data):
         ]
         total_size = sum(p.get("size", 0) for p in open_pos) if open_pos else 0
 
-        # If no open position, clean up protective stops (optional safety)
-        if not open_pos and cid:
-            cancel_all_stops(acct_id, cid)
-
         # --- NEW: HOLD branch (no new orders) ---
-        if sig == "HOLD":
+        if action == "HOLD":
             if cid:
                 if open_pos:
                     logging.info(
@@ -865,19 +865,29 @@ def handle_webhook_logic(data):
                 logging.info("HOLD with unknown contract -> no action.")
             return
 
-        # --- Strategy Dispatch for BUY/SELL only ---
+        # --- Unified bracket execution ---
         logging.info(
-            f"Executing {strat} strategy: {sig} {size} {sym} in {regime} regime (pos={total_size})"
+            f"Executing server bracket: {action} {size} {sym} intent={intent or 'ENTER'} template={bracket_template or 'default'}"
         )
 
-        if strat == "bracket":
-            run_bracket(acct_id, sym, sig, size, alert, ai_decision_id)
-        elif strat == "brackmod":
-            run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id)
-        elif strat == "pivot":
-            run_pivot(acct_id, sym, sig, size, alert, ai_decision_id)
-        else:
-            logging.error(f"Unknown strategy '{strat}'")
+        if action not in ALLOWED_ACTIONS:
+            logging.error(f"Unsupported action '{action}' for bracket executor")
+            return
+        if intent and intent.upper() not in {i for i in ALLOWED_INTENTS if i}:
+            logging.error(f"Unsupported intent '{intent}' for bracket executor")
+            return
+
+        execute_bracket_strategy(
+            acct_name=acct,
+            acct_id=acct_id,
+            sym=sym,
+            action=action,
+            intent=intent,
+            size=size,
+            alert=alert,
+            ai_decision_id=ai_decision_id,
+            bracket_template=bracket_template,
+        )
 
     except Exception as e:
         import traceback

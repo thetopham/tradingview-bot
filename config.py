@@ -34,6 +34,14 @@ def load_config():
     config['LIVE_MODE'] = os.getenv("LIVE_MODE", "false").lower() == "true"
     config['DEFAULT_SYMBOL'] = os.getenv("DEFAULT_SYMBOL", "MES")
 
+    # Bracket templates (server-side)
+    config['BRACKET_TEMPLATE_DEFAULT'] = os.getenv("BRACKET_TEMPLATE_DEFAULT", "")
+    config['BRACKET_TEMPLATES'] = {
+        k[len("BRACKET_TEMPLATE_"):].lower(): v
+        for k, v in os.environ.items()
+        if k.startswith("BRACKET_TEMPLATE_")
+    }
+
     # Accounts (ACCOUNT_ALPHA=12345, etc.)
     config['ACCOUNTS'] = {
         k[len("ACCOUNT_"):].lower(): int(v)
