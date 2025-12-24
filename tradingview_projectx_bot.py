@@ -24,7 +24,7 @@ from api import (
     # NEW: balances via ProjectX
     search_accounts,  # <—— uses /api/Account/search
 )
-from strategies import run_bracket, run_brackmod, run_pivot
+from strategies import run_bracket, run_brackmod, run_pivot, run_simple
 from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token
 from signalr_listener import launch_signalr_listener
@@ -874,8 +874,10 @@ def handle_webhook_logic(data):
             run_bracket(acct_id, sym, sig, size, alert, ai_decision_id)
         elif strat == "brackmod":
             run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id)
+        elif strat == "simple":
+            run_simple(acct_id, sym, sig, size, alert, ai_decision_id) 
         elif strat == "pivot":
-            run_pivot(acct_id, sym, sig, size, alert, ai_decision_id)
+            run_pivot(acct_id, sym, sig, size, alert, ai_decision_id)        
         else:
             logging.error(f"Unknown strategy '{strat}'")
 
