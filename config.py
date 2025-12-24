@@ -27,6 +27,13 @@ def load_config():
         'MAX_CONSECUTIVE_LOSSES': int(os.getenv("MAX_CONSECUTIVE_LOSSES", 3)),
         'STOP_LOSS_POINTS': float(os.getenv("STOP_LOSS_POINTS", 10.0)),
         'TP_POINTS': [float(x) for x in os.getenv("TP_POINTS", "2.5,5.0,10.0").split(",")],
+
+        # Reduction-trigger controls
+        'TRADING_ENABLED': os.getenv("TRADING_ENABLED", "false").lower() == "true",
+        'DEFAULT_SIZE': int(os.getenv("DEFAULT_SIZE", 1)),
+        'SLOPE_LOOKBACK': int(os.getenv("SLOPE_LOOKBACK", 10)),
+        'SLOPE_THRESHOLD': float(os.getenv("SLOPE_THRESHOLD", 0.00003)),
+        'MARKET_SYMBOL': os.getenv("MARKET_SYMBOL", "MES"),
     }
 
     # Mode/symbol
@@ -42,9 +49,19 @@ def load_config():
     }
     if not config['ACCOUNTS']:
         raise RuntimeError("No accounts loaded from .env. Add ACCOUNT_<NAME>=<ID>.")
+    if not config['ACCOUNTS'] and os.getenv("PROJECTX_ACCOUNT_ID"):
+        try:
+            acct_id = int(os.getenv("PROJECTX_ACCOUNT_ID"))
+            config['ACCOUNTS'] = {'default': acct_id}
+        except ValueError:
+            pass
+
+    if not config['ACCOUNTS']:
+        raise RuntimeError("No accounts loaded from .env. Add ACCOUNT_<NAME>=<ID> or PROJECTX_ACCOUNT_ID.")
+
     config['DEFAULT_ACCOUNT'] = next(iter(config['ACCOUNTS']))
 
-    # NEW: per-account AI endpoints (N8N_AI_URL_ALPHA=..., etc.)
+    # Optional/legacy AI endpoints retained for compatibility but unused in reduction path
     ai_eps = {
         'alpha':   os.getenv('N8N_AI_URL_ALPHA'),
         'beta':    os.getenv('N8N_AI_URL_BETA'),
@@ -52,22 +69,11 @@ def load_config():
         'delta':   os.getenv('N8N_AI_URL_DELTA'),
         'epsilon': os.getenv('N8N_AI_URL_EPSILON'),
     }
-    # prune Nones so you can mix legacy + new during transition
     config['AI_ENDPOINTS'] = {k: v for k, v in ai_eps.items() if v}
-
-    # Fallback: if no per-account map provided, fall back to legacy var(s)
     if not config['AI_ENDPOINTS']:
-        # Map first two accounts to legacy URLs if present
-        acct_names = list(config['ACCOUNTS'].keys())
-        legacy_map = {}
-        if config['N8N_AI_URL'] and acct_names:
-            legacy_map[acct_names[0]] = config['N8N_AI_URL']
-        if config['N8N_AI_URL2'] and len(acct_names) > 1:
-            legacy_map[acct_names[1]] = config['N8N_AI_URL2']
-        if legacy_map:
-            config['AI_ENDPOINTS'] = legacy_map
-        else:
-            raise RuntimeError("No AI endpoints configured. Set N8N_AI_URL_<ACCOUNT> or N8N_AI_URL.")
+        for k in ['N8N_AI_URL', 'N8N_AI_URL2']:
+            if config.get(k):
+                config['AI_ENDPOINTS'][k] = config[k]
 
     # Trading day windows / tz
     config['OVERRIDE_CONTRACT_ID'] = os.getenv("OVERRIDE_CONTRACT_ID", None)

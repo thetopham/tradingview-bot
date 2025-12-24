@@ -2,7 +2,7 @@ import os
 import time
 import threading
 import logging
-from api import search_pos, log_trade_results_to_supabase, check_for_phantom_orders
+from api import search_pos, log_trade_results_to_supabase
 from datetime import datetime
 from dateutil import parser
 from signalrcore.hub_connection_builder import HubConnectionBuilder
@@ -269,7 +269,6 @@ class SignalRTradingListener(threading.Thread):
         logging.info("SignalR reconnected! Resubscribing to all events...")
         self.last_event_time = time.time()
         self.subscribe_all()
-        self.sweep_and_cleanup_positions_and_stops()
 
     def default_handler(self, args):
         self.last_event_time = time.time()
@@ -320,26 +319,7 @@ class SignalRTradingListener(threading.Thread):
             self.hub.stop()
 
     def sweep_and_cleanup_positions_and_stops(self):
-        from api import search_pos, search_open, cancel
-        logging.info("[Sweep] Starting stop/order cleanup for all accounts/contracts")
-        for acct_id in self.accounts:
-            try:
-                positions = search_pos(acct_id)
-                open_orders = search_open(acct_id)
-                contracts_with_positions = set()
-                for pos in positions:
-                    if pos.get("size", 0) > 0:
-                        contracts_with_positions.add(pos["contractId"])
-                for order in open_orders:
-                    cid = order.get("contractId")
-                    # Cancel all stops if flat, or any stop that doesn't match open position
-                    if order.get("type") == 4 and order.get("status") == 1:  # Stop order, open
-                        if cid not in contracts_with_positions:
-                            logging.info(f"[Sweep] Canceling leftover stop {order['id']} (flat in {cid})")
-                            cancel(acct_id, order["id"])
-            except Exception as e:
-                logging.error(f"[Sweep] Cleanup failed for acct {acct_id}: {e}")
-        logging.info("[Sweep] Stop/order cleanup completed")
+        logging.info("[Sweep] Cleanup disabled in reduction architecture (logging only)")
 
 # --- Event Handlers ---
 
@@ -358,9 +338,6 @@ def on_order_update(args):
         return
 
     orders_state.setdefault(account_id, {})[order_data.get("id")] = order_data
-
-    if order_data.get("type") == 1 and status == 2:  # TP filled
-        ensure_stops_match_position(account_id, contract_id)
 
     if status == 2:
         meta = trade_meta.setdefault((account_id, contract_id), {})
@@ -446,15 +423,6 @@ def on_position_update(args):
                 'comment': f'Metadata created on position update at {datetime.now(CT).strftime("%Y-%m-%d %H:%M:%S")}'
             }
 
-    # DELAY the ensure_stops_match_position call to allow orders to settle
-    # This is key to preventing premature stop cancellation
-    def delayed_stop_check():
-        time.sleep(2)  # Wait 2 seconds for orders to register
-        ensure_stops_match_position(account_id, contract_id)
-    
-    # Run in separate thread to not block
-    threading.Thread(target=delayed_stop_check, daemon=True).start()
-
     if size == 0:
         meta = trade_meta.pop((account_id, contract_id), None)
         logging.info(f"[on_position_update] Position closed for acct={account_id}, cid={contract_id}")
@@ -505,8 +473,6 @@ def on_position_update(args):
                 ai_decision_id=None,
                 meta=minimal_meta
             )
-            
-        check_for_phantom_orders(account_id, contract_id)
 
 
 # Also add a helper function to clean up stale metadata
@@ -583,71 +549,9 @@ def launch_signalr_listener(get_token, get_token_expiry, authenticate, auth_lock
     return listener
 
 def ensure_stops_match_position(acct_id, contract_id, max_retries=5, retry_delay=0.4):
-    from api import search_open, place_stop, cancel, search_pos
-    
-    if acct_id is None or contract_id is None:
-        logging.error(f"ensure_stops_match_position called with acct_id={acct_id}, contract_id={contract_id} (BUG IN CALLER)")
-        return
-    
-    # Wait longer initially to let things settle
-    time.sleep(3)  # Add initial delay
-    
-    for attempt in range(max_retries):
-        position = positions_state.get(acct_id, {}).get(contract_id)
-        if position is None:
-            fresh_positions = search_pos(acct_id)
-            position = next((p for p in fresh_positions if p["contractId"] == contract_id), None)
-            if position:
-                positions_state.setdefault(acct_id, {})[contract_id] = position
-        
-        current_size = position.get("size", 0) if position else 0
-        if current_size > 0 or attempt == max_retries - 1:
-            break
-        time.sleep(retry_delay)
-    
-    open_orders = search_open(acct_id)
-    stops = [o for o in open_orders if o["contractId"] == contract_id and o["type"] == 4 and o["status"] == 1]
-    
-    # Get position type to determine stop side
-    position_type = position.get("type") if position else None
-    
-    # Only sync stops if we have a position
-    if current_size > 0:
-        for stop in stops:
-            if stop["size"] != current_size:
-                logging.info(f"[SL SYNC] Adjusting stop from size {stop['size']} to match position {current_size}")
-                cancel(acct_id, stop["id"])
-                
-                # Only replace if we know the stop price
-                stop_price = stop.get("stopPrice")
-                if stop_price and position_type:
-                    stop_side = 1 if position_type == 1 else 0
-                    time.sleep(0.5)
-                    place_stop(acct_id, contract_id, stop_side, current_size, stop_price)
-    
-    # Only cancel stops if we're REALLY sure there's no position
-    elif current_size == 0:
-        # Check if stop is very new (might be for a position we haven't seen yet)
-        for stop in stops:
-            # Check stop age if possible
-            stop_time = stop.get("creationTimestamp")
-            if stop_time:
-                try:
-                    from dateutil import parser
-                    from datetime import datetime, timezone
-                    stop_dt = parser.parse(stop_time)
-                    age_seconds = (datetime.now(timezone.utc) - stop_dt).total_seconds()
-                    
-                    # Don't cancel stops less than 10 seconds old
-                    if age_seconds < 10:
-                        logging.info(f"[SL SYNC] Keeping new stop {stop['id']} (age: {age_seconds:.1f}s)")
-                        continue
-                except:
-                    pass
-            
-            logging.info(f"[SL SYNC] No position found, canceling old stop {stop['id']}")
-            cancel(acct_id, stop["id"])
-          
-# Example usage:
-if __name__ == "__main__":
-    print("SignalR Listener module. Import and launch from your tradingview_projectx_bot.py main script.")
+    logging.info(
+        "ensure_stops_match_position is disabled in reduction architecture (acct_id=%s, contract_id=%s)",
+        acct_id,
+        contract_id,
+    )
+
