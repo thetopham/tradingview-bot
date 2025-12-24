@@ -20,6 +20,8 @@ def load_config():
         'SUPABASE_URL': os.getenv("SUPABASE_URL"),
         'SUPABASE_KEY': os.getenv("SUPABASE_KEY"),
         'WEBHOOK': os.getenv("WEBHOOK"),
+        'TRADING_ENABLED': os.getenv("TRADING_ENABLED", "false").lower() == "true",
+        'DEFAULT_TRADE_SIZE': int(os.getenv("DEFAULT_TRADE_SIZE", 1)),
 
         # Risk params
         'DAILY_PROFIT_TARGET': float(os.getenv("DAILY_PROFIT_TARGET", 500.0)),
