@@ -69,6 +69,7 @@ def ensure_live_stop(acct_id: int, cid: str, exit_side: int, size: int, target_p
 
 
 def get_regime_adjusted_params(base_sl_points: float, base_tp_points: list, regime_data: dict = None) -> tuple:
+    raise RuntimeError("get_regime_adjusted_params is quarantined for reduction architecture MVP")
     """
     Adjust stop loss and take profit based on market regime.
     Returns (adjusted_sl_points, adjusted_tp_points).
@@ -141,6 +142,7 @@ def _compute_entry_fill(acct_id: int, oid: int) -> float | None:
 
 
 def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
+    raise RuntimeError("run_bracket is quarantined for reduction architecture MVP")
     cid = get_contract(sym)
     side = 0 if sig == "BUY" else 1
     exit_side = 1 - side
@@ -219,6 +221,7 @@ def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
 
 
 def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
+    raise RuntimeError("run_brackmod is quarantined for reduction architecture MVP")
     cid = get_contract(sym)
     side = 0 if sig == "BUY" else 1
     exit_side = 1 - side
@@ -298,6 +301,7 @@ def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
 
 
 def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
+    raise RuntimeError("run_pivot is quarantined for reduction architecture MVP")
     cid = get_contract(sym)
     side = 0 if sig == "BUY" else 1
     exit_side = 1 - side

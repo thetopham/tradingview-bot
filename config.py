@@ -33,6 +33,13 @@ def load_config():
     config['USE_DYNAMIC_CONTRACTS'] = os.getenv("USE_DYNAMIC_CONTRACTS", "true").lower() == "true"
     config['LIVE_MODE'] = os.getenv("LIVE_MODE", "false").lower() == "true"
     config['DEFAULT_SYMBOL'] = os.getenv("DEFAULT_SYMBOL", "MES")
+    config['MARKET_SYMBOL'] = os.getenv("MARKET_SYMBOL", "MES")
+
+    # Trading controls
+    config['TRADING_ENABLED'] = os.getenv("TRADING_ENABLED", "false").lower() == "true"
+    config['DEFAULT_SIZE'] = int(os.getenv("DEFAULT_SIZE", 1))
+    config['SLOPE_LOOKBACK'] = int(os.getenv("SLOPE_LOOKBACK", 10))
+    config['SLOPE_THRESHOLD'] = float(os.getenv("SLOPE_THRESHOLD", 0.00003))
 
     # Accounts (ACCOUNT_ALPHA=12345, etc.)
     config['ACCOUNTS'] = {
@@ -66,8 +73,6 @@ def load_config():
             legacy_map[acct_names[1]] = config['N8N_AI_URL2']
         if legacy_map:
             config['AI_ENDPOINTS'] = legacy_map
-        else:
-            raise RuntimeError("No AI endpoints configured. Set N8N_AI_URL_<ACCOUNT> or N8N_AI_URL.")
 
     # Trading day windows / tz
     config['OVERRIDE_CONTRACT_ID'] = os.getenv("OVERRIDE_CONTRACT_ID", None)

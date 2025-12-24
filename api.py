@@ -610,8 +610,9 @@ class RegimeTracker:
             return change_info
         return None
 
-def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None, 
+def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None,
                                    cache_minutes: int = 4, force_refresh: bool = False) -> Dict:
+    raise RuntimeError("fetch_multi_timeframe_analysis is quarantined for reduction architecture MVP")
     """
     Fetch multi-timeframe analysis using BOTH OHLC and image data
     """
@@ -892,6 +893,7 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
             regime_cache_in_progress.pop(request_key, None)
 
 def evaluate_entry_quality(regime_analysis: Dict, position_context: Dict = None) -> Dict:
+    raise RuntimeError("evaluate_entry_quality is quarantined for reduction architecture MVP")
     """
     Evaluate entry quality based on hybrid analysis and position context
     """
@@ -959,6 +961,7 @@ def evaluate_entry_quality(regime_analysis: Dict, position_context: Dict = None)
     }
 
 def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url):
+    raise RuntimeError("ai_trade_decision_with_regime is quarantined for reduction architecture MVP")
     """
     Enhanced AI trade decision that includes market regime analysis, chart URLs, and position context
     """
@@ -1151,6 +1154,7 @@ def get_all_positions_summary() -> Dict:
         }
 
 def get_market_conditions_summary(force_refresh: bool = False) -> Dict:
+    raise RuntimeError("get_market_conditions_summary is quarantined for reduction architecture MVP")
     """
     Get a summary of current market conditions for logging
     """
