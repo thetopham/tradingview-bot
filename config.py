@@ -13,6 +13,13 @@ def load_config():
         'API_KEY': os.getenv("PROJECTX_API_KEY"),
         'WEBHOOK_SECRET': os.getenv("WEBHOOK_SECRET"),
 
+        # Reduction architecture toggles
+        'TRADING_ENABLED': os.getenv("TRADING_ENABLED", "false").lower() == "true",
+        'DEFAULT_SIZE': int(os.getenv("DEFAULT_SIZE", 1)),
+        'SLOPE_LOOKBACK': int(os.getenv("SLOPE_LOOKBACK", 10)),
+        'SLOPE_THRESHOLD': float(os.getenv("SLOPE_THRESHOLD", 0.00003)),
+        'MARKET_SYMBOL': os.getenv("MARKET_SYMBOL", "MES"),
+
         # legacy single/dual endpoints (kept for backward-compat)
         'N8N_AI_URL': os.getenv("N8N_AI_URL"),
         'N8N_AI_URL2': os.getenv("N8N_AI_URL2"),
@@ -67,7 +74,8 @@ def load_config():
         if legacy_map:
             config['AI_ENDPOINTS'] = legacy_map
         else:
-            raise RuntimeError("No AI endpoints configured. Set N8N_AI_URL_<ACCOUNT> or N8N_AI_URL.")
+            # Reduction architecture disables AI by default; allow empty mapping
+            config['AI_ENDPOINTS'] = {}
 
     # Trading day windows / tz
     config['OVERRIDE_CONTRACT_ID'] = os.getenv("OVERRIDE_CONTRACT_ID", None)
