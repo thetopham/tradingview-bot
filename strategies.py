@@ -139,6 +139,8 @@ def _compute_entry_fill(acct_id: int, oid: int) -> float | None:
         time.sleep(0.25)
     return price
 
+def run_simple(acct_id, sym, sig, size, alert, ai_decision_id=None):
+    #simple script that just sends a buy or sell signal to the api, size is defaulted to 1
 
 def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
     cid = get_contract(sym)
