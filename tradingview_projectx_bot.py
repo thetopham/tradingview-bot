@@ -8,23 +8,25 @@ Handles webhooks, AI decisions, trade execution, and scheduled processing.
 
 from datetime import time as dtime, timedelta
 from typing import Optional
-from market_regime import MarketRegime
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from logging_config import setup_logging
 from config import load_config
 from api import (
-    flatten_contract, get_contract, ai_trade_decision, cancel_all_stops, 
-    search_pos, get_supabase_client, search_trades, search_open,
-    get_market_conditions_summary, ai_trade_decision_with_regime,
+    flatten_contract,
+    get_contract,
+    get_supabase_client,
+    search_pos,
+    search_trades,
+    search_open,
     # Added for /contracts endpoints
-    search_contracts, get_active_contract_for_symbol_cached, 
+    search_contracts,
+    get_active_contract_for_symbol_cached,
     get_active_contract_for_symbol,  # used in JSON response
     CONTRACT_CACHE_DURATION,
     # NEW: balances via ProjectX
     search_accounts,  # <—— uses /api/Account/search
 )
-from strategies import run_bracket, run_brackmod, run_pivot
 from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token
 from signalr_listener import launch_signalr_listener
@@ -35,7 +37,11 @@ import logging
 import json
 import time
 import os
-from supabase import create_client
+
+from execution import send_entry
+from market_state import build_market_state
+from position_manager import PositionManager
+from trigger_engine import decide
 
 # --- Logging/Config/Globals ---
 setup_logging()
@@ -49,15 +55,11 @@ CT              = config['CT']
 GET_FLAT_START  = config['GET_FLAT_START']
 GET_FLAT_END    = config['GET_FLAT_END']
 
-AI_ENDPOINTS = config['AI_ENDPOINTS']
-
-def ai_url_for(account_name: str) -> str:
-    url = AI_ENDPOINTS.get(account_name)
-    if not url:
-        raise RuntimeError(
-            f"No AI endpoint for account '{account_name}'. Known: {list(AI_ENDPOINTS)}"
-        )
-    return url
+TRADING_ENABLED = config.get('TRADING_ENABLED', False)
+DEFAULT_SIZE = config.get('DEFAULT_SIZE', 1)
+SLOPE_LOOKBACK = config.get('SLOPE_LOOKBACK', 10)
+SLOPE_THRESHOLD = config.get('SLOPE_THRESHOLD', 0.00003)
+MARKET_SYMBOL = config.get('MARKET_SYMBOL', 'MES')
 
 MARKET_SESSIONS = {
     'ASIAN': {
@@ -110,6 +112,8 @@ def get_current_session(now=None):
     return 'OFF_HOURS', {'characteristics': 'Market closed'}
 
 AUTH_LOCK = threading.Lock()
+
+position_manager = PositionManager(ACCOUNTS)
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for the dashboard
@@ -526,16 +530,14 @@ def get_account_health(account):
 def get_market_status():
     """Get current market conditions and regime (resilient to None)."""
     try:
-        summary = get_market_conditions_summary() or {}
+        supabase = get_supabase_client()
+        market_state = build_market_state(supabase, symbol=MARKET_SYMBOL)
         session_name, session_info = get_current_session()
-        summary['session'] = {
+        market_state['session'] = {
             'name': session_name,
             'characteristics': session_info.get('characteristics', 'Unknown')
         }
-        # sane defaults if upstream omitted them
-        summary.setdefault('regime', 'unknown')
-        summary.setdefault('confidence', 0)
-        return jsonify(summary), 200
+        return jsonify(market_state), 200
     except Exception as e:
         logging.error(f"Error getting market status: {e}")
         return jsonify({"error": str(e), "regime": "unknown", "confidence": 0}), 200
@@ -739,145 +741,63 @@ def flatten_account_positions(acct_id: int, primary_cid: Optional[str], symbol: 
 
 def handle_webhook_logic(data):
     try:
-        strat = data.get("strategy", "bracket").lower()
-        acct  = (data.get("account") or DEFAULT_ACCOUNT).lower()
-        sig   = data.get("signal", "").upper()
-        sym   = data.get("symbol", config['DEFAULT_SYMBOL'])  # Use default symbol if not provided
-        size  = int(data.get("size", 1))
-        alert = data.get("alert", "")
-        ai_decision_id = data.get("ai_decision_id", None)
-        regime = "unknown"
-        regime_confidence = 0
+        acct = (data.get("account") or DEFAULT_ACCOUNT).lower()
+        sig = data.get("signal", "").upper()
+        sym = data.get("symbol", MARKET_SYMBOL)
+        size = int(data.get("size", DEFAULT_SIZE))
 
         if acct not in ACCOUNTS:
-            logging.error(f"Unknown account '{acct}'")
-            return
-
-        if not strat:
-            logging.info(f"No strategy provided for account {acct}; skipping trade execution")
+            logging.error("Unknown account '%s'", acct)
             return
 
         if not sig:
-            logging.info(f"No signal provided for account {acct}; skipping trade execution")
+            logging.info("No signal provided for account %s; skipping", acct)
             return
 
         acct_id = ACCOUNTS[acct]
-
+        supabase = get_supabase_client()
         now = datetime.now(CT)
 
-        # Check if in get-flat window
-        if in_get_flat(now):
-            logging.info("In get-flat window, no trades processed")
-            return
-
-        # Get current market session
-        session_name, session_info = get_current_session(now)
-        logging.info(f"Current session: {session_name} - {session_info['characteristics']}")
-
-        # Log market conditions periodically
-        if not hasattr(handle_webhook_logic, 'last_market_log'):
-            handle_webhook_logic.last_market_log = now - timedelta(minutes=6)
-
-        if now - handle_webhook_logic.last_market_log > timedelta(minutes=5):
-            get_market_conditions_summary()
-            handle_webhook_logic.last_market_log = now
-
-        # --- AI Overseer OR Direct Trading ---
-        ai_decision = None
-        if acct in AI_ENDPOINTS:
-            ai_url = AI_ENDPOINTS[acct]
-            ai_decision = ai_trade_decision_with_regime(
-                acct, strat, sig, sym, size, alert, ai_url
-            )
-
-            regime = ai_decision.get('regime', 'unknown')
-            regime_confidence = ai_decision.get('regime_confidence', 0)
-            logging.info(f"Market regime: {regime} (confidence: {regime_confidence}%)")
-
-            # Merge / normalize
-            strat = (ai_decision.get("strategy", strat) or "bracket").lower()
-            sig   = (ai_decision.get("signal", sig)   or "HOLD").upper()
-            sym   = ai_decision.get("symbol", sym)
-            size  = ai_decision.get("size", size)
-            alert = ai_decision.get("alert", alert)
-            ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
-
-            # allow BUY/SELL/HOLD/FLAT to continue; block anything else
-            if sig not in ("BUY", "SELL", "HOLD", "FLAT"):
-                logging.info(
-                    f"AI decided {sig}; no action. Reason: {ai_decision.get('reason', 'n/a')}"
-                )
-                return
-        else:
-            # NON-AI ACCOUNT - simple decision ID for tracking
-            ai_decision_id = int(time.time() * 1000) % (2**62)
-            logging.info(f"Non-AI account {acct} - proceeding with manual trade")
-
-        # --- FLAT handling for manual or AI decisions ---
+        # Manual panic flatten
         if sig == "FLAT":
             try:
-                primary_cid = get_contract(sym)  # may be None; sweeper tolerates it
+                cid = get_contract(sym)
             except Exception:
-                primary_cid = None
-            flatten_account_positions(acct_id, primary_cid, sym)
-            if ai_decision:
-                logging.info(
-                    f"AI-initiated FLAT complete for account {acct} ({sym}) decision_id={ai_decision_id}"
-                )
-            else:
-                logging.info(
-                    f"Manual FLAT complete for account {acct} ({sym})"
-                )
+                cid = None
+            flatten_account_positions(acct_id, cid, sym)
+            logging.info("Manual FLAT complete for account %s (%s)", acct, sym)
             return
 
-        # Resolve contract (best effort; HOLD can still proceed without it)
-        try:
-            cid = get_contract(sym)
-        except Exception:
-            cid = None
-        if not cid and sig in ("BUY", "SELL"):
+        cid = get_contract(sym)
+        if not cid:
             logging.error("Could not determine contract ID for symbol %s; aborting entry", sym)
             return
 
-        # Check current positions before acting
-        positions = search_pos(acct_id) or []
-        open_pos = [
-            p for p in positions if cid and p.get("contractId") == cid and p.get("size", 0) != 0
-        ]
-        total_size = sum(p.get("size", 0) for p in open_pos) if open_pos else 0
+        position_context = position_manager.get_position_context_for_ai(acct_id, cid)
+        market_snapshot = build_market_state(supabase, symbol=sym)
+        in_flat_window = in_get_flat(now)
+        plan = decide(market_snapshot, position_context, in_flat_window, TRADING_ENABLED)
 
-        # If no open position, clean up protective stops (optional safety)
-        if not open_pos and cid:
-            cancel_all_stops(acct_id, cid)
-
-        # --- NEW: HOLD branch (no new orders) ---
-        if sig == "HOLD":
-            if cid:
-                if open_pos:
-                    logging.info(
-                        f"HOLD with open position (size {total_size}) -> leaving existing brackets/stops as-is."
-                    )
-                else:
-                    logging.info(
-                        "HOLD while flat -> canceled protective stops (if any) and took no action."
-                    )
-            else:
-                logging.info("HOLD with unknown contract -> no action.")
-            return
-
-        # --- Strategy Dispatch for BUY/SELL only ---
         logging.info(
-            f"Executing {strat} strategy: {sig} {size} {sym} in {regime} regime (pos={total_size})"
+            "Decision summary: regime=%s slopes=%s action=%s reason=%s trading_enabled=%s account=%s",
+            market_snapshot.get("regime"),
+            market_snapshot.get("slope"),
+            plan.get("action"),
+            plan.get("reason_code"),
+            TRADING_ENABLED,
+            acct,
         )
 
-        if strat == "bracket":
-            run_bracket(acct_id, sym, sig, size, alert, ai_decision_id)
-        elif strat == "brackmod":
-            run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id)
-        elif strat == "pivot":
-            run_pivot(acct_id, sym, sig, size, alert, ai_decision_id)
+        if plan.get("action") in ("BUY", "SELL"):
+            result = send_entry(plan["action"], acct_id, sym, size, TRADING_ENABLED)
+            if TRADING_ENABLED:
+                logging.info("Entry sent for %s (%s): %s", acct, sym, result)
+            else:
+                logging.info(
+                    "SIMULATED ORDER: %s %s %s result=%s", acct, plan.get("action"), sym, result
+                )
         else:
-            logging.error(f"Unknown strategy '{strat}'")
+            logging.info("No entry taken for %s (%s): %s", acct, sym, plan.get("reason_code"))
 
     except Exception as e:
         import traceback

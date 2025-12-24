@@ -22,6 +22,7 @@ TP_POINTS = config.get('TP_POINTS', [2.5, 5.0, 10.0])
 CT = config['CT']
 ACCOUNTS = config['ACCOUNTS']
 AI_ENDPOINTS = config.get('AI_ENDPOINTS', {})
+LEGACY_DISABLED_MSG = "Legacy strategies are disabled under the reduction MVP."
 
 # --- Tick handling (MES = 0.25). If you expand to other contracts later,
 # consider mapping symbols to tick sizes in config.
@@ -69,59 +70,7 @@ def ensure_live_stop(acct_id: int, cid: str, exit_side: int, size: int, target_p
 
 
 def get_regime_adjusted_params(base_sl_points: float, base_tp_points: list, regime_data: dict = None) -> tuple:
-    """
-    Adjust stop loss and take profit based on market regime.
-    Returns (adjusted_sl_points, adjusted_tp_points).
-    """
-    # Get current regime if not provided
-    if regime_data is None:
-        try:
-            summary = get_market_conditions_summary()
-            regime = summary.get('regime', 'choppy')
-            volatility = summary.get('volatility', 'medium')
-        except Exception:
-            regime = 'choppy'
-            volatility = 'medium'
-    else:
-        regime = regime_data.get('primary_regime', 'choppy')
-        volatility = regime_data.get('volatility_details', {}).get('volatility_regime', 'medium')
-
-    # Regime-based adjustments
-    sl_multiplier = 1.0
-    tp_multiplier = 1.0
-
-    if regime in ('trending_up', 'trending_down'):
-        # In trending markets, give trades more room
-        sl_multiplier = 1.2
-        tp_multiplier = 1.5
-    elif regime == 'ranging':
-        sl_multiplier = 0.8
-        tp_multiplier = 0.8
-    elif regime == 'choppy':
-        sl_multiplier = 0.6
-        tp_multiplier = 0.6
-    elif regime == 'breakout':
-        sl_multiplier = 1.3
-        tp_multiplier = 2.0
-
-    # Volatility adjustments
-    if volatility == 'high':
-        sl_multiplier *= 1.2
-        tp_multiplier *= 1.2
-    elif volatility == 'low':
-        sl_multiplier *= 0.9
-        tp_multiplier *= 0.9
-
-    adjusted_sl = base_sl_points * sl_multiplier
-    adjusted_tp = [tp * tp_multiplier for tp in base_tp_points]
-
-    logging.info(
-        f"Regime adjustments ({regime}/{volatility}): "
-        f"SL {base_sl_points} -> {adjusted_sl:.1f}, "
-        f"TP {base_tp_points} -> {[f'{tp:.1f}' for tp in adjusted_tp]}"
-    )
-
-    return adjusted_sl, adjusted_tp
+    raise RuntimeError(LEGACY_DISABLED_MSG)
 
 
 def _compute_entry_fill(acct_id: int, oid: int) -> float | None:

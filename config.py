@@ -27,6 +27,13 @@ def load_config():
         'MAX_CONSECUTIVE_LOSSES': int(os.getenv("MAX_CONSECUTIVE_LOSSES", 3)),
         'STOP_LOSS_POINTS': float(os.getenv("STOP_LOSS_POINTS", 10.0)),
         'TP_POINTS': [float(x) for x in os.getenv("TP_POINTS", "2.5,5.0,10.0").split(",")],
+
+        # Reduction MVP toggles
+        'TRADING_ENABLED': os.getenv("TRADING_ENABLED", "false").lower() == "true",
+        'DEFAULT_SIZE': int(os.getenv("DEFAULT_SIZE", 1)),
+        'SLOPE_LOOKBACK': int(os.getenv("SLOPE_LOOKBACK", 10)),
+        'SLOPE_THRESHOLD': float(os.getenv("SLOPE_THRESHOLD", 0.00003)),
+        'MARKET_SYMBOL': os.getenv("MARKET_SYMBOL", "MES"),
     }
 
     # Mode/symbol
@@ -67,7 +74,7 @@ def load_config():
         if legacy_map:
             config['AI_ENDPOINTS'] = legacy_map
         else:
-            raise RuntimeError("No AI endpoints configured. Set N8N_AI_URL_<ACCOUNT> or N8N_AI_URL.")
+            config['AI_ENDPOINTS'] = {}
 
     # Trading day windows / tz
     config['OVERRIDE_CONTRACT_ID'] = os.getenv("OVERRIDE_CONTRACT_ID", None)
