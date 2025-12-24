@@ -9,14 +9,14 @@ This project implements a Python-based webhook designed to receive trading alert
 ## 📦 Core Features
 
 - **Webhook Integration**: Receives TradingView alerts via HTTP POST requests.
-- **Flexible Trading Strategies**: Supports multiple trading strategies like `bracket`, `brackmod`, and AI-assisted pivots.
+- **Single bracket pipeline**: Routes all BUY/SELL decisions through a server-side bracket template to avoid Python-managed TP/SLs.
 - **ProjectX API**: Interacts with ProjectX for order execution and position management.
 - **AI-Powered Decisions**: Optionally integrates with an n8n workflow to leverage AI (e.g., OpenAI) for trade decisions.
 - **Supabase Logging**: Logs trade results and bot activity to a Supabase database.
 - **Configuration**: Highly configurable via environment variables (`.env` file).
 - **Log Management**: Includes a utility script (`upload_botlog.py`) for sending logs to Discord.
 - **Automated Position Flattening**: Can flatten positions based on `FLAT` signals or pre-set times.
-- **Phantom Order Sweeper**: Includes a mechanism to detect and cancel orphaned orders.
+- **Lean API usage**: Eliminates screenshot polling and multi-order micromanagement to reduce load on Topstep, n8n, and Supabase.
 
 ---
 
@@ -47,7 +47,6 @@ This project implements a Python-based webhook designed to receive trading alert
      -H "Content-Type: application/json" \
      -d '{
        "secret": "WEBHOOK_SECRET",
-       "strategy": "brackmod",
        "signal": "BUY",
        "symbol": "MES",
        "size": 1
@@ -66,21 +65,19 @@ The bot operates as a webhook service, processing signals from TradingView to ex
 - **Webhook Setup**: Listens on the `/webhook` endpoint for incoming JSON payloads from TradingView, triggering trade actions based on the received signal (BUY, SELL, FLAT).
 - **ProjectX API Interaction**:
     - **Authentication**: Securely connects to the ProjectX API using credentials stored in the `.env` file.
-    - **Order Placement**: Places market orders and bracket orders (stop-loss and take-profit) based on the trading strategy.
+    - **Order Placement**: Places a single bracket-template order (server-managed stop-loss and take-profit) for each BUY/SELL decision.
     - **Position Management**: Monitors and manages open positions, including flattening positions when required (e.g., on a FLAT signal or during specific market hours).
-- **Trading Strategies**:
-    - **Bracket**: Standard bracket order with predefined stop-loss and take-profit levels.
-    - **Brackmod**: A modified bracket strategy allowing dynamic adjustments based on market conditions or AI input.
-    - **Pivot**: Trades based on pivot points, often integrated with AI analysis for entry and exit signals.
+- **Trading Strategy**:
+    - **Bracket template**: A unified execution path that submits one server-side bracket using the configured template ID; the bot no longer manages TP/SL legs locally.
 - **AI-Driven Decision-Making**:
     - Integrates with an n8n workflow that calls an AI service (e.g., OpenAI).
     - The AI analyzes market data and provides trade recommendations (e.g., hold, modify, or close position), which the bot can act upon.
 - **Trade Result Logging**:
     - Records detailed information about each trade (entry price, exit price, profit/loss, strategy used) to a Supabase database for analysis and record-keeping.
-- **`upload_botlog.py` Script**:
-    - A utility script to manually or automatically upload local log files (e.g., `bot.log`) to a designated channel or storage (like a Discord channel) for monitoring and debugging.
-- **Phantom Order Sweeper**:
-    - A scheduled task that periodically checks for and cancels any "phantom" orders on ProjectX. These are orders that might have been orphaned due to disconnections or errors, ensuring the account state remains clean.
+  - **`upload_botlog.py` Script**:
+      - A utility script to manually or automatically upload local log files (e.g., `bot.log`) to a designated channel or storage (like a Discord channel) for monitoring and debugging.
+  - **Bracket Lifecycle Simplicity**:
+      - Execution relies on server-side bracket templates rather than client-managed stops/targets, reducing the need for polling or sweepers.
 
 ---
 
@@ -90,10 +87,10 @@ The AI-assisted path builds several guardrails before any order is released to P
 
 1. **Alert intake & async dispatch** – The Flask webhook validates the shared secret and hands the payload to `handle_webhook_logic` on a background thread so TradingView or n8n immediately receive a `202` response.【F:tradingview_projectx_bot.py†L113-L122】
 2. **Pre-trade guardrails** – `handle_webhook_logic` normalizes the strategy, account, symbol, and size, then enforces several early exits: unknown accounts, missing contracts, manual `FLAT` commands, or time windows where trading is disallowed. It also tags the current market session and periodically logs regime snapshots for monitoring.【F:tradingview_projectx_bot.py†L671-L717】
-3. **Hybrid regime intelligence (n8n)** – AI-enabled accounts route through `ai_trade_decision_with_regime`, which first calls `fetch_multi_timeframe_analysis` using the n8n base URL. That helper aggregates 1-minute Supabase OHLC data into 5/15/30 minute bars, merges any stored chart snapshots, and falls back to live n8n `/webhook/<timeframe>` endpoints when local data is missing. All analyses are cached in Supabase to reduce duplicate n8n executions.【F:api.py†L1121-L1294】【F:api.py†L701-L1010】
+3. **OHLC-only regime intelligence** – AI-enabled accounts route through `ai_trade_decision_with_regime`, which first calls `fetch_multi_timeframe_analysis`. The helper aggregates 1-minute Supabase OHLC data into multi-timeframe arrays (5m/15m/30m/1h/4h/1d) and skips TradingView screenshots or n8n image fallbacks, cutting external API usage.【F:api.py†L613-L820】
 4. **Regime-aware risk filters** – The regime result drives several blocking decisions before the AI model is even called: account risk checks from `PositionManager`, entry-quality scoring that punishes choppy or low-confidence conditions, and regime rules that suppress conflicting signals (e.g., forcing HOLDs when the regime says not to trade).【F:api.py†L1140-L1205】【F:api.py†L1026-L1109】
 5. **AI adjudication & sizing** – Only after those gates does the bot send the enriched payload (regime snapshot, chart URLs, support/resistance levels, position context) to the n8n/OpenAI webhook. The returned decision is annotated with regime metadata and then clipped against regime-defined maximum size or risk-based recommendations before execution continues.【F:api.py†L1207-L1294】
-6. **Strategy execution** – If the AI authorizes a BUY/SELL, `handle_webhook_logic` overwrites the original alert with AI guidance, clears existing protective orders when appropriate, and dispatches to the configured strategy (`bracket`, `brackmod`, or `pivot`). Otherwise the trade is blocked and the reason is logged for observability.【F:tradingview_projectx_bot.py†L718-L766】
+6. **Strategy execution** – If the AI authorizes a BUY/SELL, `handle_webhook_logic` overwrites the original alert with AI guidance and dispatches a single bracket-template order; HOLD/FLAT decisions short-circuit without stop/TP polling. Otherwise the trade is blocked and the reason is logged for observability.【F:tradingview_projectx_bot.py†L718-L834】【F:strategies.py†L24-L70】
 
 The result is a closed-loop flow where TradingView alerts are tempered by a hybrid regime detector, n8n-hosted AI reasoning, and on-bot risk checks before the execution modules touch ProjectX.
 
@@ -152,7 +149,7 @@ Then, edit the `.env` file with your specific settings.
 *   `PROJECTX_API_KEY`: Your API key for the ProjectX API.
 *   `WEBHOOK_SECRET`: A secret key to verify webhook requests. This should be a long, random string that you also use in your TradingView alert configuration.
 *   `TV_PORT`: The local port on which the Flask webhook listener will run (e.g., `5000`).
-*   `N8N_WEBHOOK_URL` (Optional): URL for your n8n workflow if using AI integration for strategies like `pivot_ai`.
+*   `N8N_WEBHOOK_URL` (Optional): URL for your n8n workflow if using AI-assisted decision making.
 *   `SUPABASE_URL` (Optional): The URL of your Supabase project for logging trade results.
 *   `SUPABASE_KEY` (Optional): The anon key for your Supabase project.
 *   `DISCORD_WEBHOOK_URL` (Optional): The Discord webhook URL for uploading bot logs.
@@ -262,10 +259,9 @@ The bot expects a JSON payload on the `/webhook` endpoint. This payload contains
 *   **`secret`** (string, required):
     *   A security token used to authenticate the webhook request.
     *   **Important**: This value *must* match the `WEBHOOK_SECRET` environment variable configured for the bot. Requests with an invalid secret will be rejected.
-*   **`strategy`** (string, required):
-    *   The name of the trading strategy to be executed.
-    *   Examples: `bracket`, `brackmod`, `pivot_ai`.
-    *   The bot uses this field to determine the order placement logic (e.g., bracket parameters, AI interaction).
+*   **`strategy`** (string, optional):
+    *   The execution style. Defaults to the bracket-template pipeline if omitted.
+    *   Values other than `bracket` are ignored in the current simplified architecture.
 *   **`account`** (string, optional):
     *   The friendly name of the ProjectX account to use for the trade (e.g., `EVAL`, `FUNDED`).
     *   This name should correspond to one of the `ACCOUNT_<NAME>` environment variables (e.g., `ACCOUNT_EVAL=123456`).
@@ -292,7 +288,7 @@ The bot expects a JSON payload on the `/webhook` endpoint. This payload contains
 ```json
 {
   "secret": "your_webhook_secret_here",
-  "strategy": "brackmod",
+  "strategy": "bracket",
   "account": "EVAL",
   "signal": "BUY",
   "symbol": "MESU4",
@@ -456,7 +452,7 @@ To send alerts from TradingView to your bot:
     ```json
     {
       "secret": "your_webhook_secret_here",
-      "strategy": "pivot_ai",
+      "strategy": "bracket",
       "account": "EVAL",
       "signal": "SELL",
       "symbol": "MNQU4",
@@ -535,14 +531,14 @@ Feel free to extend these jobs—just ensure they respect the `in_get_flat` guar
 ## 🏗️ Architecture & Data Flow
 
 - **Entry Points**: `tradingview_projectx_bot.py` initializes logging, loads configuration from `.env`, authenticates with ProjectX, launches the SignalR market feed listener, starts the APScheduler background jobs, and serves the Flask API (health check, position snapshots, market status, webhook).
-- **Alert Handling**: `/webhook` accepts TradingView payloads, validates `WEBHOOK_SECRET`, and hands them to `handle_webhook_logic` on a background thread. The handler resolves accounts/contracts via `config.py` + `api.get_contract`, blocks trading during the get-flat window, and dispatches strategies from `strategies.py`.
-- **Strategy Layer**: `run_bracket`, `run_brackmod`, and `run_pivot` submit ProjectX orders, derive fills, and apply market-regime-adjusted stop/target levels. Each trade session is tracked through `signalr_listener.track_trade`, which later logs outcomes to Supabase.
+- **Alert Handling**: `/webhook` accepts TradingView payloads, validates `WEBHOOK_SECRET`, and hands them to `handle_webhook_logic` on a background thread. The handler resolves accounts/contracts via `config.py` + `api.get_contract`, blocks trading during the get-flat window, and dispatches a single bracket-template order through `strategies.execute_bracket`.
+- **Strategy Layer**: `execute_bracket` submits one server-side bracket template (no client-side TP/SL micromanagement) and tags the session via `signalr_listener.track_trade` for downstream Supabase logging.
 - **External Services**:
   - ProjectX REST calls live in `api.py`; `auth.py` keeps JWTs fresh; `state.py` holds the shared `requests.Session`.
   - Supabase stores trade logs, market-regime cache, tv_datafeed bars, and uploaded bot logs. `upload_botlog.py` can sync `/tmp/tradingview_projectx_bot.log*` into the `botlogs` bucket.
   - n8n AI endpoints (mapped in `.env`) enrich alerts with regime insight and can veto trades for AI-managed accounts (`epsilon`, `beta` by convention).
 - **Background Jobs** (`scheduler.py`): Hourly trim orphaned metadata, warn at 15:02 CT, auto-flatten all MES exposure at 15:07 CT, and refresh contract caches daily at 06:00 CT. Additional monitoring hooks are commented out but document prior automation.
-- **Market Context**: `market_regime.py`, `market_regime_ohlc.py`, and `market_regime_hybrid.py` fuse OHLC indicators with AI chart analysis. `api.get_market_conditions_summary` exposes a normalized snapshot for logs, endpoints, and strategy adjustments.
+- **Market Context**: `market_regime.py`, `market_regime_ohlc.py`, and `market_regime_hybrid.py` fuse OHLC indicators across multiple timeframes. `api.get_market_conditions_summary` exposes a normalized snapshot for logs, endpoints, and strategy adjustments without relying on screenshots.
 - **Live State Sync**: `signalr_listener.py` subscribes to TopstepX SignalR feeds per configured account, mirrors stop orders (`ensure_stops_match_position`), reconstructs metadata on restart, and triggers Supabase logging when positions close. Ensure `ACCOUNT_*` variables match funded accounts before enabling it.
 - **Risk & Positions**: `PositionManager` computes account metrics (daily P&L, risk level, consecutive losses) and serves `/positions/<account>/manage` and `/account/<account>/health`. Note: `scan_for_opportunities` referenced in the API is not implemented—avoid using `/scan` until it exists.
 

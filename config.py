@@ -44,6 +44,18 @@ def load_config():
         raise RuntimeError("No accounts loaded from .env. Add ACCOUNT_<NAME>=<ID>.")
     config['DEFAULT_ACCOUNT'] = next(iter(config['ACCOUNTS']))
 
+    # Bracket templates (Topstep server-side brackets)
+    config['BRACKET_TEMPLATE_DEFAULT'] = os.getenv("BRACKET_TEMPLATE_DEFAULT", "default")
+    config['BRACKET_TEMPLATE_MAP'] = {
+        k[len("BRACKET_TEMPLATE_"):].lower(): v
+        for k, v in os.environ.items()
+        if k.startswith("BRACKET_TEMPLATE_") and k != "BRACKET_TEMPLATE_DEFAULT"
+    }
+
+    # OHLC timeframe preferences for AI/regime analysis
+    default_timeframes = os.getenv("OHLC_TIMEFRAMES", "5m,15m,30m,1h,4h,1d")
+    config['OHLC_TIMEFRAMES'] = [tf.strip() for tf in default_timeframes.split(',') if tf.strip()]
+
     # NEW: per-account AI endpoints (N8N_AI_URL_ALPHA=..., etc.)
     ai_eps = {
         'alpha':   os.getenv('N8N_AI_URL_ALPHA'),

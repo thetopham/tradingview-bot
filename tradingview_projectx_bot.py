@@ -24,7 +24,7 @@ from api import (
     # NEW: balances via ProjectX
     search_accounts,  # <—— uses /api/Account/search
 )
-from strategies import run_bracket, run_brackmod, run_pivot
+from strategies import execute_bracket
 from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token
 from signalr_listener import launch_signalr_listener
@@ -739,7 +739,7 @@ def flatten_account_positions(acct_id: int, primary_cid: Optional[str], symbol: 
 
 def handle_webhook_logic(data):
     try:
-        strat = data.get("strategy", "bracket").lower()
+        strat = "bracket"
         acct  = (data.get("account") or DEFAULT_ACCOUNT).lower()
         sig   = data.get("signal", "").upper()
         sym   = data.get("symbol", config['DEFAULT_SYMBOL'])  # Use default symbol if not provided
@@ -751,10 +751,6 @@ def handle_webhook_logic(data):
 
         if acct not in ACCOUNTS:
             logging.error(f"Unknown account '{acct}'")
-            return
-
-        if not strat:
-            logging.info(f"No strategy provided for account {acct}; skipping trade execution")
             return
 
         if not sig:
@@ -795,8 +791,18 @@ def handle_webhook_logic(data):
             logging.info(f"Market regime: {regime} (confidence: {regime_confidence}%)")
 
             # Merge / normalize
-            strat = (ai_decision.get("strategy", strat) or "bracket").lower()
-            sig   = (ai_decision.get("signal", sig)   or "HOLD").upper()
+            action = (ai_decision.get("action") or ai_decision.get("signal") or sig).upper()
+            if action in ("BUY", "LONG", "ENTER_LONG", "ADD", "ADD_LONG", "INCREASE"):
+                sig = "BUY"
+            elif action in ("SELL", "SHORT", "ENTER_SHORT", "ADD_SHORT"):
+                sig = "SELL"
+            elif action in ("EXIT", "FLAT", "CLOSE", "REDUCE", "TRIM", "SCALE_OUT"):
+                sig = "FLAT"
+            elif action in ("NO POSITION", "NONE"):
+                sig = "HOLD"
+            else:
+                sig = "HOLD"
+
             sym   = ai_decision.get("symbol", sym)
             size  = ai_decision.get("size", size)
             alert = ai_decision.get("alert", alert)
@@ -867,17 +873,9 @@ def handle_webhook_logic(data):
 
         # --- Strategy Dispatch for BUY/SELL only ---
         logging.info(
-            f"Executing {strat} strategy: {sig} {size} {sym} in {regime} regime (pos={total_size})"
+            f"Executing bracket template: {sig} {size} {sym} in {regime} regime (pos={total_size})"
         )
-
-        if strat == "bracket":
-            run_bracket(acct_id, sym, sig, size, alert, ai_decision_id)
-        elif strat == "brackmod":
-            run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id)
-        elif strat == "pivot":
-            run_pivot(acct_id, sym, sig, size, alert, ai_decision_id)
-        else:
-            logging.error(f"Unknown strategy '{strat}'")
+        execute_bracket(acct_id, sym, sig, size, alert, ai_decision_id, account_name=acct)
 
     except Exception as e:
         import traceback
