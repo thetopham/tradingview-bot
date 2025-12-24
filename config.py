@@ -27,6 +27,7 @@ def load_config():
         'MAX_CONSECUTIVE_LOSSES': int(os.getenv("MAX_CONSECUTIVE_LOSSES", 3)),
         'STOP_LOSS_POINTS': float(os.getenv("STOP_LOSS_POINTS", 10.0)),
         'TP_POINTS': [float(x) for x in os.getenv("TP_POINTS", "2.5,5.0,10.0").split(",")],
+        'DEFAULT_BRACKET_TEMPLATE': os.getenv("DEFAULT_BRACKET_TEMPLATE", "standard"),
     }
 
     # Mode/symbol
@@ -74,4 +75,13 @@ def load_config():
     config['GET_FLAT_START'] = dtime(15, 7)
     config['GET_FLAT_END'] = dtime(17, 0)
     config['CT'] = pytz.timezone("America/Chicago")
+
+    # Bracket templates (BRACKET_TEMPLATE_<ACCOUNT>=name) and OHLC timeframes
+    config['BRACKET_TEMPLATES'] = {
+        k[len("BRACKET_TEMPLATE_"):].lower(): v
+        for k, v in os.environ.items()
+        if k.startswith("BRACKET_TEMPLATE_") and v
+    }
+    raw_timeframes = os.getenv("OHLC_TIMEFRAMES", "5m,15m,30m,1h,4h,1D")
+    config['OHLC_TIMEFRAMES'] = [tf.strip() for tf in raw_timeframes.split(',') if tf.strip()]
     return config

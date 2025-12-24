@@ -14,17 +14,17 @@ from flask_cors import CORS
 from logging_config import setup_logging
 from config import load_config
 from api import (
-    flatten_contract, get_contract, ai_trade_decision, cancel_all_stops, 
-    search_pos, get_supabase_client, search_trades, search_open,
+    flatten_contract, get_contract,
+    search_pos, get_supabase_client,
     get_market_conditions_summary, ai_trade_decision_with_regime,
     # Added for /contracts endpoints
-    search_contracts, get_active_contract_for_symbol_cached, 
+    search_contracts, get_active_contract_for_symbol_cached,
     get_active_contract_for_symbol,  # used in JSON response
     CONTRACT_CACHE_DURATION,
     # NEW: balances via ProjectX
     search_accounts,  # <—— uses /api/Account/search
 )
-from strategies import run_bracket, run_brackmod, run_pivot
+from strategies import run_simple_bracket
 from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token
 from signalr_listener import launch_signalr_listener
@@ -739,13 +739,15 @@ def flatten_account_positions(acct_id: int, primary_cid: Optional[str], symbol: 
 
 def handle_webhook_logic(data):
     try:
-        strat = data.get("strategy", "bracket").lower()
+        strat = data.get("strategy", "simple_bracket").lower()
         acct  = (data.get("account") or DEFAULT_ACCOUNT).lower()
-        sig   = data.get("signal", "").upper()
-        sym   = data.get("symbol", config['DEFAULT_SYMBOL'])  # Use default symbol if not provided
+        direction = data.get("signal", "").upper()
+        action = (data.get("action") or direction or "").upper()
+        sym   = data.get("symbol", config['DEFAULT_SYMBOL'])
         size  = int(data.get("size", 1))
         alert = data.get("alert", "")
         ai_decision_id = data.get("ai_decision_id", None)
+        template = data.get("bracket_template") or data.get("template")
         regime = "unknown"
         regime_confidence = 0
 
@@ -757,7 +759,7 @@ def handle_webhook_logic(data):
             logging.info(f"No strategy provided for account {acct}; skipping trade execution")
             return
 
-        if not sig:
+        if not direction:
             logging.info(f"No signal provided for account {acct}; skipping trade execution")
             return
 
@@ -770,24 +772,12 @@ def handle_webhook_logic(data):
             logging.info("In get-flat window, no trades processed")
             return
 
-        # Get current market session
-        session_name, session_info = get_current_session(now)
-        logging.info(f"Current session: {session_name} - {session_info['characteristics']}")
-
-        # Log market conditions periodically
-        if not hasattr(handle_webhook_logic, 'last_market_log'):
-            handle_webhook_logic.last_market_log = now - timedelta(minutes=6)
-
-        if now - handle_webhook_logic.last_market_log > timedelta(minutes=5):
-            get_market_conditions_summary()
-            handle_webhook_logic.last_market_log = now
-
         # --- AI Overseer OR Direct Trading ---
         ai_decision = None
         if acct in AI_ENDPOINTS:
             ai_url = AI_ENDPOINTS[acct]
             ai_decision = ai_trade_decision_with_regime(
-                acct, strat, sig, sym, size, alert, ai_url
+                acct, strat, direction, sym, size, alert, ai_url
             )
 
             regime = ai_decision.get('regime', 'unknown')
@@ -795,17 +785,19 @@ def handle_webhook_logic(data):
             logging.info(f"Market regime: {regime} (confidence: {regime_confidence}%)")
 
             # Merge / normalize
-            strat = (ai_decision.get("strategy", strat) or "bracket").lower()
-            sig   = (ai_decision.get("signal", sig)   or "HOLD").upper()
+            strat = (ai_decision.get("strategy", strat) or "simple_bracket").lower()
+            direction = (ai_decision.get("signal", direction) or "").upper()
+            action = (ai_decision.get("action", action) or direction).upper()
             sym   = ai_decision.get("symbol", sym)
             size  = ai_decision.get("size", size)
             alert = ai_decision.get("alert", alert)
+            template = ai_decision.get("bracket_template", template)
             ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
 
             # allow BUY/SELL/HOLD/FLAT to continue; block anything else
-            if sig not in ("BUY", "SELL", "HOLD", "FLAT"):
+            if direction not in ("BUY", "SELL", "HOLD", "FLAT") and action not in ("ENTER", "EXIT", "ADD", "REDUCE", "NO_POSITION"):
                 logging.info(
-                    f"AI decided {sig}; no action. Reason: {ai_decision.get('reason', 'n/a')}"
+                    f"AI decided {direction or action}; no action. Reason: {ai_decision.get('reason', 'n/a')}"
                 )
                 return
         else:
@@ -814,7 +806,7 @@ def handle_webhook_logic(data):
             logging.info(f"Non-AI account {acct} - proceeding with manual trade")
 
         # --- FLAT handling for manual or AI decisions ---
-        if sig == "FLAT":
+        if action in ("FLAT", "EXIT", "REDUCE") or direction == "FLAT":
             try:
                 primary_cid = get_contract(sym)  # may be None; sweeper tolerates it
             except Exception:
@@ -830,54 +822,36 @@ def handle_webhook_logic(data):
                 )
             return
 
-        # Resolve contract (best effort; HOLD can still proceed without it)
+        if action in ("HOLD", "NO_POSITION") or direction == "HOLD":
+            logging.info("HOLD signal received; no bracket submitted")
+            return
+
         try:
             cid = get_contract(sym)
         except Exception:
             cid = None
-        if not cid and sig in ("BUY", "SELL"):
+        if not cid:
             logging.error("Could not determine contract ID for symbol %s; aborting entry", sym)
             return
 
-        # Check current positions before acting
-        positions = search_pos(acct_id) or []
-        open_pos = [
-            p for p in positions if cid and p.get("contractId") == cid and p.get("size", 0) != 0
-        ]
-        total_size = sum(p.get("size", 0) for p in open_pos) if open_pos else 0
-
-        # If no open position, clean up protective stops (optional safety)
-        if not open_pos and cid:
-            cancel_all_stops(acct_id, cid)
-
-        # --- NEW: HOLD branch (no new orders) ---
-        if sig == "HOLD":
-            if cid:
-                if open_pos:
-                    logging.info(
-                        f"HOLD with open position (size {total_size}) -> leaving existing brackets/stops as-is."
-                    )
-                else:
-                    logging.info(
-                        "HOLD while flat -> canceled protective stops (if any) and took no action."
-                    )
-            else:
-                logging.info("HOLD with unknown contract -> no action.")
-            return
-
-        # --- Strategy Dispatch for BUY/SELL only ---
         logging.info(
-            f"Executing {strat} strategy: {sig} {size} {sym} in {regime} regime (pos={total_size})"
+            f"Executing {strat} strategy: {direction or action} {size} {sym} in {regime} regime"
         )
 
-        if strat == "bracket":
-            run_bracket(acct_id, sym, sig, size, alert, ai_decision_id)
-        elif strat == "brackmod":
-            run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id)
-        elif strat == "pivot":
-            run_pivot(acct_id, sym, sig, size, alert, ai_decision_id)
+        if direction in ("BUY", "SELL"):
+            run_simple_bracket(
+                acct_id=acct_id,
+                account_name=acct,
+                sym=sym,
+                direction=direction,
+                size=size,
+                alert=alert,
+                ai_decision_id=ai_decision_id,
+                template=template,
+                regime=regime,
+            )
         else:
-            logging.error(f"Unknown strategy '{strat}'")
+            logging.info("No actionable BUY/SELL direction provided; skipping order submission")
 
     except Exception as e:
         import traceback
