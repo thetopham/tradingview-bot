@@ -12,6 +12,8 @@ def load_config():
         'USER_NAME': os.getenv("PROJECTX_USERNAME"),
         'API_KEY': os.getenv("PROJECTX_API_KEY"),
         'WEBHOOK_SECRET': os.getenv("WEBHOOK_SECRET"),
+        'TRADING_ENABLED': os.getenv("TRADING_ENABLED", "false").lower() == "true",
+        'DEFAULT_TRADE_SIZE': int(os.getenv("DEFAULT_TRADE_SIZE", 1)),
 
         # legacy single/dual endpoints (kept for backward-compat)
         'N8N_AI_URL': os.getenv("N8N_AI_URL"),
@@ -64,10 +66,7 @@ def load_config():
             legacy_map[acct_names[0]] = config['N8N_AI_URL']
         if config['N8N_AI_URL2'] and len(acct_names) > 1:
             legacy_map[acct_names[1]] = config['N8N_AI_URL2']
-        if legacy_map:
-            config['AI_ENDPOINTS'] = legacy_map
-        else:
-            raise RuntimeError("No AI endpoints configured. Set N8N_AI_URL_<ACCOUNT> or N8N_AI_URL.")
+        config['AI_ENDPOINTS'] = legacy_map
 
     # Trading day windows / tz
     config['OVERRIDE_CONTRACT_ID'] = os.getenv("OVERRIDE_CONTRACT_ID", None)
