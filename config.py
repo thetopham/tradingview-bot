@@ -27,6 +27,11 @@ def load_config():
         'MAX_CONSECUTIVE_LOSSES': int(os.getenv("MAX_CONSECUTIVE_LOSSES", 3)),
         'STOP_LOSS_POINTS': float(os.getenv("STOP_LOSS_POINTS", 10.0)),
         'TP_POINTS': [float(x) for x in os.getenv("TP_POINTS", "2.5,5.0,10.0").split(",")],
+        'BRACKET_TEMPLATE': os.getenv("BRACKET_TEMPLATE", "default"),
+        'AI_TIMEFRAMES': [tf.strip() for tf in os.getenv(
+            "AI_TIMEFRAMES",
+            "5m,15m,30m,1h,4h,1D"
+        ).split(',') if tf.strip()],
     }
 
     # Mode/symbol
@@ -54,6 +59,17 @@ def load_config():
     }
     # prune Nones so you can mix legacy + new during transition
     config['AI_ENDPOINTS'] = {k: v for k, v in ai_eps.items() if v}
+
+    # Per-account bracket template overrides (BRACKET_TEMPLATE_ALPHA, etc.)
+    bracket_templates = {
+        k[len("BRACKET_TEMPLATE_"):].lower(): v
+        for k, v in os.environ.items()
+        if k.startswith("BRACKET_TEMPLATE_")
+    }
+    if bracket_templates:
+        config['ACCOUNT_BRACKETS'] = bracket_templates
+    else:
+        config['ACCOUNT_BRACKETS'] = {}
 
     # Fallback: if no per-account map provided, fall back to legacy var(s)
     if not config['AI_ENDPOINTS']:
