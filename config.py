@@ -64,14 +64,15 @@ def load_config():
             legacy_map[acct_names[0]] = config['N8N_AI_URL']
         if config['N8N_AI_URL2'] and len(acct_names) > 1:
             legacy_map[acct_names[1]] = config['N8N_AI_URL2']
-        if legacy_map:
-            config['AI_ENDPOINTS'] = legacy_map
-        else:
-            raise RuntimeError("No AI endpoints configured. Set N8N_AI_URL_<ACCOUNT> or N8N_AI_URL.")
+        config['AI_ENDPOINTS'] = legacy_map
 
     # Trading day windows / tz
     config['OVERRIDE_CONTRACT_ID'] = os.getenv("OVERRIDE_CONTRACT_ID", None)
     config['GET_FLAT_START'] = dtime(15, 7)
     config['GET_FLAT_END'] = dtime(17, 0)
     config['CT'] = pytz.timezone("America/Chicago")
+
+    # Trading toggles
+    config['TRADING_ENABLED'] = os.getenv("TRADING_ENABLED", "false").lower() == "true"
+    config['DEFAULT_SIZE'] = int(os.getenv("DEFAULT_SIZE", 1))
     return config
