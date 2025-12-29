@@ -273,6 +273,44 @@ def _build_market_summary(market_state: Dict) -> Dict:
     return summary
 
 
+def _log_market_state_to_supabase(summary: Dict, symbol: str = "MES", timeframe: str = "5m") -> None:
+    """Persist the latest 5m market state/conditions snapshot to Supabase."""
+
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        logging.debug("Supabase credentials missing; skipping market state log")
+        return
+
+    snapshot = {
+        'symbol': symbol,
+        'timeframe': timeframe,
+        'market_state': summary.get('market_state', {}),
+        'conditions': {k: v for k, v in summary.items() if k != 'market_state'},
+    }
+    record = {
+        'symbol': symbol,
+        'timeframe': timeframe,
+        'snapshot': snapshot,
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+        'source': 'local_market_state',
+    }
+
+    try:
+        supabase = get_supabase_client()
+
+        # Historical record
+        supabase.table('chart_analysis').insert(record).execute()
+
+        # Latest pointer for dashboards/consumers
+        supabase.table('latest_chart_analysis').upsert(
+            record,
+            on_conflict="symbol,timeframe",
+        ).execute()
+
+        logging.info("Logged 5m market state snapshot to Supabase for %s", symbol)
+    except Exception as exc:
+        logging.error("Failed to log market state to Supabase: %s", exc)
+
+
 def _apply_confluence(summary: Dict, bars: List[Dict], market_state: Dict) -> Dict:
     try:
         ohlc5m_df = pd.DataFrame(bars)
@@ -905,6 +943,7 @@ def get_market_conditions_summary(
         _cache_set(cache_key, summary, ttl)
         _cache_set(provisional_key, summary, ttl)
         _cache_market_bars(symbol, bars)
+        _log_market_state_to_supabase(summary, symbol=symbol, timeframe="5m")
 
         engine = _get_engine(bars_needed)
         engine.prime(bars)
@@ -993,6 +1032,7 @@ def update_market_state_incremental(symbol: str = "MES", bars_needed: int = 90) 
             _cache_set(cache_key, final_summary, ttl)
             _cache_set(provisional_key, final_summary, ttl)
             _cache_market_bars(symbol, engine.get_bars(include_partial=False))
+            _log_market_state_to_supabase(final_summary, symbol=symbol, timeframe="5m")
             logging.info("Incremental 5m close cached for %s; ttl=%ds", symbol, int(ttl))
         else:
             logging.debug("Cached provisional market summary for %s", symbol)
