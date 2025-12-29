@@ -33,6 +33,11 @@ _ADAPTIVE_LOCK = RLock()
 _adaptive_params: Optional[AdaptiveConfluenceParams] = None
 _adaptive_update_counter = 0
 _ADAPTIVE_SAVE_FREQUENCY = 10
+_PRICE_CACHE = {
+    "symbol": None,
+    "ts": 0,
+    "value": (None, None),
+}
 
 def _cache_get(key: str):
     with _CACHE_LOCK:
@@ -1074,6 +1079,15 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
     Get the current market price from the best available source.
     """
     try:
+        now_ts = time.time()
+        if (
+            _PRICE_CACHE.get("symbol") == symbol
+            and now_ts - _PRICE_CACHE.get("ts", 0) <= 10
+            and _PRICE_CACHE.get("value")
+        ):
+            price, source = _PRICE_CACHE.get("value")
+            return price, source
+
         supabase = get_supabase_client()
         try:
             result = supabase.table('tv_datafeed') \
@@ -1091,6 +1105,7 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
                 age_seconds = (current_time - bar_time).total_seconds()
                 if age_seconds <= max_age_seconds:
                     logging.debug(f"Current price from 1m feed: ${price} (age: {age_seconds:.0f}s)")
+                    _PRICE_CACHE.update({"symbol": symbol, "ts": now_ts, "value": (price, f"1m_feed_{int(age_seconds)}s_old")})
                     return price, f"1m_feed_{int(age_seconds)}s_old"
                 else:
                     logging.debug(f"1m data too old: {age_seconds:.0f}s > {max_age_seconds}s")
@@ -1115,6 +1130,7 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
                     price = snapshot.get('current_price')
                     if price:
                         logging.debug(f"Current price from 5m chart: ${price} (age: {age_seconds:.0f}s)")
+                        _PRICE_CACHE.update({"symbol": symbol, "ts": now_ts, "value": (float(price), f"5m_chart_{int(age_seconds)}s_old")})
                         return float(price), f"5m_chart_{int(age_seconds)}s_old"
         except Exception as e:
             logging.debug(f"Could not get chart price: {e}")
@@ -1136,6 +1152,7 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
                 if result.data:
                     record = result.data[0]
                     price = float(record.get('c'))
+                    _PRICE_CACHE.update({"symbol": symbol, "ts": now_ts, "value": (price, "market_closed_last_known")})
                     return price, "market_closed_last_known"
             except:
                 pass
