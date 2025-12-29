@@ -1,11 +1,15 @@
 # scheduler.py
 
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
-import pytz
 import logging
 import re
 import time
+from datetime import datetime, timedelta
+
+import pytz
+import requests
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+
 from config import load_config
 from position_manager import PositionManager
 from api import (
@@ -14,7 +18,7 @@ from api import (
     check_contract_rollover,
     get_contract,
 )
-from datetime import datetime, timedelta
+from state import get_last_event_id, set_last_event_id
 
 
 config = load_config()
@@ -22,6 +26,7 @@ WEBHOOK_SECRET = config['WEBHOOK_SECRET']
 CT = pytz.timezone("America/Chicago")
 TV_PORT = config['TV_PORT']
 ACCOUNTS = config['ACCOUNTS']
+AUTOTRADE_ACCOUNTS = config.get('AUTOTRADE_ACCOUNTS', list(ACCOUNTS.keys()))
 
 # Global position manager instance
 position_manager = None
@@ -60,6 +65,217 @@ def start_scheduler(app):
             )
         except Exception as e:
             logging.error(f"[APScheduler] Market-state refresh failed: {e}")
+
+    # ──────────────────────────────────────────────────────────────────────────────
+    # Auto-trade job - runs every 5 minutes after market state refresh
+    # ──────────────────────────────────────────────────────────────────────────────
+    def auto_trade_job():
+        symbol = config.get('DEFAULT_SYMBOL', 'MES')
+
+        try:
+            from auth import in_get_flat
+
+            if in_get_flat(datetime.now(CT)):
+                logging.info("[AutoTrade] Skipping auto-trade - in get-flat window")
+                return
+        except Exception as exc:
+            logging.error("[AutoTrade] Get-flat check failed: %s", exc)
+            return
+
+        if not config.get('AUTOTRADE_ENABLED'):
+            return
+
+        overseer_url = config.get('N8N_OVERSEER_URL', '')
+        if not overseer_url:
+            logging.info("[AutoTrade] Overseer URL not configured; skipping")
+            return
+
+        try:
+            summary = get_market_conditions_summary(
+                force_refresh=False,
+                symbol=symbol,
+            )
+        except Exception as exc:
+            logging.error("[AutoTrade] Failed to load market summary: %s", exc)
+            return
+
+        market_state = summary.get('market_state') or summary
+        confluence = summary.get('confluence', {}) or {}
+        score = float(confluence.get('score', 0) or 0)
+        confluence_ok = bool(confluence.get('trade_recommended'))
+        trade_recommended = summary.get('trade_recommended', False)
+
+        if config.get('AUTOTRADE_REQUIRE_CONFLUENCE', True):
+            should_trade = confluence_ok and abs(score) >= config.get('AUTOTRADE_MIN_SCORE', 1.0)
+        else:
+            should_trade = bool(trade_recommended)
+
+        try:
+            cid = get_contract(symbol)
+        except Exception as exc:
+            logging.error("[AutoTrade] Unable to resolve contract for %s: %s", symbol, exc)
+            return
+
+        event_id = str(
+            market_state.get('timestamp')
+            or summary.get('timestamp')
+            or int(time.time() // 300)
+        )
+
+        logging.info(
+            "[AutoTrade] AUTO 5m event_id=%s confluence_score=%.2f bias=%s tradeable=%s",
+            event_id,
+            score,
+            confluence.get('bias'),
+            should_trade,
+        )
+
+        for account_name in AUTOTRADE_ACCOUNTS:
+            if account_name not in ACCOUNTS:
+                logging.warning("[AutoTrade] Unknown account '%s' in AUTOTRADE_ACCOUNTS", account_name)
+                continue
+
+            acct_id = ACCOUNTS[account_name]
+
+            try:
+                account_state = position_manager.get_account_state(acct_id)
+            except Exception as exc:
+                logging.error("[AutoTrade] %s account state error: %s", account_name, exc)
+                continue
+
+            if not account_state.get('can_trade', False):
+                logging.info("[AutoTrade] %s blocked by risk limits", account_name)
+                continue
+
+            position_context = position_manager.get_position_context_for_ai(acct_id, cid)
+            has_position = position_context.get('current_position', {}).get('has_position')
+
+            should_call = should_trade or has_position
+            if not should_call:
+                logging.info(
+                    "[AutoTrade] %s skipping event_id=%s (no trade setup and flat)",
+                    account_name,
+                    event_id,
+                )
+                continue
+
+            if get_last_event_id(account_name) == event_id:
+                logging.info(
+                    "[AutoTrade] %s already processed event_id=%s; enforcing idempotency",
+                    account_name,
+                    event_id,
+                )
+                continue
+
+            risk_context = {
+                'can_trade': account_state.get('can_trade'),
+                'risk_level': account_state.get('risk_level'),
+                'daily_pnl': account_state.get('daily_pnl'),
+                'consecutive_losses': account_state.get('consecutive_losses'),
+            }
+
+            payload = {
+                'alert': 'AUTO_5M',
+                'symbol': symbol,
+                'account': account_name,
+                'ai_decision_id': event_id,
+                'market_state': market_state,
+                'confluence': confluence,
+                'position_context': position_context,
+                'risk_context': risk_context,
+                'chart_urls': {},
+            }
+
+            decision = {}
+            try:
+                resp = requests.post(overseer_url, json=payload, timeout=10)
+                resp.raise_for_status()
+                decision = resp.json()
+            except Exception as exc:
+                logging.error("[AutoTrade] Overseer call failed for %s: %s", account_name, exc)
+                decision = {}
+
+            signal = (decision.get('signal') or 'HOLD').upper()
+            reason = decision.get('reason', '')
+            strategy = decision.get('strategy', 'simple') or 'simple'
+
+            size = decision.get('size', config.get('AUTOTRADE_SIZE', 1))
+            try:
+                size = int(size)
+            except Exception:
+                size = config.get('AUTOTRADE_SIZE', 1)
+            size = max(0, min(size, 3))
+
+            logging.info(
+                "[AutoTrade] %s decision=%s size=%s reason=%s",
+                account_name,
+                signal,
+                size,
+                reason,
+            )
+
+            if signal == 'HOLD' or signal not in {'BUY', 'SELL', 'FLAT'}:
+                set_last_event_id(account_name, event_id)
+                continue
+
+            current_side = (position_context.get('current_position', {}).get('side') or '').upper()
+
+            if signal == 'FLAT':
+                if has_position:
+                    try:
+                        from api import flatten_contract
+
+                        if flatten_contract(acct_id, cid, timeout=10):
+                            logging.info("[AutoTrade] %s flattened position on %s", account_name, symbol)
+                        else:
+                            logging.error("[AutoTrade] %s flatten failed for %s", account_name, symbol)
+                    except Exception as exc:
+                        logging.error("[AutoTrade] %s flatten exception: %s", account_name, exc)
+                else:
+                    logging.info("[AutoTrade] %s FLAT signal but already flat", account_name)
+
+                set_last_event_id(account_name, event_id)
+                continue
+
+            if (signal == 'BUY' and current_side == 'LONG') or (signal == 'SELL' and current_side == 'SHORT'):
+                logging.info(
+                    "[AutoTrade] %s already aligned with %s; skipping entry",
+                    account_name,
+                    signal,
+                )
+                set_last_event_id(account_name, event_id)
+                continue
+
+            if size == 0:
+                logging.info("[AutoTrade] %s size=0 -> no order placed", account_name)
+                set_last_event_id(account_name, event_id)
+                continue
+
+            side = 'buy' if signal == 'BUY' else 'sell'
+
+            try:
+                from tradingview_projectx_bot import execute_internal_webhook
+
+                result = execute_internal_webhook({
+                    'secret': WEBHOOK_SECRET,
+                    'account': account_name,
+                    'strategy': strategy,
+                    'symbol': symbol,
+                    'side': side,
+                    'size': size,
+                    'ai_decision_id': event_id,
+                    'reason': reason,
+                })
+                logging.info(
+                    "[AutoTrade] %s executed=%s (event_id=%s)",
+                    account_name,
+                    result,
+                    event_id,
+                )
+            except Exception as exc:
+                logging.error("[AutoTrade] %s execution error: %s", account_name, exc)
+
+            set_last_event_id(account_name, event_id)
 
     # ──────────────────────────────────────────────────────────────────────────────
     # Market analysis job - runs every 5 minutes using cached state
@@ -399,6 +615,14 @@ def start_scheduler(app):
         replace_existing=True,
     )
 
+    # Auto-trade overseer (runs shortly after the 5m refresh)
+    scheduler.add_job(
+        auto_trade_job,
+        CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=10, timezone=CT),
+        id='auto_trade_job',
+        replace_existing=True,
+    )
+
     # Incremental 1m aggregation every minute
     scheduler.add_job(
         incremental_market_update,
@@ -494,6 +718,10 @@ def start_scheduler(app):
     )
 
     scheduler.start()
-    logging.info("[APScheduler] Scheduler started with monitoring jobs only (no autonomous trading)")
+    logging.info(
+        "[APScheduler] Scheduler started (auto-trade=%s overseer=%s)",
+        config.get('AUTOTRADE_ENABLED'),
+        bool(config.get('N8N_OVERSEER_URL')),
+    )
 
     return scheduler

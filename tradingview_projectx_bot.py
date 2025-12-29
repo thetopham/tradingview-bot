@@ -748,6 +748,31 @@ def flatten_account_positions(acct_id: int, primary_cid: Optional[str], symbol: 
         logging.info("Manual flatten for %s: no open positions found", acct_id)
 
 
+def execute_internal_webhook(payload: dict) -> dict:
+    """Execute webhook logic without an HTTP request (used by scheduler)."""
+    if not isinstance(payload, dict):
+        raise ValueError("Payload must be a dict")
+
+    data = dict(payload)
+    if data.get("secret") != WEBHOOK_SECRET:
+        return {"status": "error", "reason": "unauthorized"}
+
+    data.setdefault("strategy", "simple")
+    data.setdefault("account", DEFAULT_ACCOUNT)
+    data.setdefault("symbol", config.get('DEFAULT_SYMBOL', 'MES'))
+
+    try:
+        handle_webhook_logic(data)
+        return {
+            "status": "accepted",
+            "account": data.get("account"),
+            "ai_decision_id": data.get("ai_decision_id"),
+        }
+    except Exception as exc:
+        logging.error("execute_internal_webhook failed: %s", exc)
+        return {"status": "error", "reason": str(exc)}
+
+
 def handle_webhook_logic(data):
     try:
         incoming_strategy = (data.get("strategy") or "simple").lower()
@@ -815,6 +840,10 @@ def handle_webhook_logic(data):
             and acct in AI_ENDPOINTS
             and (confluence.get('trade_recommended') is True or has_position)
         )
+
+        incoming_side = (data.get("side") or "").lower()
+        if incoming_side in {"buy", "sell"}:
+            sig = "BUY" if incoming_side == "buy" else "SELL"
 
         if should_call_ai:
             ai_payload = {

@@ -13,6 +13,13 @@ def load_config():
         'API_KEY': os.getenv("PROJECTX_API_KEY"),
         'WEBHOOK_SECRET': os.getenv("WEBHOOK_SECRET"),
 
+        # Overseer / automation
+        'N8N_OVERSEER_URL': os.getenv("N8N_OVERSEER_URL", ""),
+        'AUTOTRADE_ENABLED': os.getenv("AUTOTRADE_ENABLED", "false").lower() == "true",
+        'AUTOTRADE_SIZE': int(os.getenv("AUTOTRADE_SIZE", 1)),
+        'AUTOTRADE_REQUIRE_CONFLUENCE': os.getenv("AUTOTRADE_REQUIRE_CONFLUENCE", "true").lower() == "true",
+        'AUTOTRADE_MIN_SCORE': float(os.getenv("AUTOTRADE_MIN_SCORE", 1.0)),
+
         # legacy single/dual endpoints (kept for backward-compat)
         'N8N_AI_URL': os.getenv("N8N_AI_URL"),
         'N8N_AI_URL2': os.getenv("N8N_AI_URL2"),
@@ -62,6 +69,20 @@ def load_config():
             )
 
     config['DEFAULT_ACCOUNT'] = next(iter(config['ACCOUNTS']))
+
+    # Autotrade allowlist (defaults to all known accounts)
+    autotrade_accounts_raw = os.getenv("AUTOTRADE_ACCOUNTS")
+    if autotrade_accounts_raw:
+        autotrade_accounts = [
+            name.strip().lower()
+            for name in autotrade_accounts_raw.split(",")
+            if name.strip()
+        ]
+        config['AUTOTRADE_ACCOUNTS'] = [
+            name for name in autotrade_accounts if name in config['ACCOUNTS']
+        ]
+    else:
+        config['AUTOTRADE_ACCOUNTS'] = list(config['ACCOUNTS'].keys())
 
     # NEW: per-account AI endpoints (N8N_AI_URL_ALPHA=..., etc.)
     ai_eps = {
