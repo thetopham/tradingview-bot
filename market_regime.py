@@ -121,7 +121,7 @@ class MarketRegime:
         minute = now.minute
         
         # First 30 min of market (8:30-9:00 AM CT)
-        if (hour == 8 and minute >= 30) or (hour == 9 and minute < 0):
+        if hour == 8 and minute >= 30:
             return self.market_state_weights['volatile_open']
         
         # Lunch period (11:00 AM - 1:00 PM CT)
@@ -285,7 +285,8 @@ class MarketRegime:
                     'range_size': data.get('range_size', 0),
                     'indicators': data.get('indicators', {}),
                     'volume_trend': data.get('volume_trend', 'flat'),
-                    'signal_confidence': data.get('signal_confidence', 'low')
+                    'signal_confidence': data.get('signal_confidence', 'low'),
+                    'ema21_slope': data.get('ema21_slope', 0)
                 }
                 
             except Exception as e:
@@ -539,15 +540,34 @@ class MarketRegime:
         else:
             return 'poor'
     
-    def _determine_regime(self, trend_analysis: Dict, volatility_analysis: Dict, 
+    def _determine_regime(self, trend_analysis: Dict, volatility_analysis: Dict,
                          momentum_analysis: Dict, metrics: Dict) -> Dict:
         """Determine the primary market regime - OPTIMIZED FOR DAY TRADING"""
         regime = self.REGIME_CHOPPY
         confidence = 50
         supporting_factors = []
-        
+
+        # Simplified slope-first check using EMA21 direction to avoid over-complication
+        slope_trend = self._get_ema21_slope_trend(metrics)
+
+        if slope_trend['has_slope_data'] and slope_trend['alignment_score'] >= 60:
+            if slope_trend['trend'] == 'up':
+                regime = self.REGIME_TRENDING_UP
+            elif slope_trend['trend'] == 'down':
+                regime = self.REGIME_TRENDING_DOWN
+            else:
+                regime = self.REGIME_RANGING
+
+            confidence = max(confidence, slope_trend['confidence'])
+            supporting_factors.append(
+                f"EMA21 slopes aligned {slope_trend['trend']} across timeframes"
+            )
+            supporting_factors.append(
+                f"Weighted slope {slope_trend['avg_slope']:.4f}"
+            )
+
         # More aggressive regime detection for day trading
-        if trend_analysis['alignment_score'] > 60:
+        if regime == self.REGIME_CHOPPY and trend_analysis['alignment_score'] > 60:
             # Check if at least primary timeframes agree
             if trend_analysis.get('higher_tf_agreement', False) or not trend_analysis['has_conflict']:
                 if trend_analysis['primary_trend'] == 'up' and momentum_analysis['momentum_state'] != 'weak':
@@ -572,7 +592,7 @@ class MarketRegime:
                         confidence += 5
         
         # Alternative: If alignment is 50-60% but primary timeframes agree
-        elif trend_analysis['alignment_score'] > 50 and trend_analysis.get('higher_tf_agreement', False):
+        elif regime == self.REGIME_CHOPPY and trend_analysis['alignment_score'] > 50 and trend_analysis.get('higher_tf_agreement', False):
             if trend_analysis['primary_trend'] == 'up' and momentum_analysis['indicator_bias'] == 'bullish':
                 regime = self.REGIME_TRENDING_UP
                 confidence = 65
@@ -581,17 +601,18 @@ class MarketRegime:
                 regime = self.REGIME_TRENDING_DOWN
                 confidence = 65
                 supporting_factors.append("Primary timeframes aligned bearish")
-        
+
         # Ranging regime detection
-        elif (trend_analysis['primary_trend'] == 'sideways' and 
+        elif (regime == self.REGIME_CHOPPY and
+              trend_analysis['primary_trend'] == 'sideways' and
               volatility_analysis['volatility_regime'] != 'high' and
               not volatility_analysis['is_expanding']):
             regime = self.REGIME_RANGING
             confidence = 70
             supporting_factors.append("Sideways trend with contained volatility")
-            
+
         # Choppy conditions
-        elif (trend_analysis['has_conflict'] and trend_analysis['alignment_score'] < 50):
+        elif (regime == self.REGIME_CHOPPY and trend_analysis['has_conflict'] and trend_analysis['alignment_score'] < 50):
             regime = self.REGIME_CHOPPY
             confidence = 80
             supporting_factors.append("Significant timeframe conflicts")
@@ -646,14 +667,69 @@ class MarketRegime:
         
         # Session-based confidence adjustment
         confidence = self._adjust_confidence_for_session(confidence)
-        
+
         return {
             'primary_regime': regime,
             'confidence': max(0, min(100, confidence)),
             'supporting_factors': supporting_factors,
-            'trend_details': trend_analysis,
+            'trend_details': {**trend_analysis, 'ema21_slope_summary': slope_trend},
             'volatility_details': volatility_analysis,
             'momentum_details': momentum_analysis
+        }
+
+    def _get_ema21_slope_trend(self, metrics: Dict) -> Dict:
+        """Simplify regime read with weighted EMA21 slopes."""
+        slopes = []
+        weighted_sum = 0.0
+        total_weight = 0.0
+
+        for tf in self.timeframes:
+            if tf not in metrics:
+                continue
+
+            slope = metrics[tf].get('ema21_slope')
+            if slope is None:
+                continue
+
+            try:
+                slope_val = float(slope)
+            except (TypeError, ValueError):
+                continue
+
+            weight = self.default_weights.get(tf, 0.33)
+            slopes.append({'timeframe': tf, 'slope': slope_val, 'weight': weight})
+            weighted_sum += slope_val * weight
+            total_weight += weight
+
+        if not slopes or total_weight == 0:
+            return {
+                'has_slope_data': False,
+                'trend': 'unknown',
+                'avg_slope': 0.0,
+                'alignment_score': 0,
+                'confidence': 0,
+                'slopes': []
+            }
+
+        avg_slope = weighted_sum / total_weight
+        positive = sum(1 for s in slopes if s['slope'] > 0)
+        negative = sum(1 for s in slopes if s['slope'] < 0)
+        alignment_score = (max(positive, negative) / len(slopes)) * 100
+
+        if abs(avg_slope) < 0.01:
+            trend = 'sideways'
+        else:
+            trend = 'up' if avg_slope > 0 else 'down'
+
+        confidence = min(90, 40 + alignment_score / 2 + min(abs(avg_slope) * 100, 20))
+
+        return {
+            'has_slope_data': True,
+            'trend': trend,
+            'avg_slope': avg_slope,
+            'alignment_score': alignment_score,
+            'confidence': confidence,
+            'slopes': slopes
         }
     
     def _detect_breakout(self, metrics: Dict) -> bool:
