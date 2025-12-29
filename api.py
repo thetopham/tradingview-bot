@@ -8,6 +8,7 @@ import threading
 import hashlib
 import random  # NEW: for jitter in backoff
 import pandas as pd
+import numpy as np
 
 from datetime import datetime, timezone, timedelta
 from auth import ensure_token, get_token
@@ -15,6 +16,7 @@ from config import load_config
 from dateutil import parser
 from market_state import MarketStateConfig, RollingFiveMinuteEngine, compute_market_state
 from confluence import compute_confluence
+from adaptive_confluence import AdaptiveConfluenceParams
 from supabase import create_client, Client
 from typing import Dict, List, Optional, Tuple
 from threading import RLock
@@ -27,6 +29,10 @@ _CACHE_LOCK = RLock()
 _ENGINE_LOCK = RLock()
 _rolling_engine: Optional[RollingFiveMinuteEngine] = None
 _insufficient_bars_logged = False
+_ADAPTIVE_LOCK = RLock()
+_adaptive_params: Optional[AdaptiveConfluenceParams] = None
+_adaptive_update_counter = 0
+_ADAPTIVE_SAVE_FREQUENCY = 10
 
 def _cache_get(key: str):
     with _CACHE_LOCK:
@@ -52,6 +58,80 @@ def _get_engine(bars_needed: int) -> RollingFiveMinuteEngine:
         else:
             _rolling_engine.bars_needed = max(_rolling_engine.bars_needed, bars_needed)
         return _rolling_engine
+
+
+def _get_adaptive_params() -> AdaptiveConfluenceParams:
+    global _adaptive_params
+    with _ADAPTIVE_LOCK:
+        if _adaptive_params is None:
+            _adaptive_params = AdaptiveConfluenceParams.load()
+        return _adaptive_params
+
+
+def _compute_z_ema21_series(df: pd.DataFrame, lookback: int) -> pd.Series:
+    if df is None or df.empty:
+        return pd.Series(dtype=float)
+
+    work = df.copy()
+    if "ts" in work.columns:
+        work = work.sort_values("ts")
+
+    work = work.tail(max(lookback, 50))
+    closes = work["c"].astype(float)
+
+    ema_series = work.get("ema21")
+    if ema_series is None or ema_series.isna().all():
+        ema_series = closes.ewm(span=21, adjust=False).mean()
+    else:
+        ema_series = ema_series.astype(float)
+
+    atr_series = work.get("atr")
+    if atr_series is None or atr_series.isna().all():
+        highs = work["h"].astype(float)
+        lows = work["l"].astype(float)
+        prev_close = closes.shift(1)
+        tr = pd.concat(
+            [
+                (highs - lows).abs(),
+                (highs - prev_close).abs(),
+                (lows - prev_close).abs(),
+            ],
+            axis=1,
+        ).max(axis=1)
+        atr_series = tr.rolling(window=14, min_periods=14).mean()
+    else:
+        atr_series = atr_series.astype(float)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        z_series = (closes - ema_series) / atr_series
+    z_series = z_series.replace([np.inf, -np.inf], np.nan).dropna()
+    return z_series.tail(lookback)
+
+
+def _update_adaptive_params(ohlc5m_df: pd.DataFrame, market_state: Dict) -> Tuple[AdaptiveConfluenceParams, int]:
+    global _adaptive_update_counter
+    with _ADAPTIVE_LOCK:
+        params = _get_adaptive_params()
+        z_series = _compute_z_ema21_series(ohlc5m_df, params.n)
+        sample_count = len(z_series)
+        side = (market_state or {}).get("signal")
+        if side in {"BUY", "SELL"}:
+            updated = params.update_from_series(z_series, side)
+            if updated:
+                _adaptive_update_counter += 1
+                if _adaptive_update_counter % _ADAPTIVE_SAVE_FREQUENCY == 0:
+                    params.save()
+        return params, sample_count
+
+
+def _log_adaptive_snapshot(params: AdaptiveConfluenceParams, sample_count: int) -> None:
+    logging.info(
+        "Adaptive params snapshot: sell_zone=%s buy_zone=%s threshold=%.3f samples=%d",
+        params.sell_zone,
+        params.buy_zone,
+        params.threshold,
+        sample_count,
+    )
 
 session = requests.Session()
 config = load_config()
@@ -196,12 +276,15 @@ def _build_market_summary(market_state: Dict) -> Dict:
 def _apply_confluence(summary: Dict, bars: List[Dict], market_state: Dict) -> Dict:
     try:
         ohlc5m_df = pd.DataFrame(bars)
+        params, sample_count = _update_adaptive_params(ohlc5m_df, market_state)
         confluence = compute_confluence(
             ohlc5m_df,
             base_signal=market_state.get('signal'),
             market_state=market_state,
+            params=params,
         )
         summary.update(confluence)
+        _log_adaptive_snapshot(params, sample_count)
 
         confluence_tags = []
         conf_obj = summary.get('confluence', {})
@@ -816,23 +899,7 @@ def get_market_conditions_summary(
 
         market_state = compute_market_state(bars)
         summary = _build_market_summary(market_state)
-
-        ohlc5m_df = pd.DataFrame(bars)
-        confluence = compute_confluence(ohlc5m_df, base_signal=market_state.get('signal'))
-        summary.update(confluence)
-
-        confluence_tags = []
-        conf_obj = summary.get('confluence', {})
-        for comp in conf_obj.get('components', []):
-            confluence_tags.extend([t for t in comp.get('tags', []) if t])
-        for gate_name, gate_val in (conf_obj.get('gates') or {}).items():
-            confluence_tags.append(gate_name if gate_val else f"{gate_name}_blocked")
-        if conf_obj.get('trade_recommended'):
-            confluence_tags.append(f"bias_{conf_obj.get('bias', 'HOLD').lower()}")
-
-        if confluence_tags:
-            existing = summary.get('key_factors', [])
-            summary['key_factors'] = (existing + confluence_tags)[:6]
+        summary = _apply_confluence(summary, bars, market_state)
 
         ttl = random.uniform(240, 290)
         _cache_set(cache_key, summary, ttl)

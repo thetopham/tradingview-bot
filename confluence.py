@@ -121,7 +121,12 @@ def _zone_confidence(value: float, lower: float, upper: float, sweet: float) -> 
     return max(0.0, 1 - abs(value - sweet) / half_range)
 
 
-def _pullback_component(df: pd.DataFrame, base_bias: str, atr_value: Optional[float]) -> Dict:
+def _pullback_component(
+    df: pd.DataFrame,
+    base_bias: str,
+    atr_value: Optional[float],
+    zones: Optional[Dict[str, tuple]] = None,
+) -> Dict:
     tags: List[str] = []
     if atr_value is None or atr_value == 0:
         return _component_result("pullback_to_mean", tags=["missing_data"])
@@ -146,14 +151,17 @@ def _pullback_component(df: pd.DataFrame, base_bias: str, atr_value: Optional[fl
 
     signal = 0
     confidence = 0.0
+    zone_sell = zones.get("SELL") if zones else PULLBACK_ZONE_SELL
+    zone_buy = zones.get("BUY") if zones else PULLBACK_ZONE_BUY
+
     if base_bias == "SELL":
-        low, high, sweet = PULLBACK_ZONE_SELL
+        low, high, sweet = zone_sell
         if low <= z_ema21 <= high:
             signal = -1
             confidence = _zone_confidence(z_ema21, low, high, sweet)
             tags.append("pullback_zone")
     elif base_bias == "BUY":
-        low, high, sweet = PULLBACK_ZONE_BUY
+        low, high, sweet = zone_buy
         if low <= z_ema21 <= high:
             signal = 1
             confidence = _zone_confidence(z_ema21, low, high, sweet)
@@ -325,6 +333,7 @@ def compute_confluence(
     ohlc5m: pd.DataFrame,
     base_signal: Optional[str] = None,
     market_state: Optional[Dict] = None,
+    params: Optional[Any] = None,
 ) -> Dict:
     """Compute confluence score from 5m OHLCV + indicator data."""
 
@@ -347,7 +356,19 @@ def compute_confluence(
     bias = base_signal or market_bias or _infer_base_bias(ohlc5m, atr_value)
     components = []
 
-    pullback = _pullback_component(ohlc5m, bias, atr_value)
+    if params is not None:
+        sell_zone = getattr(params, "sell_zone", None) or PULLBACK_ZONE_SELL
+        buy_zone = getattr(params, "buy_zone", None) or PULLBACK_ZONE_BUY
+    else:
+        sell_zone = PULLBACK_ZONE_SELL
+        buy_zone = PULLBACK_ZONE_BUY
+
+    pullback = _pullback_component(
+        ohlc5m,
+        bias,
+        atr_value,
+        zones={"SELL": sell_zone, "BUY": buy_zone},
+    )
     trend_channel = _channel_component(ohlc5m, bias, atr_value)
     components.extend([sanitize(pullback), sanitize(trend_channel)])
 
@@ -389,7 +410,8 @@ def compute_confluence(
         "vol_ok": bool(vol_ok),
     }
 
-    threshold = 1.0
+    threshold_val = getattr(params, "threshold", 1.0) if params is not None else 1.0
+    threshold = 1.0 if threshold_val in {None, 0} else float(threshold_val)
     score_satisfies = abs(score) >= threshold
     gates_ok = all(gates.values())
     market_signal = (market_state or {}).get("signal") if market_state else None
