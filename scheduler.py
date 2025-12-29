@@ -47,7 +47,11 @@ def start_scheduler(app):
             return
 
         try:
-            summary = get_market_conditions_summary()
+            summary = get_market_conditions_summary(
+                force_refresh=True,
+                symbol=config.get('DEFAULT_SYMBOL', 'MES'),
+                bars_needed=90,
+            )
             logging.info(
                 "[APScheduler] 5m market state: %s (conf=%s signal=%s)",
                 summary.get('regime'),
@@ -58,7 +62,7 @@ def start_scheduler(app):
             logging.error(f"[APScheduler] Market-state refresh failed: {e}")
 
     # ──────────────────────────────────────────────────────────────────────────────
-    # Market analysis job - runs every 15 minutes
+    # Market analysis job - runs every 5 minutes using cached state
     # ──────────────────────────────────────────────────────────────────────────────
     def market_analysis_job():
         """Log market conditions and alerts"""
@@ -69,7 +73,7 @@ def start_scheduler(app):
 
         try:
             from api import get_market_conditions_summary
-            summary = get_market_conditions_summary(force_refresh=False)
+            summary = get_market_conditions_summary(cached_only=True)
 
             regime = summary.get('regime', 'sideways')
             signal = summary.get('market_state', {}).get('signal', 'HOLD')
@@ -86,6 +90,16 @@ def start_scheduler(app):
 
         except Exception as e:
             logging.error(f"[Market Analysis] Error: {e}")
+
+    # ──────────────────────────────────────────────────────────────────────────────
+    # Incremental 1m -> 5m updater - runs every minute
+    # ──────────────────────────────────────────────────────────────────────────────
+    def incremental_market_update():
+        try:
+            from api import update_market_state_incremental
+            update_market_state_incremental()
+        except Exception as e:
+            logging.error(f"[Incremental Market Update] Error: {e}")
 
     # ──────────────────────────────────────────────────────────────────────────────
     # Position monitoring job - runs every 2 minutes
@@ -375,6 +389,14 @@ def start_scheduler(app):
         cron_job,
         CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=5, timezone=CT),
         id='5m_job',
+        replace_existing=True,
+    )
+
+    # Incremental 1m aggregation every minute
+    scheduler.add_job(
+        incremental_market_update,
+        CronTrigger(minute='*', second=20, timezone=CT),
+        id='market_state_incremental',
         replace_existing=True,
     )
 
