@@ -188,7 +188,6 @@ def start_scheduler(app):
                 'alert': 'AUTO_5M',
                 'symbol': symbol,
                 'account': account_name,
-                'ai_decision_id': event_id,
                 'market_state': market_state,
                 'confluence': confluence,
                 'position_context': position_context,
@@ -291,7 +290,6 @@ def start_scheduler(app):
                     'symbol': symbol,
                     'side': side,
                     'size': size,
-                    'ai_decision_id': event_id,
                     'alert': reason or 'AUTO_5M',
                 })
                 logging.info(
