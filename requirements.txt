@@ -9,3 +9,4 @@ signalrcore
 supabase
 flask-cors
 numpy
+pandas
