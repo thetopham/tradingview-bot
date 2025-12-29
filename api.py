@@ -52,6 +52,87 @@ contract_cache = {}
 contract_cache_expiry = {}
 CONTRACT_CACHE_DURATION = 3600  # Cache for 1 hour
 
+
+def _timeframe_filters(minutes: int) -> List:
+    """Return accepted Supabase timeframe representations for the given interval."""
+    return [minutes, str(minutes), f"{minutes}m"]
+
+
+def _aggregate_1m_bars_to_5m(bars: List[Dict]) -> List[Dict]:
+    """Aggregate 1m bars into 5m bars, ordered from oldest to newest."""
+
+    def _merge_bucket(bucket_start, bucket_bars):
+        return {
+            'o': float(bucket_bars[0]['o']),
+            'h': max(float(b['h']) for b in bucket_bars),
+            'l': min(float(b['l']) for b in bucket_bars),
+            'c': float(bucket_bars[-1]['c']),
+            'v': sum(float(b.get('v', 0)) for b in bucket_bars),
+            'ts': bucket_start.isoformat()
+        }
+
+    aggregated: List[Dict] = []
+    current_bucket_start = None
+    bucket: List[Dict] = []
+
+    # Sort chronologically to build buckets
+    sorted_bars = sorted(
+        [b for b in bars if b.get('ts')], key=lambda b: parser.parse(b['ts'])
+    )
+
+    for bar in sorted_bars:
+        try:
+            ts = parser.parse(bar['ts'])
+        except Exception as e:
+            logging.debug("Skipping 1m bar with invalid ts %s: %s", bar.get('ts'), e)
+            continue
+        bucket_start = ts - timedelta(
+            minutes=ts.minute % 5, seconds=ts.second, microseconds=ts.microsecond
+        )
+        if current_bucket_start is None:
+            current_bucket_start = bucket_start
+        if bucket_start != current_bucket_start:
+            if bucket:
+                aggregated.append(_merge_bucket(current_bucket_start, bucket))
+            bucket = []
+            current_bucket_start = bucket_start
+        bucket.append(bar)
+
+    if bucket:
+        aggregated.append(_merge_bucket(current_bucket_start, bucket))
+
+    return aggregated
+
+
+def _fetch_5m_bars_from_1m(supabase: Client, symbol: str, bars_needed: int) -> List[Dict]:
+    """Fetch 1m bars and aggregate into 5m bars for Supabase-backed datafeed."""
+
+    minute_bars_needed = (bars_needed * 5) + 5  # pad for partial bucket
+    result = (
+        supabase
+        .table('tv_datafeed')
+        .select('o, h, l, c, v, ts')
+        .eq('symbol', symbol)
+        .in_('timeframe', _timeframe_filters(1))
+        .order('ts', desc=True)
+        .limit(minute_bars_needed)
+        .execute()
+    )
+    minute_bars = result.data or []
+    if not minute_bars:
+        logging.warning("No 1m bars returned from tv_datafeed for %s", symbol)
+        return []
+
+    five_minute_bars = _aggregate_1m_bars_to_5m(minute_bars)
+    if len(five_minute_bars) > bars_needed:
+        five_minute_bars = five_minute_bars[-bars_needed:]
+    if len(five_minute_bars) < bars_needed:
+        logging.warning(
+            "Only %s of %s requested 5m bars available after aggregation for %s",
+            len(five_minute_bars), bars_needed, symbol,
+        )
+    return five_minute_bars
+
 def get_active_contract_for_symbol_cached(symbol: str, live: bool = False) -> Optional[str]:
     """
     Get active contract with caching to avoid repeated API calls
@@ -617,19 +698,11 @@ def get_market_conditions_summary(force_refresh: bool = False) -> Dict:
     """
     try:
         supabase = get_supabase_client()
-        bars = (
-            supabase
-            .table('tv_datafeed')
-            .select('o, h, l, c, ts')
-            .eq('symbol', config.get('DEFAULT_SYMBOL', 'MES'))
-            .eq('timeframe', 5)
-            .order('ts', desc=True)
-            .limit(150)
-            .execute()
-            .data
-            or []
+        bars = _fetch_5m_bars_from_1m(
+            supabase, config.get('DEFAULT_SYMBOL', 'MES'), bars_needed=150
         )
-        bars = list(reversed(bars))
+        if not bars:
+            logging.warning("No 5m bars available after aggregating 1m feed")
         market_state = compute_market_state(bars)
         trend_details = {
             'slope_norm': market_state.get('slope_norm', 0),
@@ -674,7 +747,7 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
             result = supabase.table('tv_datafeed') \
                 .select('c, ts') \
                 .eq('symbol', 'MES') \
-                .eq('timeframe', 1) \
+                .in_('timeframe', _timeframe_filters(1)) \
                 .order('ts', desc=True) \
                 .limit(1) \
                 .execute()
@@ -724,7 +797,7 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
                 result = supabase.table('tv_datafeed') \
                     .select('c, ts') \
                     .eq('symbol', 'MES') \
-                    .eq('timeframe', 1) \
+                    .in_('timeframe', _timeframe_filters(1)) \
                     .order('ts', desc=True) \
                     .limit(1) \
                     .execute()
@@ -749,7 +822,7 @@ def get_spread_and_mid_price(symbol: str = "MES") -> Dict[str, Optional[float]]:
         result = supabase.table('tv_datafeed') \
             .select('o, h, l, c, ts') \
             .eq('symbol', 'MES') \
-            .eq('timeframe', 1) \
+            .in_('timeframe', _timeframe_filters(1)) \
             .order('ts', desc=True) \
             .limit(1) \
             .execute()
@@ -786,16 +859,20 @@ def fetch_ohlc_for_analysis(symbol: str = 'MES', cache_minutes: int = 5) -> Dict
         }
         ohlc_data = {}
         for timeframe, bars in bars_needed.items():
-            tf_minutes = int(timeframe.replace('m', ''))
-            result = supabase.table('tv_datafeed') \
-                .select('o, h, l, c, v, ts') \
-                .eq('symbol', symbol) \
-                .eq('timeframe', tf_minutes) \
-                .order('ts', desc=True) \
-                .limit(bars) \
-                .execute()
-            if result.data and len(result.data) > 10:
-                data = list(reversed(result.data))
+            if timeframe == '5m':
+                data = _fetch_5m_bars_from_1m(supabase, symbol, bars_needed=bars)
+            else:
+                tf_minutes = int(timeframe.replace('m', ''))
+                result = supabase.table('tv_datafeed') \
+                    .select('o, h, l, c, v, ts') \
+                    .eq('symbol', symbol) \
+                    .in_('timeframe', _timeframe_filters(tf_minutes)) \
+                    .order('ts', desc=True) \
+                    .limit(bars) \
+                    .execute()
+                data = list(reversed(result.data)) if result.data else []
+
+            if data and len(data) > 10:
                 ohlc_data[timeframe] = {
                     'open': [float(d['o']) for d in data],
                     'high': [float(d['h']) for d in data],
