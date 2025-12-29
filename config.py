@@ -20,6 +20,14 @@ def load_config():
         'AUTOTRADE_REQUIRE_CONFLUENCE': os.getenv("AUTOTRADE_REQUIRE_CONFLUENCE", "true").lower() == "true",
         'AUTOTRADE_MIN_SCORE': float(os.getenv("AUTOTRADE_MIN_SCORE", 1.0)),
         'AUTOTRADE_MIN_SCORE_SCALP': float(os.getenv("AUTOTRADE_MIN_SCORE_SCALP", 0.6)),
+        'BRACKET_MODE': os.getenv("BRACKET_MODE", "per_position"),
+        'BRACKET_SL_USD': float(os.getenv("BRACKET_SL_USD", 50)),
+        'BRACKET_TP_USD': float(os.getenv("BRACKET_TP_USD", 100)),
+        'BRACKET_POINT_VALUE': float(os.getenv("BRACKET_POINT_VALUE", 5.0)),
+        'BRACKET_TICK_SIZE': float(os.getenv("BRACKET_TICK_SIZE", 0.25)),
+        'BRACKET_MIN_SL_POINTS': float(os.getenv("BRACKET_MIN_SL_POINTS", 6.0)),
+        'BRACKET_MIN_SL_TICKS': os.getenv("BRACKET_MIN_SL_TICKS"),
+        'BRACKET_MAX_SIZE': int(os.getenv("BRACKET_MAX_SIZE", 3)),
 
         # legacy single/dual endpoints (kept for backward-compat)
         'N8N_AI_URL': os.getenv("N8N_AI_URL"),

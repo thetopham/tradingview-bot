@@ -11,6 +11,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from config import load_config
 from position_manager import PositionManager
+from bracket_math import compute_bracket_table
 from api import (
     get_supabase_client,
     get_market_conditions_summary,
@@ -37,6 +38,14 @@ PM_OPPOSITE_MIN_PNL = float(config.get('PM_OPPOSITE_MIN_PNL', -5.0))
 PM_TIME_STOP_MINUTES = float(config.get('PM_TIME_STOP_MINUTES', 20))
 PM_TIME_STOP_PNL_BAND = float(config.get('PM_TIME_STOP_PNL_BAND', 5.0))
 PM_MIN_SECONDS_BETWEEN_FLATS = int(config.get('PM_MIN_SECONDS_BETWEEN_FLATS', 60))
+BRACKET_SL_USD = float(config.get('BRACKET_SL_USD', 50))
+BRACKET_TP_USD = float(config.get('BRACKET_TP_USD', 100))
+BRACKET_POINT_VALUE = float(config.get('BRACKET_POINT_VALUE', 5.0))
+BRACKET_TICK_SIZE = float(config.get('BRACKET_TICK_SIZE', 0.25))
+BRACKET_MIN_SL_POINTS = config.get('BRACKET_MIN_SL_POINTS')
+BRACKET_MIN_SL_TICKS = config.get('BRACKET_MIN_SL_TICKS') or None
+BRACKET_MODE = config.get('BRACKET_MODE', 'per_position')
+BRACKET_MAX_SIZE = int(config.get('BRACKET_MAX_SIZE', 3))
 
 LAST_JOB_RUN = {}
 
@@ -64,6 +73,26 @@ def start_scheduler(app):
 
         wrapper.__name__ = getattr(func, "__name__", job_id)
         return wrapper
+
+    def build_bracket_payload():
+        computed = compute_bracket_table(
+            BRACKET_SL_USD,
+            BRACKET_TP_USD,
+            sizes=range(1, BRACKET_MAX_SIZE + 1),
+            point_value=BRACKET_POINT_VALUE,
+            tick_size=BRACKET_TICK_SIZE,
+        )
+        return {
+            "mode": BRACKET_MODE,
+            "sl_usd": BRACKET_SL_USD,
+            "tp_usd": BRACKET_TP_USD,
+            "point_value_per_contract": BRACKET_POINT_VALUE,
+            "tick_size": BRACKET_TICK_SIZE,
+            "min_sl_points": BRACKET_MIN_SL_POINTS,
+            "min_sl_ticks": BRACKET_MIN_SL_TICKS,
+            "max_size": BRACKET_MAX_SIZE,
+            "computed_by_size": {str(k.split("_")[-1]): v for k, v in computed.items()},
+        }
 
     # ──────────────────────────────────────────────────────────────────────────────
     # 5-minute cron job: compute local market state
@@ -167,6 +196,8 @@ def start_scheduler(app):
             should_trade,
         )
 
+        bracket_payload = build_bracket_payload()
+
         for account_name in AUTOTRADE_ACCOUNTS:
             if account_name not in ACCOUNTS:
                 logging.warning("[AutoTrade] Unknown account '%s' in AUTOTRADE_ACCOUNTS", account_name)
@@ -225,6 +256,7 @@ def start_scheduler(app):
                 'position_context': position_context,
                 'risk_context': risk_context,
                 'chart_urls': {},
+                'bracket': bracket_payload,
             }
             decision = {}
             try:
@@ -251,7 +283,7 @@ def start_scheduler(app):
                 size = int(size)
             except Exception:
                 size = config.get('AUTOTRADE_SIZE', 1)
-            size = max(0, min(size, 3))
+            size = max(0, min(size, BRACKET_MAX_SIZE))
 
             logging.info(
                 "[AutoTrade] %s decision=%s size=%s reason=%s has_position=%s",
