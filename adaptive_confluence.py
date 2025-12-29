@@ -10,6 +10,24 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+def filter_learning_series(series: Optional[pd.Series], side: str) -> pd.Series:
+    """Return side-appropriate, clipped samples for adaptive learning."""
+
+    if series is None:
+        return pd.Series(dtype=float)
+
+    filtered = series.dropna().clip(lower=-3.0, upper=3.0)
+
+    if side == "BUY":
+        filtered = filtered[filtered <= 0.0]
+    elif side == "SELL":
+        filtered = filtered[filtered >= 0.0]
+    else:
+        return pd.Series(dtype=float)
+
+    return filtered
+
+
 @dataclass
 class AdaptiveConfluenceParams:
     """Manage adaptive confluence tuning parameters with persistence."""
@@ -65,14 +83,14 @@ class AdaptiveConfluenceParams:
         return (float(q.loc[0.2]), float(q.loc[0.8]), float(q.loc[0.5]))
 
     def update_from_series(self, series: Optional[pd.Series], side: str) -> bool:
-        if series is None or len(series) < self.min_samples:
+        if series is None:
             return False
 
-        series = series.dropna()
-        if len(series) < self.min_samples:
+        filtered = filter_learning_series(series, side)
+        if len(filtered) < self.min_samples:
             return False
 
-        lower_est, upper_est, sweet_est = self._quantiles(series.tail(self.n))
+        lower_est, upper_est, sweet_est = self._quantiles(filtered.tail(self.n))
         estimate = (lower_est, upper_est, sweet_est)
 
         if side == "SELL":
@@ -91,7 +109,7 @@ class AdaptiveConfluenceParams:
             side,
             old_zone,
             new_zone,
-            len(series),
+            len(filtered),
             self.threshold,
         )
         return True
