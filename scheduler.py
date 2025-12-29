@@ -27,6 +27,8 @@ TV_PORT = config['TV_PORT']
 ACCOUNTS = config['ACCOUNTS']
 AUTOTRADE_ACCOUNTS = config.get('AUTOTRADE_ACCOUNTS', list(ACCOUNTS.keys()))
 
+LAST_JOB_RUN = {}
+
 # Global position manager instance
 position_manager = None
 
@@ -37,6 +39,20 @@ def start_scheduler(app):
 
     # Initialize position manager
     position_manager = PositionManager(ACCOUNTS)
+
+    def _wrap_job(job_id, func):
+        """Wrap jobs to capture last run timestamps without altering logic."""
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            finally:
+                try:
+                    LAST_JOB_RUN[job_id] = datetime.now(CT).isoformat()
+                except Exception:
+                    pass
+
+        wrapper.__name__ = getattr(func, "__name__", job_id)
+        return wrapper
 
     # ──────────────────────────────────────────────────────────────────────────────
     # 5-minute cron job: compute local market state
@@ -632,7 +648,7 @@ def start_scheduler(app):
     # ──────────────────────────────────────────────────────────────────────────────
 
     scheduler.add_job(
-        metadata_cleanup_job,
+        _wrap_job('metadata_cleanup', metadata_cleanup_job),
         CronTrigger(minute=30, timezone=CT),  # Run at :30 every hour
         id='metadata_cleanup',
         replace_existing=True,
@@ -640,7 +656,7 @@ def start_scheduler(app):
 
     # Chart fetch and regime update - every 5 minutes
     scheduler.add_job(
-        cron_job,
+        _wrap_job('5m_job', cron_job),
         CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=5, timezone=CT),
         id='5m_job',
         replace_existing=True,
@@ -648,7 +664,7 @@ def start_scheduler(app):
 
     # Auto-trade overseer (runs shortly after the 5m refresh)
     scheduler.add_job(
-        auto_trade_job,
+        _wrap_job('auto_trade_job', auto_trade_job),
         CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=10, timezone=CT),
         id='auto_trade_job',
         replace_existing=True,
@@ -656,7 +672,7 @@ def start_scheduler(app):
 
     # Incremental 1m aggregation every minute
     scheduler.add_job(
-        incremental_market_update,
+        _wrap_job('market_state_incremental', incremental_market_update),
         CronTrigger(minute='*', second=20, timezone=CT),
         id='market_state_incremental',
         replace_existing=True,
@@ -664,7 +680,7 @@ def start_scheduler(app):
 
     # Market analysis every 5 minutes
     scheduler.add_job(
-        market_analysis_job,
+        _wrap_job('market_analysis', market_analysis_job),
         CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=55, timezone=CT),
         id='market_analysis',
         replace_existing=True,
@@ -672,7 +688,7 @@ def start_scheduler(app):
 
     # Position monitoring every 2 minutes
     scheduler.add_job(
-        position_monitoring_job,
+        _wrap_job('position_monitoring', position_monitoring_job),
         CronTrigger(
             minute='1,3,6,8,11,13,16,18,21,23,26,28,31,33,36,38,41,43,46,48,51,53,56,58',
             second=0,
@@ -684,7 +700,7 @@ def start_scheduler(app):
 
     # Data feed monitor - every minute during market hours
     scheduler.add_job(
-        monitor_data_feed,
+        _wrap_job('data_feed_monitor', monitor_data_feed),
         CronTrigger(minute='*', second=15, timezone=CT),
         id='data_feed_monitor',
         replace_existing=True,
@@ -692,7 +708,7 @@ def start_scheduler(app):
 
     # Account health check every 30 minutes
     scheduler.add_job(
-        account_health_check,
+        _wrap_job('account_health', account_health_check),
         CronTrigger(minute='0,30', second=45, timezone=CT),
         id='account_health',
         replace_existing=True,
@@ -701,7 +717,7 @@ def start_scheduler(app):
     # Pre-session analysis
     # London session prep (1:45 AM CT)
     scheduler.add_job(
-        lambda: pre_session_analysis('LONDON'),
+        _wrap_job('pre_london', lambda: pre_session_analysis('LONDON')),
         CronTrigger(hour=1, minute=45, timezone=CT),
         id='pre_london',
         replace_existing=True,
@@ -709,7 +725,7 @@ def start_scheduler(app):
 
     # NY Morning session prep (8:15 AM CT)
     scheduler.add_job(
-        lambda: pre_session_analysis('NY_MORNING'),
+        _wrap_job('pre_ny_morning', lambda: pre_session_analysis('NY_MORNING')),
         CronTrigger(hour=8, minute=15, timezone=CT),
         id='pre_ny_morning',
         replace_existing=True,
@@ -717,7 +733,7 @@ def start_scheduler(app):
 
     # NY Afternoon session prep (12:45 PM CT)
     scheduler.add_job(
-        lambda: pre_session_analysis('NY_AFTERNOON'),
+        _wrap_job('pre_ny_afternoon', lambda: pre_session_analysis('NY_AFTERNOON')),
         CronTrigger(hour=12, minute=45, timezone=CT),
         id='pre_ny_afternoon',
         replace_existing=True,
@@ -726,7 +742,7 @@ def start_scheduler(app):
     # GET FLAT JOBS
     # Pre-flat warning at 3:02 PM CT (5 minutes before)
     scheduler.add_job(
-        pre_flat_warning_job,
+        _wrap_job('pre_flat_warning', pre_flat_warning_job),
         CronTrigger(hour=15, minute=2, timezone=CT),
         id='pre_flat_warning',
         replace_existing=True,
@@ -734,7 +750,7 @@ def start_scheduler(app):
 
     # Get flat at 3:07 PM CT
     scheduler.add_job(
-        get_flat_job,
+        _wrap_job('get_flat', get_flat_job),
         CronTrigger(hour=15, minute=7, timezone=CT),
         id='get_flat',
         replace_existing=True,
@@ -742,7 +758,7 @@ def start_scheduler(app):
 
     # Contract rollover check at 6:00 AM CT
     scheduler.add_job(
-        check_contract_rollover,
+        _wrap_job('contract_rollover_check', check_contract_rollover),
         CronTrigger(hour=6, minute=0, timezone=CT),
         id='contract_rollover_check',
         replace_existing=True,

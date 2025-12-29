@@ -170,6 +170,14 @@
             border-color: var(--accent-blue);
         }
 
+        .input {
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+        }
+
         /* Quick Stats - More spacious layout */
         .quick-stats {
             display: grid;
@@ -1211,6 +1219,93 @@
             animation: fadeIn 0.3s ease;
         }
 
+        .diagnostics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+        }
+
+        .diag-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px;
+        }
+
+        .diag-label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 6px;
+        }
+
+        .diag-value {
+            font-size: 1.3rem;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .market-filter {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .filter-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--bg-secondary);
+        }
+
+        .gate-pills {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .pill {
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            border: 1px solid var(--border);
+        }
+
+        .pill-success { background: rgba(16, 185, 129, 0.15); color: #34d399; border-color: rgba(16,185,129,0.3); }
+        .pill-danger { background: rgba(239, 68, 68, 0.15); color: #f87171; border-color: rgba(239,68,68,0.3); }
+        .pill-neutral { background: rgba(148, 163, 184, 0.15); color: #cbd5e1; }
+
+        .highlight-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 10px;
+        }
+
+        .highlight-list li {
+            padding: 10px;
+            background: var(--bg-secondary);
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            font-family: 'JetBrains Mono', 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+            font-size: 0.9rem;
+        }
+
+        .log-viewer {
+            background: #0b1220;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px;
+            font-family: 'JetBrains Mono', 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+            font-size: 0.9rem;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+
         @keyframes fadeIn {
             from { opacity: 0; }
             to { opacity: 1; }
@@ -1441,6 +1536,7 @@
             <div class="tabs">
                 <button class="tab active" onclick="switchTab('analysis')">Timeframe Analysis</button>
                 <button class="tab" onclick="switchTab('levels')">Key Price Levels</button>
+                <button class="tab" onclick="switchTab('diagnostics')">Diagnostics</button>
             </div>
 
             <!-- Tab Content -->
@@ -1472,6 +1568,86 @@
                             <div class="spinner"></div>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <div id="diagnostics-tab" class="tab-content">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Diagnostics &amp; Health</h2>
+                        <div style="display:flex; gap:10px; align-items:center;">
+                            <button class="btn btn-secondary" onclick="fetchDiagnostics(true)">Refresh</button>
+                            <label style="display:flex; align-items:center; gap:6px; font-size:14px; color:var(--text-secondary);">
+                                <input type="checkbox" id="diag-autofollow" checked /> Auto-follow logs
+                            </label>
+                        </div>
+                    </div>
+                    <div class="diagnostics-grid" id="diagnostics-health">
+                        <div class="diag-card">
+                            <div class="diag-label">Server Uptime</div>
+                            <div class="diag-value" id="diag-uptime">--</div>
+                        </div>
+                        <div class="diag-card">
+                            <div class="diag-label">Last Diagnostics Fetch</div>
+                            <div class="diag-value" id="diag-last-fetch">--</div>
+                        </div>
+                        <div class="diag-card">
+                            <div class="diag-label">Scheduler</div>
+                            <div class="diag-value" id="diag-scheduler">--</div>
+                        </div>
+                        <div class="diag-card">
+                            <div class="diag-label">Log File</div>
+                            <div class="diag-value" id="diag-log-path">--</div>
+                        </div>
+                        <div class="diag-card">
+                            <div class="diag-label">Log Updated</div>
+                            <div class="diag-value" id="diag-log-updated">--</div>
+                        </div>
+                        <div class="diag-card">
+                            <div class="diag-label">Market Refresh Age</div>
+                            <div class="diag-value" id="diag-market-age">--</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid two-column">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Market Filter</h2>
+                        </div>
+                        <div class="market-filter" id="market-filter-panel">
+                            <div class="filter-row"><span>Confluence Score</span><span id="diag-confluence-score">--</span></div>
+                            <div class="filter-row"><span>Bias</span><span id="diag-bias">--</span></div>
+                            <div class="filter-row"><span>Trade Recommended</span><span id="diag-trade" class="pill pill-neutral">--</span></div>
+                            <div class="filter-row"><span>Gates</span>
+                                <div class="gate-pills">
+                                    <span id="gate-trend" class="pill pill-neutral">Trendline</span>
+                                    <span id="gate-bos" class="pill pill-neutral">BOS</span>
+                                    <span id="gate-vol" class="pill pill-neutral">Volume</span>
+                                </div>
+                            </div>
+                            <div class="filter-row"><span>Timestamp</span><span id="diag-market-ts">--</span></div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">CLI Snapshot</h2>
+                        </div>
+                        <ul class="highlight-list" id="diag-highlights"></ul>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header" style="gap:10px; flex-wrap: wrap;">
+                        <h2 class="card-title">Log Tail</h2>
+                        <div style="display:flex; gap:10px; align-items:center; flex-wrap: wrap;">
+                            <input id="log-search" type="text" placeholder="Filter logs" class="input" style="width:200px;" />
+                            <button class="btn btn-secondary" onclick="copyLogs()">Copy</button>
+                            <a class="btn btn-primary" href="/logs/download" target="_blank" rel="noopener">Download</a>
+                        </div>
+                    </div>
+                    <div class="log-viewer" id="log-viewer"></div>
                 </div>
             </div>
         </div>
@@ -1554,6 +1730,11 @@
         let lastData = {};
         let alerts = [];
         let soundEnabled = localStorage.getItem(SOUND_ENABLED_KEY) !== 'false';
+        let logAutoFollow = true;
+        let diagnosticsTimer;
+        let lastDiagnosticsLogFetch = 0;
+        const DIAGNOSTICS_INTERVAL = 5000;
+        const LOG_REFRESH_INTERVAL = 12000;
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
@@ -1571,12 +1752,27 @@
                 localStorage.setItem(SOUND_ENABLED_KEY, soundEnabled);
             });
 
+            const logSearch = document.getElementById('log-search');
+            if (logSearch) {
+                logSearch.addEventListener('input', () => renderLogs(lastData?.diagnostics?.log));
+            }
+
+            const autoFollowToggle = document.getElementById('diag-autofollow');
+            if (autoFollowToggle) {
+                autoFollowToggle.checked = logAutoFollow;
+                autoFollowToggle.addEventListener('change', (e) => {
+                    logAutoFollow = e.target.checked;
+                });
+            }
+
             document.addEventListener('visibilitychange', () => {
                 if (document.hidden) {
                     stopAutoRefresh();
+                    stopDiagnosticsPolling();
                 } else if (autoRefreshEnabled) {
                     refreshAll();
                     startAutoRefresh();
+                    if (isDiagnosticsActive()) startDiagnosticsPolling();
                 }
             });
         }
@@ -1589,9 +1785,32 @@
             document.querySelectorAll('.tab-content').forEach(content => {
                 content.classList.remove('active');
             });
-            
+
             event.target.classList.add('active');
             document.getElementById(`${tabName}-tab`).classList.add('active');
+
+            if (tabName === 'diagnostics') {
+                startDiagnosticsPolling();
+            } else {
+                stopDiagnosticsPolling();
+            }
+        }
+
+        function isDiagnosticsActive() {
+            return document.getElementById('diagnostics-tab')?.classList.contains('active');
+        }
+
+        function startDiagnosticsPolling() {
+            if (diagnosticsTimer) return;
+            fetchDiagnostics(true);
+            diagnosticsTimer = setInterval(() => fetchDiagnostics(false), DIAGNOSTICS_INTERVAL);
+        }
+
+        function stopDiagnosticsPolling() {
+            if (diagnosticsTimer) {
+                clearInterval(diagnosticsTimer);
+                diagnosticsTimer = null;
+            }
         }
 
         // API Functions
@@ -1665,6 +1884,25 @@
                 return data;
             } catch (error) {
                 console.error('Error fetching timeframe analysis:', error);
+            }
+        }
+
+        async function fetchDiagnostics(forceLog = false) {
+            if (!isDiagnosticsActive()) return;
+            try {
+                const now = Date.now();
+                const shouldIncludeLog = forceLog || (now - lastDiagnosticsLogFetch) > LOG_REFRESH_INTERVAL;
+                const params = new URLSearchParams({
+                    include_log: shouldIncludeLog,
+                    include_positions: true,
+                    lines: 400,
+                });
+                const data = await fetchJSON(`/diagnostics?${params.toString()}`);
+                lastData.diagnostics = data;
+                updateDiagnostics(data, shouldIncludeLog);
+                if (shouldIncludeLog) lastDiagnosticsLogFetch = now;
+            } catch (error) {
+                console.error('Diagnostics fetch failed', error);
             }
         }
 
@@ -2237,8 +2475,73 @@
             const currentPosition = (currentMinutes / totalMinutes) * 100;
             
             html += `<div class="current-time-indicator" style="left: ${currentPosition}%;"></div>`;
-            
+
             container.innerHTML = html;
+        }
+
+        function setPillState(elementId, value, label) {
+            const el = document.getElementById(elementId);
+            if (!el) return;
+            el.textContent = label;
+            if (value === true) {
+                el.className = 'pill pill-success';
+            } else if (value === false) {
+                el.className = 'pill pill-danger';
+            } else {
+                el.className = 'pill pill-neutral';
+            }
+        }
+
+        function updateDiagnostics(data, includeLog) {
+            if (!data) return;
+            document.getElementById('diag-uptime').textContent = formatDuration(data.uptime_sec);
+            document.getElementById('diag-last-fetch').textContent = formatTime(data.timestamp);
+            document.getElementById('diag-log-path').textContent = data.log?.path || '--';
+            document.getElementById('diag-log-updated').textContent = computeDataAgeText(data.log?.last_modified);
+            document.getElementById('diag-market-age').textContent = computeDataAgeText(data.market_filter?.market_state?.timestamp);
+
+            const scheduler = data.scheduler || {};
+            const jobCount = scheduler.jobs ? scheduler.jobs.length : 0;
+            document.getElementById('diag-scheduler').textContent = scheduler.running ? `Running (${jobCount} jobs)` : 'Stopped';
+
+            const confluence = data.market_filter?.confluence || {};
+            document.getElementById('diag-confluence-score').textContent = (confluence.score ?? '--');
+            document.getElementById('diag-bias').textContent = confluence.bias || '--';
+            setPillState('diag-trade', !!data.market_filter?.trade_recommended, data.market_filter?.trade_recommended ? 'Yes' : 'No');
+            setPillState('gate-trend', confluence.trendline_ok, 'Trendline');
+            setPillState('gate-bos', confluence.bos_ok, 'BOS');
+            setPillState('gate-vol', confluence.vol_ok, 'Volume');
+            document.getElementById('diag-market-ts').textContent = data.market_filter?.market_state?.timestamp ? formatTime(data.market_filter.market_state.timestamp) : '--';
+
+            const highlights = data.log_highlights || [];
+            const highlightContainer = document.getElementById('diag-highlights');
+            highlightContainer.innerHTML = highlights.length ? highlights.map(line => `<li>${line}</li>`).join('') : '<li class="text-dim">No highlights</li>';
+
+            if (includeLog) {
+                renderLogs(data.log);
+            }
+        }
+
+        function renderLogs(logData) {
+            const viewer = document.getElementById('log-viewer');
+            if (!viewer) return;
+            const searchTerm = (document.getElementById('log-search')?.value || '').toLowerCase();
+            const lines = logData?.lines || [];
+            const filtered = searchTerm ? lines.filter(l => l.toLowerCase().includes(searchTerm)) : lines;
+            viewer.textContent = filtered.join('\n');
+            if (logAutoFollow) {
+                viewer.scrollTop = viewer.scrollHeight;
+            }
+        }
+
+        function copyLogs() {
+            const viewer = document.getElementById('log-viewer');
+            if (!viewer) return;
+            navigator.clipboard.writeText(viewer.textContent || '').then(() => {
+                showAlert('success', 'Copied', 'Logs copied to clipboard');
+            }).catch(() => {
+                showAlert('error', 'Copy failed', 'Unable to copy logs');
+            });
         }
 
         // Alert System
@@ -2358,6 +2661,21 @@
             return `${diffDays.toFixed(1)}d`;
         }
 
+        function formatDuration(seconds) {
+            if (!seconds && seconds !== 0) return '--';
+            const s = Math.max(0, Math.floor(seconds));
+            const days = Math.floor(s / 86400);
+            const hours = Math.floor((s % 86400) / 3600);
+            const minutes = Math.floor((s % 3600) / 60);
+            const sec = s % 60;
+            const parts = [];
+            if (days) parts.push(`${days}d`);
+            if (hours) parts.push(`${hours}h`);
+            if (minutes) parts.push(`${minutes}m`);
+            parts.push(`${sec}s`);
+            return parts.join(' ');
+        }
+
         function getTrendArrow(trend) {
             const arrows = { up: '↑', down: '↓', sideways: '→' };
             return arrows[trend] || '→';
@@ -2397,8 +2715,10 @@
             
             if (autoRefreshEnabled) {
                 startAutoRefresh();
+                if (isDiagnosticsActive()) startDiagnosticsPolling();
             } else {
                 stopAutoRefresh();
+                stopDiagnosticsPolling();
             }
         }
 
@@ -2416,14 +2736,16 @@
 
         async function refreshAll() {
             updateTimestamps();
-            
+
             try {
-                await Promise.all([
+                const tasks = [
                     fetchMarketData(),
                     fetchPositions(),
                     fetchLatestAIDecision(),
                     fetchTimeframeAnalysis()
-                ]);
+                ];
+                if (isDiagnosticsActive()) tasks.push(fetchDiagnostics());
+                await Promise.all(tasks);
             } catch (error) {
                 console.error('Refresh error:', error);
             }
