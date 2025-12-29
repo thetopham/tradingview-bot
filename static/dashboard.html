@@ -1898,8 +1898,14 @@
                     lines: 400,
                 });
                 const data = await fetchJSON(`/diagnostics?${params.toString()}`);
-                lastData.diagnostics = data;
-                updateDiagnostics(data, shouldIncludeLog);
+
+                const mergedDiagnostics = {
+                    ...data,
+                    log: shouldIncludeLog ? data.log : (lastData?.diagnostics?.log || data.log),
+                };
+
+                lastData.diagnostics = mergedDiagnostics;
+                updateDiagnostics(mergedDiagnostics, shouldIncludeLog);
                 if (shouldIncludeLog) lastDiagnosticsLogFetch = now;
             } catch (error) {
                 console.error('Diagnostics fetch failed', error);
