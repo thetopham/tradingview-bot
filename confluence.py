@@ -6,6 +6,22 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+
+def sanitize(obj):
+    """Convert numpy/pandas objects to JSON-serializable Python types."""
+
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, dict):
+        return {k: sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [sanitize(v) for v in obj]
+    if isinstance(obj, tuple):
+        return [sanitize(v) for v in obj]
+    return obj
+
 PULLBACK_ZONE_SELL = (-0.2, 0.8, 0.3)  # lower, upper, sweet spot
 PULLBACK_ZONE_BUY = (-0.8, 0.2, -0.3)
 CHANNEL_DISTANCE_RANGE = (-0.2, 1.2)
@@ -278,7 +294,7 @@ def compute_confluence(ohlc5m: pd.DataFrame, base_signal: Optional[str] = None) 
 
     pullback = _pullback_component(ohlc5m, bias, atr_value)
     trend_channel = _channel_component(ohlc5m, bias, atr_value)
-    components.extend([pullback, trend_channel])
+    components.extend([sanitize(pullback), sanitize(trend_channel)])
 
     weights = {
         "pullback_to_mean": 1.0,
@@ -296,8 +312,8 @@ def compute_confluence(ohlc5m: pd.DataFrame, base_signal: Optional[str] = None) 
     elif score <= -1.0:
         confluence_bias = "SELL"
 
-    trendline_ok = trend_channel.get("metrics", {}).get("trendline_ok", True)
-    bos_ok = trend_channel.get("metrics", {}).get("bos_ok", True)
+    trendline_ok = bool(trend_channel.get("metrics", {}).get("trendline_ok", True))
+    bos_ok = bool(trend_channel.get("metrics", {}).get("bos_ok", True))
     gates = {
         "trendline_ok": bool(trendline_ok),
         "bos_ok": bool(bos_ok),
@@ -313,4 +329,4 @@ def compute_confluence(ohlc5m: pd.DataFrame, base_signal: Optional[str] = None) 
     }
 
     logger.debug("Confluence computed: %s", confluence)
-    return {"confluence": confluence}
+    return {"confluence": sanitize(confluence)}
