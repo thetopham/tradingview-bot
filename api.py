@@ -610,7 +610,7 @@ class RegimeTracker:
             return change_info
         return None
 
-def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None, 
+def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None,
                                    cache_minutes: int = 4, force_refresh: bool = False) -> Dict:
     """
     Fetch multi-timeframe analysis using BOTH OHLC and image data
@@ -622,7 +622,7 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
     supabase_client = get_supabase_client()
     
     if timeframes is None:
-        timeframes = ['5m', '15m', '30m']
+        timeframes = ['5m']
     
     request_key = hashlib.md5(f"{n8n_base_url}:{','.join(timeframes)}:{force_refresh}".encode()).hexdigest()
     
@@ -693,7 +693,7 @@ def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = No
             if result.data and len(result.data) >= 50:
                 minute_bars = result.data
                 logging.info(f"Retrieved {len(minute_bars)} 1-minute bars")
-                timeframe_mapping = {'5m': 5, '15m': 15, '30m': 30}
+                timeframe_mapping = {'5m': 5}
                 for tf_name in timeframes:
                     if tf_name in timeframe_mapping:
                         tf_minutes = timeframe_mapping[tf_name]
@@ -1316,9 +1316,7 @@ def fetch_ohlc_for_analysis(symbol: str = 'MES', cache_minutes: int = 5) -> Dict
     try:
         supabase = get_supabase_client()
         bars_needed = {
-            '5m': 50,
-            '15m': 50,
-            '30m': 30
+            '5m': 50
         }
         ohlc_data = {}
         for timeframe, bars in bars_needed.items():

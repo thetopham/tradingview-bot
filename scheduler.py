@@ -75,7 +75,7 @@ def start_scheduler(app):
             
 
             # ===== TRIGGER N8N CHART UPDATES WITH LONGER TIMEOUT =====
-            timeframes = ['5m', '15m', '30m']
+            timeframes = ['5m']
             logging.info("[APScheduler] Triggering n8n chart analysis updates...")
 
             def trigger_n8n_update(tf):
@@ -98,7 +98,7 @@ def start_scheduler(app):
 
             # Run n8n updates in parallel to save time
             successful_updates = 0
-            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(timeframes)) as executor:
                 future_to_tf = {executor.submit(trigger_n8n_update, tf): tf for tf in timeframes}
                 for future in concurrent.futures.as_completed(future_to_tf):
                     if future.result():

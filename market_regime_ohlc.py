@@ -13,10 +13,10 @@ class OHLCRegimeDetector:
     
     def analyze_regime(self, ohlc_data: Dict[str, Dict]) -> Dict:
         """
-        Analyze market regime using OHLC data from multiple timeframes
-        
+        Analyze market regime using OHLC data from the 5m timeframe
+
         Args:
-            ohlc_data: Dict with timeframe keys ('5m', '15m', '30m') containing OHLC arrays
+            ohlc_data: Dict with timeframe keys (e.g., '5m') containing OHLC arrays
             
         Returns:
             Dict with regime analysis
@@ -495,14 +495,6 @@ class OHLCRegimeDetector:
             else:
                 momentum_state = 'neutral'
         
-            # Check for higher timeframe agreement (15m and 30m)
-            higher_tf_trends = []
-            for tf in ['15m', '30m']:
-                if tf in timeframe_analysis:
-                    higher_tf_trends.append(timeframe_analysis[tf].get('trend', 'unknown'))
-        
-            higher_tf_agreement = len(set(higher_tf_trends)) == 1 and 'unknown' not in higher_tf_trends
-        
             # Build trend details dict
             trends_by_timeframe = {}
             for tf, tf_data in timeframe_analysis.items():
@@ -537,7 +529,7 @@ class OHLCRegimeDetector:
                     'is_aligned': alignment_score > 70,
                     'has_conflict': (up_count > 0 and down_count > 0) or buy_count > 0 and sell_count > 0,
                     'trends_by_timeframe': trends_by_timeframe,
-                    'higher_tf_agreement': higher_tf_agreement,
+                    'higher_tf_agreement': False,
                     'trend_strength': 'strong' if alignment_score > 80 else 'moderate' if alignment_score > 60 else 'weak',
                     'fast_vs_slow': 'aligned' if alignment_score > 70 else 'divergent'
                 },
