@@ -834,6 +834,13 @@ def handle_webhook_logic(data):
             'daily_pnl': account_state.get('daily_pnl'),
         }
         confluence = summary.get('confluence', {})
+        confluence_tags = confluence.get('tags', []) if isinstance(confluence, dict) else []
+        scalp_ok = (
+            regime == "sideways"
+            and confluence.get('trade_recommended') is True
+            and any("scalp" in t for t in confluence_tags)
+            and str(confluence.get('bias', '')).upper() in {"BUY", "SELL"}
+        )
         has_position = bool(position_context and position_context.get('current_position', {}).get('has_position'))
         should_call_ai = (
             AI_ENDPOINTS
@@ -862,7 +869,10 @@ def handle_webhook_logic(data):
             size = int(ai_decision.get('size', size))
             alert = ai_decision.get('reason', alert)
 
-        if sig == "HOLD" or regime == "sideways":
+        if sig == "HOLD" and scalp_ok:
+            sig = str(confluence.get('bias')).upper()
+
+        if sig == "HOLD" or (regime == "sideways" and not scalp_ok):
             if cid:
                 if position_context and position_context['current_position']['has_position']:
                     logging.info(
