@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from auth import ensure_token, get_token
 from config import load_config
 from dateutil import parser
-from market_regime import MarketRegime
+from market_state import compute_market_state
 from supabase import create_client, Client
 from typing import Dict, List, Optional, Tuple
 from threading import RLock
@@ -74,10 +74,6 @@ def get_active_contract_for_symbol_cached(symbol: str, live: bool = False) -> Op
         contract_cache_expiry[cache_key] = current_time + CONTRACT_CACHE_DURATION
     
     return contract_id
-
-# Global lock for regime cache updates
-regime_cache_lock = threading.Lock()
-regime_cache_in_progress = {}
 
 # ─────────────────────────────
 # Low-level POST helper
@@ -580,317 +576,6 @@ def get_supabase_client() -> Client:
     supabase: Client = create_client(url, key)
     return supabase
 
-# regime updates
-market_regime_analyzer = MarketRegime()
-
-class RegimeTracker:
-    def __init__(self):
-        self.last_regime = None
-        self.regime_start_time = None
-        
-    def check_regime_change(self, new_regime: str, confidence: int) -> Optional[Dict]:
-        """Check if regime has changed significantly"""
-        if self.last_regime is None:
-            self.last_regime = new_regime
-            self.regime_start_time = datetime.now(CT)
-            return None
-            
-        if new_regime != self.last_regime and confidence > 70:
-            duration = (datetime.now(CT) - self.regime_start_time).total_seconds() / 60
-            change_info = {
-                'from': self.last_regime,
-                'to': new_regime,
-                'duration_minutes': duration,
-                'timestamp': datetime.now(CT).isoformat()
-            }
-            self.last_regime = new_regime
-            self.regime_start_time = datetime.now(CT)
-            logging.warning(f"🔄 REGIME CHANGE: {change_info['from']} → {change_info['to']} "
-                            f"(lasted {duration:.1f} minutes)")
-            return change_info
-        return None
-
-def fetch_multi_timeframe_analysis(n8n_base_url: str, timeframes: List[str] = None,
-                                   cache_minutes: int = 4, force_refresh: bool = False) -> Dict:
-    """
-    Build a minimal EMA21 trend snapshot from 1m OHLC data.
-    """
-    import datetime
-
-    now = datetime.datetime.now(datetime.timezone.utc)
-    supabase_client = get_supabase_client()
-
-    if timeframes is None:
-        timeframes = ['5m']
-
-    timeframe_mapping = {'5m': 5}
-    timeframe_data: Dict[str, Dict] = {}
-
-    try:
-        result = supabase_client.table('tv_datafeed') \
-            .select('*') \
-            .eq('symbol', 'MES') \
-            .eq('timeframe', 1) \
-            .order('ts', desc=True) \
-            .limit(800) \
-            .execute()
-
-        if not result.data:
-            raise ValueError("No 1m bars available for aggregation")
-
-        minute_bars = result.data
-        for tf_name in timeframes:
-            tf_minutes = timeframe_mapping.get(tf_name)
-            if not tf_minutes:
-                continue
-            aggregated_bars = aggregate_1m_to_timeframe(minute_bars, tf_minutes)
-            if not aggregated_bars:
-                continue
-            timeframe_data[tf_name] = {
-                'close': [bar['c'] for bar in aggregated_bars],
-                'timestamps': [bar['ts'] for bar in aggregated_bars],
-                'current_price': aggregated_bars[-1]['c'],
-            }
-
-        if not timeframe_data:
-            raise ValueError("No aggregated timeframe data produced")
-
-        regime_analysis = market_regime_analyzer.analyze_regime(timeframe_data)
-        result_payload = {
-            'regime_analysis': regime_analysis,
-            'timeframe_data': timeframe_data,
-            'data_sources': ['1m tv_datafeed'],
-        }
-
-        try:
-            supabase_client.table('market_regime_cache').insert({
-                'timestamp': now.isoformat(),
-                'analysis_data': json.dumps(result_payload),
-                'data_sources': '1m tv_datafeed'
-            }).execute()
-        except Exception as exc:
-            logging.debug(f"Skipping cache insert: {exc}")
-
-        return result_payload
-
-    finally:
-        with regime_cache_lock:
-            regime_cache_in_progress.clear()
-
-
-def evaluate_entry_quality(regime_analysis: Dict, position_context: Dict = None) -> Dict:
-    """
-    Evaluate entry quality based on hybrid analysis and position context
-    """
-    quality_score = 50
-    factors = []
-
-    confidence = regime_analysis.get('confidence', 0)
-    if confidence > 70:
-        quality_score += 10
-        factors.append("Solid EMA slope confidence")
-    elif confidence < 30:
-        quality_score -= 15
-        factors.append("Weak EMA slope confidence")
-
-    regime = regime_analysis.get('primary_regime')
-    if regime == 'trending_up':
-        quality_score += 10
-        factors.append("EMA trending up")
-    elif regime == 'trending_down':
-        quality_score += 10
-        factors.append("EMA trending down")
-    else:
-        quality_score -= 10
-        factors.append("Sideways slope")
-
-    slope = regime_analysis.get('trend_details', {}).get('slope', 0)
-    if abs(slope) > 0:
-        factors.append(f"Slope: {slope:.5f}")
-
-    if position_context:
-        if not position_context.get('account_metrics', {}).get('can_trade', True):
-            quality_score = 0
-            factors.append("Account cannot trade")
-        if position_context.get('current_position', {}).get('has_position'):
-            quality_score -= 10
-            factors.append("Already in position")
-
-    quality_score = max(0, min(100, quality_score))
-    if quality_score >= 70:
-        recommendation = 'STRONG_ENTRY'
-    elif quality_score >= 55:
-        recommendation = 'ENTRY_OK'
-    elif quality_score >= 40:
-        recommendation = 'WEAK_ENTRY'
-    else:
-        recommendation = 'NO_ENTRY'
-
-    return {
-        'quality_score': quality_score,
-        'factors': factors,
-        'recommendation': recommendation,
-        'regime': regime,
-        'confidence': confidence
-    }
-
-def ai_trade_decision_with_regime(account, strat, sig, sym, size, alert, ai_url):
-    """
-    Enhanced AI trade decision that includes market regime analysis, chart URLs, and position context
-    """
-    try:
-        if '/webhook/' in ai_url:
-            n8n_base_url = ai_url.split('/webhook/')[0]
-        else:
-            n8n_base_url = ai_url.replace('/webhook', '')
-        market_analysis = fetch_multi_timeframe_analysis(n8n_base_url, force_refresh=False)
-        regime = market_analysis['regime_analysis']
-        regime_rules = market_regime_analyzer.get_regime_trading_rules(regime['primary_regime'])
-        chart_urls = market_analysis.get('chart_urls', {})
-        acct_id = ACCOUNTS.get(account.lower())
-        if acct_id:
-            from position_manager import PositionManager
-            pm = PositionManager(ACCOUNTS)
-            cid = get_contract(sym)
-            position_context = pm.get_position_context_for_ai(acct_id, cid)
-            if not position_context['account_metrics']['can_trade']:
-                logging.warning(f"Account {account} cannot trade due to risk limits")
-                return {
-                    "strategy": strat,
-                    "signal": "HOLD",
-                    "account": account,
-                    "reason": f"Account risk limits exceeded: {', '.join(position_context['warnings'])}",
-                    "regime": regime['primary_regime'],
-                    "error": False
-                }
-        else:
-            position_context = None
-        entry_quality = evaluate_entry_quality(regime, position_context)
-        logging.info(f"Entry quality: {entry_quality['quality_score']}/100 - {entry_quality['recommendation']}")
-        logging.info(f"Quality factors: {', '.join(entry_quality['factors'])}")
-        if entry_quality['recommendation'] == 'NO_ENTRY' and entry_quality['quality_score'] < 40:
-            logging.warning(f"Blocking trade due to poor entry quality ({entry_quality['quality_score']})")
-            return {
-                "strategy": strat,
-                "signal": "HOLD",
-                "account": account,
-                "reason": f"Poor entry quality: {', '.join(entry_quality['factors'])}",
-                "regime": regime['primary_regime'],
-                "entry_quality": entry_quality,
-                "error": False
-            }
-        if not regime['trade_recommendation']:
-            logging.warning(f"Trading not recommended in {regime['primary_regime']} regime. Blocking trade.")
-            return {
-                "strategy": strat,
-                "signal": "HOLD",
-                "account": account,
-                "reason": f"Market regime ({regime['primary_regime']}) not suitable for trading. {', '.join(regime['supporting_factors'])}",
-                "regime": regime['primary_regime'],
-                "error": False
-            }
-        if regime_rules['avoid_signal'] == 'BOTH' or (regime_rules['avoid_signal'] and sig == regime_rules['avoid_signal']):
-            logging.warning(f"Signal {sig} conflicts with {regime['primary_regime']} regime preferences")
-            return {
-                "strategy": strat,
-                "signal": "HOLD",
-                "account": account,
-                "reason": f"{sig} signal not recommended in {regime['primary_regime']} regime",
-                "regime": regime['primary_regime'],
-                "error": False
-            }
-        payload = {
-            "account": account,
-            "strategy": strat,
-            "signal": sig,
-            "symbol": sym,
-            "size": size,
-            "alert": alert,
-            "market_analysis": {
-                "regime": regime['primary_regime'],
-                "confidence": regime['confidence'],
-                "supporting_factors": regime['supporting_factors'],
-                "risk_level": regime['risk_level'],
-                "trend_details": regime['trend_details'],
-                "volatility_details": regime['volatility_details'],
-                "momentum_details": regime['momentum_details']
-            },
-            "regime_rules": regime_rules,
-            "timeframe_signals": {
-                tf: data.get('signal', 'HOLD') 
-                for tf, data in market_analysis['timeframe_data'].items()
-            },
-            "chart_urls": chart_urls,
-            "support": {
-                tf: data.get('support', []) 
-                for tf, data in market_analysis['timeframe_data'].items()
-            },
-            "resistance": {
-                tf: data.get('resistance', []) 
-                for tf, data in market_analysis['timeframe_data'].items()
-            },
-            "entry_quality": entry_quality
-        }
-        if position_context:
-            payload["position_context"] = position_context
-            if position_context['current_position']['has_position']:
-                current_side = position_context['current_position']['side']
-                if (current_side == 'LONG' and sig == 'SELL') or (current_side == 'SHORT' and sig == 'BUY'):
-                    payload['position_warning'] = f"Signal would reverse current {current_side} position"
-                if position_context['current_position']['size'] >= 3:
-                    payload['suggested_size'] = 0
-                elif position_context['account_metrics']['risk_level'] == 'high':
-                    payload['suggested_size'] = 1
-                else:
-                    payload['suggested_size'] = size
-        if hasattr(strat, 'get') and strat.get('autonomous'):
-            payload['autonomous'] = True
-            payload['initiated_by'] = strat.get('initiated_by', 'unknown')
-        resp = session.post(ai_url, json=payload, timeout=240)
-        resp.raise_for_status()
-        raw_body = resp.text.strip() if resp.text is not None else ""
-        if not raw_body:
-            logging.warning("AI response empty body; defaulting to HOLD decision")
-            return {
-                "strategy": strat,
-                "signal": "HOLD",
-                "account": account,
-                "reason": "AI response was empty",
-                "regime": regime['primary_regime'],
-                "entry_quality": entry_quality,
-                "error": False
-            }
-        try:
-            data = resp.json()
-        except Exception as e:
-            logging.error(f"AI response not valid JSON: {resp.text}")
-            return {
-                "strategy": strat,
-                "signal": "HOLD",
-                "account": account,
-                "reason": f"AI response parsing error: {str(e)}",
-                "regime": regime['primary_regime'],
-                "entry_quality": entry_quality,
-                "error": True
-            }
-        data['regime'] = regime['primary_regime']
-        data['regime_confidence'] = regime['confidence']
-        if 'size' in data and regime_rules['max_position_size'] > 0:
-            data['size'] = min(data['size'], regime_rules['max_position_size'])
-            if position_context and 'suggested_size' in payload:
-                data['size'] = min(data['size'], payload['suggested_size'])
-        return data
-    except Exception as e:
-        logging.error(f"AI error with regime analysis: {str(e)}")
-        return {
-            "strategy": strat,
-            "signal": "HOLD",
-            "account": account,
-            "reason": f"AI error: {str(e)}",
-            "regime": "unknown",
-            "error": True
-        }
-
 # New endpoint function to add to api.py
 def get_all_positions_summary() -> Dict:
     """
@@ -931,40 +616,46 @@ def get_market_conditions_summary(force_refresh: bool = False) -> Dict:
     Get a summary of current market conditions for logging
     """
     try:
-        n8n_ai_url = config.get('N8N_AI_URL', '')
-        if '/webhook/' in n8n_ai_url:
-            n8n_base_url = n8n_ai_url.split('/webhook/')[0]
-        else:
-            n8n_base_url = n8n_ai_url.replace('/webhook', '')
-        market_analysis = fetch_multi_timeframe_analysis(n8n_base_url, force_refresh=force_refresh)
-        if isinstance(market_analysis, list):
-            if market_analysis:
-                market_analysis = market_analysis[0]
-            else:
-                raise ValueError("Empty market analysis list")
-        if not isinstance(market_analysis, dict):
-            raise ValueError(f"Unexpected market_analysis type: {type(market_analysis)}")
-        regime = market_analysis.get('regime_analysis', {})
-        if not regime:
-            raise ValueError("No regime_analysis in market data")
-        trend_details = regime.get('trend_details', {})
+        supabase = get_supabase_client()
+        bars = (
+            supabase
+            .table('tv_datafeed')
+            .select('o, h, l, c, ts')
+            .eq('symbol', config.get('DEFAULT_SYMBOL', 'MES'))
+            .eq('timeframe', 5)
+            .order('ts', desc=True)
+            .limit(150)
+            .execute()
+            .data
+            or []
+        )
+        bars = list(reversed(bars))
+        market_state = compute_market_state(bars)
+        trend_details = {
+            'slope_norm': market_state.get('slope_norm', 0),
+            'timeframe': '5m',
+            'ema_period': 21,
+        }
         summary = {
             'timestamp': datetime.now(CT).isoformat(),
-            'regime': regime.get('primary_regime', 'unknown'),
-            'confidence': regime.get('confidence', 0),
-            'trade_recommended': regime.get('trade_recommendation', False),
-            'risk_level': regime.get('risk_level', 'high'),
-            'key_factors': regime.get('supporting_factors', ['Error in analysis'])[:3],
-            'trend_alignment': trend_details.get('slope', 0),
+            'regime': market_state.get('regime', 'sideways'),
+            'trend': market_state.get('trend', 'sideways'),
+            'confidence': market_state.get('confidence', 0),
+            'trade_recommended': market_state.get('signal') in ('BUY', 'SELL'),
+            'risk_level': 'medium',
+            'key_factors': market_state.get('supporting_factors', ['Local analysis unavailable'])[:3],
+            'trend_alignment': market_state.get('slope_norm', 0),
             'volatility': 'unknown'
         }
+        summary['market_state'] = market_state
         logging.info(f"Market Conditions: {summary}")
         return summary
     except Exception as e:
         logging.error(f"Error getting market conditions: {e}")
         return {
             'timestamp': datetime.now(CT).isoformat(),
-            'regime': 'unknown',
+            'regime': 'sideways',
+            'trend': 'sideways',
             'confidence': 0,
             'trade_recommended': False,
             'risk_level': 'high',
@@ -1116,41 +807,3 @@ def fetch_ohlc_for_analysis(symbol: str = 'MES', cache_minutes: int = 5) -> Dict
     except Exception as e:
         logging.error(f"Error fetching OHLC data: {e}")
         return {}
-
-def aggregate_1m_to_timeframe(minute_bars: List[Dict], target_minutes: int) -> List[Dict]:
-    """
-    Efficiently aggregate 1-minute bars to target timeframe
-    """
-    if not minute_bars or len(minute_bars) < target_minutes:
-        return []
-    sorted_bars = sorted(minute_bars, key=lambda x: x['ts'])
-    aggregated = []
-
-    # Build bars from the most recent data so we never drop the newest prices
-    # when the bar count is not an exact multiple of the target timeframe.
-    for start_idx in range(len(sorted_bars) - target_minutes, -1, -target_minutes):
-        chunk = sorted_bars[start_idx:start_idx + target_minutes]
-        if len(chunk) == target_minutes:
-            agg_bar = {
-                'ts': chunk[-1]['ts'],
-                'o': float(chunk[0]['o']),
-                'h': max(float(bar['h']) for bar in chunk),
-                'l': min(float(bar['l']) for bar in chunk),
-                'c': float(chunk[-1]['c']),
-                'v': sum(float(bar.get('v', 0)) for bar in chunk),
-                'rsi': float(chunk[-1].get('rsi', 50)),
-                'macd_hist': float(chunk[-1].get('macd_hist', 0)),
-                'atr': float(chunk[-1].get('atr', 10)),
-                'fisher': float(chunk[-1].get('fisher', 0)),
-                'vzo': float(chunk[-1].get('vzo', 0)),
-                'phobos_momentum': float(chunk[-1].get('phobos_momentum', 0)),
-                'stoch_k': float(chunk[-1].get('stoch_k', 50)),
-                'bb_upper': float(chunk[-1].get('bb_upper', 0)),
-                'bb_middle': float(chunk[-1].get('bb_middle', 0)),
-                'bb_lower': float(chunk[-1].get('bb_lower', 0))
-            }
-            aggregated.append(agg_bar)
-
-    # Maintain chronological order (oldest first) for downstream consumers
-    aggregated.reverse()
-    return aggregated[-50:] if len(aggregated) > 50 else aggregated
