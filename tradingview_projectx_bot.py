@@ -202,7 +202,7 @@ def get_latest_analysis_all():
     """Get latest analysis for all timeframes from Supabase"""
     try:
         supabase = get_supabase_client()
-        timeframes = ['5m', '15m', '30m']  # align with your n8n workflows
+        timeframes = ['5m']  # align with single-timeframe workflow
         analysis_data = {}
         for tf in timeframes:
             try:
