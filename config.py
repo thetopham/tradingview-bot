@@ -19,6 +19,7 @@ def load_config():
         'AUTOTRADE_SIZE': int(os.getenv("AUTOTRADE_SIZE", 1)),
         'AUTOTRADE_REQUIRE_CONFLUENCE': os.getenv("AUTOTRADE_REQUIRE_CONFLUENCE", "true").lower() == "true",
         'AUTOTRADE_MIN_SCORE': float(os.getenv("AUTOTRADE_MIN_SCORE", 1.0)),
+        'AUTOTRADE_MIN_SCORE_SCALP': float(os.getenv("AUTOTRADE_MIN_SCORE_SCALP", 0.6)),
 
         # legacy single/dual endpoints (kept for backward-compat)
         'N8N_AI_URL': os.getenv("N8N_AI_URL"),
