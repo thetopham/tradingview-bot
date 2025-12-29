@@ -1350,8 +1350,11 @@ def aggregate_1m_to_timeframe(minute_bars: List[Dict], target_minutes: int) -> L
         return []
     sorted_bars = sorted(minute_bars, key=lambda x: x['ts'])
     aggregated = []
-    for i in range(0, len(sorted_bars) - target_minutes + 1, target_minutes):
-        chunk = sorted_bars[i:i + target_minutes]
+
+    # Build bars from the most recent data so we never drop the newest prices
+    # when the bar count is not an exact multiple of the target timeframe.
+    for start_idx in range(len(sorted_bars) - target_minutes, -1, -target_minutes):
+        chunk = sorted_bars[start_idx:start_idx + target_minutes]
         if len(chunk) == target_minutes:
             agg_bar = {
                 'ts': chunk[-1]['ts'],
@@ -1372,4 +1375,7 @@ def aggregate_1m_to_timeframe(minute_bars: List[Dict], target_minutes: int) -> L
                 'bb_lower': float(chunk[-1].get('bb_lower', 0))
             }
             aggregated.append(agg_bar)
+
+    # Maintain chronological order (oldest first) for downstream consumers
+    aggregated.reverse()
     return aggregated[-50:] if len(aggregated) > 50 else aggregated
