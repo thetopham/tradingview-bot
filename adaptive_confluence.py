@@ -86,6 +86,7 @@ class AdaptiveConfluenceParams:
         if series is None:
             return False
 
+        series = series.dropna()
         filtered = filter_learning_series(series, side)
         if len(filtered) < self.min_samples:
             return False
@@ -105,10 +106,11 @@ class AdaptiveConfluenceParams:
             return False
 
         logger.info(
-            "Adaptive params update for %s: %s -> %s (samples=%d, threshold=%.3f)",
+            "Adaptive params update side=%s: %s -> %s z_total=%d z_learn=%d threshold=%.3f",
             side,
             old_zone,
             new_zone,
+            len(series),
             len(filtered),
             self.threshold,
         )
