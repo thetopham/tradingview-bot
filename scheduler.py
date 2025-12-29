@@ -12,7 +12,6 @@ from config import load_config
 from position_manager import PositionManager
 from api import (
     get_supabase_client,
-    fetch_multi_timeframe_analysis,
     get_market_conditions_summary,
     check_contract_rollover,
     get_contract,
@@ -38,10 +37,10 @@ def start_scheduler(app):
     position_manager = PositionManager(ACCOUNTS)
 
     # ──────────────────────────────────────────────────────────────────────────────
-    # Original 5-minute cron job - still fetches charts
+    # 5-minute cron job: trigger 5m chart + state analysis in n8n
     # ──────────────────────────────────────────────────────────────────────────────
     def cron_job():
-        """Runs 5 seconds after each 5-min candle close to fetch fresh charts AND update regime"""
+        """Runs after each 5-min candle close to refresh charts and state analysis"""
 
         # Check if we're in the get-flat window
         from auth import in_get_flat
@@ -51,7 +50,7 @@ def start_scheduler(app):
             logging.info("[APScheduler] SKIPPING chart/regime fetch - in get-flat window")
             return
 
-        logging.info("[APScheduler] Fetching fresh charts and updating regime after candle close")
+        logging.info("[APScheduler] Starting 5m refresh: charts + state analysis")
 
         try:
             # Clear any existing cache first
@@ -74,9 +73,9 @@ def start_scheduler(app):
                 return
             
 
-            # ===== TRIGGER N8N CHART UPDATES WITH LONGER TIMEOUT =====
+            # ===== TRIGGER N8N 5M CHART UPDATE =====
             timeframes = ['5m']
-            logging.info("[APScheduler] Triggering n8n chart analysis updates...")
+            logging.info("[APScheduler] Triggering n8n 5m chart analysis update...")
 
             def trigger_n8n_update(tf):
                 """Trigger n8n with 60 second timeout"""
@@ -96,7 +95,6 @@ def start_scheduler(app):
                     logging.error(f"[APScheduler] Failed to trigger {tf} chart update: {e}")
                     return False
 
-            # Run n8n updates in parallel to save time
             successful_updates = 0
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(timeframes)) as executor:
                 future_to_tf = {executor.submit(trigger_n8n_update, tf): tf for tf in timeframes}
@@ -104,7 +102,6 @@ def start_scheduler(app):
                     if future.result():
                         successful_updates += 1
 
-            # Wait longer for n8n to complete processing and update database
             if successful_updates > 0:
                 wait_time = 45  # n8n usually 25-40s; wait a bit more
                 logging.info(
@@ -113,27 +110,26 @@ def start_scheduler(app):
                 )
                 time.sleep(wait_time)
             else:
-                logging.error("[APScheduler] No successful n8n updates, skipping regime analysis")
+                logging.error("[APScheduler] No successful n8n chart updates; skipping state analysis trigger")
                 return
 
-            # NOW fetch the regime analysis (which will use the fresh chart data)
-            market_analysis = fetch_multi_timeframe_analysis(
-                n8n_base_url,
-                timeframes=timeframes,
-                cache_minutes=0,      # Don't use cache
-                force_refresh=True    # Force fresh fetch
-            )
-
-            # Log regime update
-            regime = market_analysis.get('regime_analysis', {})
-            logging.info(
-                f"[APScheduler] Regime updated: {regime.get('primary_regime', 'unknown')} "
-                f"(confidence: {regime.get('confidence', 0)}%)"
-            )
-
-            # Check for regime changes and alerts
-            if regime.get('primary_regime') == 'choppy' and regime.get('confidence', 0) > 80:
-                logging.warning("⚠️ CHOPPY MARKET ALERT: High confidence choppy conditions detected!")
+            # ===== TRIGGER STATE ANALYSIS =====
+            logging.info("[APScheduler] Triggering n8n state analysis webhook...")
+            try:
+                state_url = f"{n8n_base_url}/webhook/state-analysis"
+                response = requests.post(state_url, json={}, timeout=60)
+                if response.status_code == 200:
+                    logging.info("[APScheduler] ✅ State analysis triggered successfully")
+                else:
+                    logging.warning(
+                        f"[APScheduler] ⚠️ State analysis webhook returned {response.status_code}: {response.text}"
+                    )
+            except requests.Timeout:
+                logging.error("[APScheduler] ⏱️ State analysis webhook timed out after 60s")
+                return
+            except Exception as e:
+                logging.error(f"[APScheduler] Failed to trigger state analysis: {e}")
+                return
 
         except Exception as e:
             logging.error(f"[APScheduler] Chart/regime fetch failed: {e}", exc_info=True)

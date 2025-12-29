@@ -8,23 +8,22 @@ Handles webhooks, AI decisions, trade execution, and scheduled processing.
 
 from datetime import time as dtime, timedelta
 from typing import Optional
-from market_regime import MarketRegime
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from logging_config import setup_logging
 from config import load_config
 from api import (
-    flatten_contract, get_contract, ai_trade_decision, cancel_all_stops, 
+    flatten_contract, get_contract, cancel_all_stops,
     search_pos, get_supabase_client, search_trades, search_open,
     get_market_conditions_summary, ai_trade_decision_with_regime,
     # Added for /contracts endpoints
-    search_contracts, get_active_contract_for_symbol_cached, 
+    search_contracts, get_active_contract_for_symbol_cached,
     get_active_contract_for_symbol,  # used in JSON response
     CONTRACT_CACHE_DURATION,
     # NEW: balances via ProjectX
     search_accounts,  # <—— uses /api/Account/search
 )
-from strategies import run_bracket, run_brackmod, run_pivot, run_simple
+from strategies import run_simple
 from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token
 from signalr_listener import launch_signalr_listener
@@ -739,7 +738,8 @@ def flatten_account_positions(acct_id: int, primary_cid: Optional[str], symbol: 
 
 def handle_webhook_logic(data):
     try:
-        strat = data.get("strategy", "bracket").lower()
+        incoming_strategy = (data.get("strategy") or "simple").lower()
+        strat = "simple"
         acct  = (data.get("account") or DEFAULT_ACCOUNT).lower()
         sig   = data.get("signal", "").upper()
         sym   = data.get("symbol", config['DEFAULT_SYMBOL'])  # Use default symbol if not provided
@@ -753,9 +753,10 @@ def handle_webhook_logic(data):
             logging.error(f"Unknown account '{acct}'")
             return
 
-        if not strat:
-            logging.info(f"No strategy provided for account {acct}; skipping trade execution")
-            return
+        if incoming_strategy != strat:
+            logging.info(
+                f"Ignoring strategy '{incoming_strategy}' from payload; using simple execution (brackets handled server side)."
+            )
 
         if not sig:
             logging.info(f"No signal provided for account {acct}; skipping trade execution")
@@ -795,7 +796,12 @@ def handle_webhook_logic(data):
             logging.info(f"Market regime: {regime} (confidence: {regime_confidence}%)")
 
             # Merge / normalize
-            strat = (ai_decision.get("strategy", strat) or "bracket").lower()
+            ai_strategy = (ai_decision.get("strategy") or "simple").lower()
+            if ai_strategy != "simple":
+                logging.info(
+                    f"AI suggested strategy '{ai_strategy}', but client enforces simple execution (server-side brackets)."
+                )
+            strat = "simple"
             sig   = (ai_decision.get("signal", sig)   or "HOLD").upper()
             sym   = ai_decision.get("symbol", sym)
             size  = ai_decision.get("size", size)
@@ -867,19 +873,10 @@ def handle_webhook_logic(data):
 
         # --- Strategy Dispatch for BUY/SELL only ---
         logging.info(
-            f"Executing {strat} strategy: {sig} {size} {sym} in {regime} regime (pos={total_size})"
+            f"Executing simple strategy: {sig} {size} {sym} (pos={total_size})"
         )
 
-        if strat == "bracket":
-            run_bracket(acct_id, sym, sig, size, alert, ai_decision_id)
-        elif strat == "brackmod":
-            run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id)
-        elif strat == "simple":
-            run_simple(acct_id, sym, sig, size, alert, ai_decision_id) 
-        elif strat == "pivot":
-            run_pivot(acct_id, sym, sig, size, alert, ai_decision_id)        
-        else:
-            logging.error(f"Unknown strategy '{strat}'")
+        run_simple(acct_id, sym, sig, size, alert, ai_decision_id)
 
     except Exception as e:
         import traceback
