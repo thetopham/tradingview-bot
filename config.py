@@ -42,18 +42,41 @@ def load_config():
     }
     if not config['ACCOUNTS']:
         raise RuntimeError("No accounts loaded from .env. Add ACCOUNT_<NAME>=<ID>.")
+
+    # Optional allowlist to keep the bot focused on a single account (e.g., beta)
+    allowlist_raw = os.getenv("ACTIVE_ACCOUNTS")
+    if allowlist_raw:
+        allowed = {
+            name.strip().lower()
+            for name in allowlist_raw.split(",")
+            if name.strip()
+        }
+        config['ACCOUNTS'] = {
+            name: acct_id
+            for name, acct_id in config['ACCOUNTS'].items()
+            if name in allowed
+        }
+        if not config['ACCOUNTS']:
+            raise RuntimeError(
+                "ACTIVE_ACCOUNTS filtered out all accounts. Check your account names."
+            )
+
     config['DEFAULT_ACCOUNT'] = next(iter(config['ACCOUNTS']))
 
     # NEW: per-account AI endpoints (N8N_AI_URL_ALPHA=..., etc.)
     ai_eps = {
-       # 'alpha':   os.getenv('N8N_AI_URL_ALPHA'),
+        'alpha':   os.getenv('N8N_AI_URL_ALPHA'),
         'beta':    os.getenv('N8N_AI_URL_BETA'),
-      #  'gamma':   os.getenv('N8N_AI_URL_GAMMA'),
-      #  'delta':   os.getenv('N8N_AI_URL_DELTA'),
-      #  'epsilon': os.getenv('N8N_AI_URL_EPSILON'),
+        'gamma':   os.getenv('N8N_AI_URL_GAMMA'),
+        'delta':   os.getenv('N8N_AI_URL_DELTA'),
+        'epsilon': os.getenv('N8N_AI_URL_EPSILON'),
     }
     # prune Nones so you can mix legacy + new during transition
-    config['AI_ENDPOINTS'] = {k: v for k, v in ai_eps.items() if v}
+    config['AI_ENDPOINTS'] = {
+        k: v
+        for k, v in ai_eps.items()
+        if v and k in config['ACCOUNTS']
+    }
 
     # Fallback: if no per-account map provided, fall back to legacy var(s)
     if not config['AI_ENDPOINTS']:
@@ -68,6 +91,14 @@ def load_config():
             config['AI_ENDPOINTS'] = legacy_map
         else:
             raise RuntimeError("No AI endpoints configured. Set N8N_AI_URL_<ACCOUNT> or N8N_AI_URL.")
+
+    # Final guard: keep AI endpoints aligned with the active account list
+    config['AI_ENDPOINTS'] = {
+        name: url for name, url in config['AI_ENDPOINTS'].items()
+        if name in config['ACCOUNTS']
+    }
+    if not config['AI_ENDPOINTS']:
+        raise RuntimeError("No AI endpoints available after applying ACTIVE_ACCOUNTS filter.")
 
     # Trading day windows / tz
     config['OVERRIDE_CONTRACT_ID'] = os.getenv("OVERRIDE_CONTRACT_ID", None)
