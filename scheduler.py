@@ -77,6 +77,13 @@ def start_scheduler(app):
 
             regime = summary.get('regime', 'sideways')
             signal = summary.get('market_state', {}).get('signal', 'HOLD')
+            conf_obj = summary.get('confluence', {})
+            logging.info(
+                "Confluence: bias=%s score=%.2f gates=%s",
+                conf_obj.get('bias', 'HOLD'),
+                float(conf_obj.get('score', 0.0)),
+                conf_obj.get('gates', {}),
+            )
 
             if regime == 'sideways':
                 logging.warning(

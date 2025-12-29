@@ -7,12 +7,14 @@ import pytz
 import threading
 import hashlib
 import random  # NEW: for jitter in backoff
+import pandas as pd
 
 from datetime import datetime, timezone, timedelta
 from auth import ensure_token, get_token
 from config import load_config
 from dateutil import parser
 from market_state import RollingFiveMinuteEngine, compute_market_state
+from confluence import compute_confluence
 from supabase import create_client, Client
 from typing import Dict, List, Optional, Tuple
 from threading import RLock
@@ -70,11 +72,25 @@ def _timeframe_filters(minutes: int) -> List:
     return [minutes, str(minutes), f"{minutes}m"]
 
 
+INDICATOR_FIELDS = [
+    "ema21",
+    "vwap",
+    "atr",
+    "bb_upper",
+    "bb_lower",
+    "bb_middle",
+    "rsi",
+    "macd",
+    "macd_signal",
+    "macd_hist",
+]
+
+
 def _aggregate_1m_bars_to_5m(bars: List[Dict]) -> List[Dict]:
     """Aggregate 1m bars into 5m bars, ordered from oldest to newest."""
 
     def _merge_bucket(bucket_start, bucket_bars):
-        return {
+        merged = {
             'o': float(bucket_bars[0]['o']),
             'h': max(float(b['h']) for b in bucket_bars),
             'l': min(float(b['l']) for b in bucket_bars),
@@ -82,6 +98,16 @@ def _aggregate_1m_bars_to_5m(bars: List[Dict]) -> List[Dict]:
             'v': sum(float(b.get('v', 0)) for b in bucket_bars),
             'ts': bucket_start.isoformat()
         }
+
+        for field in INDICATOR_FIELDS:
+            value = next((b.get(field) for b in reversed(bucket_bars) if field in b), None)
+            if value is not None:
+                try:
+                    merged[field] = float(value)
+                except Exception:
+                    merged[field] = value
+
+        return merged
 
     aggregated: List[Dict] = []
     current_bucket_start = None
@@ -123,7 +149,7 @@ def _fetch_5m_bars_from_1m(supabase: Client, symbol: str, bars_needed: int) -> L
     result = (
         supabase
         .table('tv_datafeed')
-        .select('o, h, l, c, v, ts')
+        .select('o, h, l, c, v, ts, ' + ', '.join(INDICATOR_FIELDS))
         .eq('symbol', symbol)
         .in_('timeframe', _timeframe_filters(1))
         .order('ts', desc=True)
@@ -163,6 +189,29 @@ def _build_market_summary(market_state: Dict) -> Dict:
         'volatility': 'unknown'
     }
     summary['market_state'] = market_state
+    return summary
+
+
+def _apply_confluence(summary: Dict, bars: List[Dict], market_state: Dict) -> Dict:
+    try:
+        ohlc5m_df = pd.DataFrame(bars)
+        confluence = compute_confluence(ohlc5m_df, base_signal=market_state.get('signal'))
+        summary.update(confluence)
+
+        confluence_tags = []
+        conf_obj = summary.get('confluence', {})
+        for comp in conf_obj.get('components', []):
+            confluence_tags.extend([t for t in comp.get('tags', []) if t])
+        for gate_name, gate_val in (conf_obj.get('gates') or {}).items():
+            confluence_tags.append(gate_name if gate_val else f"{gate_name}_blocked")
+        if conf_obj.get('trade_recommended'):
+            confluence_tags.append(f"bias_{conf_obj.get('bias', 'HOLD').lower()}")
+
+        if confluence_tags:
+            existing = summary.get('key_factors', [])
+            summary['key_factors'] = (existing + confluence_tags)[:6]
+    except Exception as exc:
+        logging.error("Failed to compute confluence: %s", exc)
     return summary
 
 def get_active_contract_for_symbol_cached(symbol: str, live: bool = False) -> Optional[str]:
@@ -763,6 +812,23 @@ def get_market_conditions_summary(
         market_state = compute_market_state(bars)
         summary = _build_market_summary(market_state)
 
+        ohlc5m_df = pd.DataFrame(bars)
+        confluence = compute_confluence(ohlc5m_df, base_signal=market_state.get('signal'))
+        summary.update(confluence)
+
+        confluence_tags = []
+        conf_obj = summary.get('confluence', {})
+        for comp in conf_obj.get('components', []):
+            confluence_tags.extend([t for t in comp.get('tags', []) if t])
+        for gate_name, gate_val in (conf_obj.get('gates') or {}).items():
+            confluence_tags.append(gate_name if gate_val else f"{gate_name}_blocked")
+        if conf_obj.get('trade_recommended'):
+            confluence_tags.append(f"bias_{conf_obj.get('bias', 'HOLD').lower()}")
+
+        if confluence_tags:
+            existing = summary.get('key_factors', [])
+            summary['key_factors'] = (existing + confluence_tags)[:6]
+
         ttl = random.uniform(240, 290)
         _cache_set(cache_key, summary, ttl)
         _cache_set(provisional_key, summary, ttl)
@@ -828,11 +894,13 @@ def update_market_state_incremental(symbol: str = "MES", bars_needed: int = 90) 
 
         provisional_state = compute_market_state(engine.get_bars(include_partial=True))
         provisional_summary = _build_market_summary(provisional_state)
+        provisional_summary = _apply_confluence(provisional_summary, engine.get_bars(include_partial=True), provisional_state)
         _cache_set(provisional_key, provisional_summary, ttl=180)
 
         if completed_bar:
             final_state = compute_market_state(engine.get_bars(include_partial=False))
             final_summary = _build_market_summary(final_state)
+            final_summary = _apply_confluence(final_summary, engine.get_bars(include_partial=False), final_state)
             ttl = random.uniform(240, 290)
             _cache_set(cache_key, final_summary, ttl)
             _cache_set(provisional_key, final_summary, ttl)
