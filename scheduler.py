@@ -197,7 +197,7 @@ def start_scheduler(app):
             }
             decision = {}
             try:
-                resp = requests.post(overseer_url, json=payload, timeout=10)
+                resp = requests.post(overseer_url, json=payload, timeout=120)
                 resp.raise_for_status()
                 try:
                     decision = resp.json()
