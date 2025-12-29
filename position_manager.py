@@ -4,6 +4,7 @@ Simplified position context provider for AI trading decisions
 """
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
@@ -21,6 +22,7 @@ class PositionManager:
     def __init__(self, accounts: Dict[str, int]):
         self.accounts = accounts
         self.logger = logging.getLogger(__name__)
+        self._account_state_cache: Dict[int, Tuple[float, Dict]] = {}
         
         # Risk parameters (for context only)
         self.max_daily_loss = config.get('MAX_DAILY_LOSS', -500.0)
@@ -32,6 +34,93 @@ class PositionManager:
         else:
             self.max_consecutive_losses = raw_max_consecutive_losses
         self.consecutive_loss_guard_enabled = self.max_consecutive_losses is not None
+
+    def get_position_state_light(
+        self, acct_id: int, cid: str, *, current_price: Optional[float] = None
+    ) -> Dict:
+        """Lightweight position snapshot without open order/trade lookups."""
+
+        positions = [p for p in search_pos(acct_id) if p.get("contractId") == cid]
+
+        if not positions:
+            return {
+                'has_position': False,
+                'size': 0,
+                'side': None,
+                'entry_price': None,
+                'current_price': None,
+                'current_pnl': 0,
+                'unrealized_pnl': 0,
+                'duration_minutes': 0,
+                'position_type': None,
+                'creationTimestamp': None,
+            }
+
+        total_size = sum(p.get("size", 0) for p in positions)
+        avg_price = (
+            sum(p.get("averagePrice", 0) * p.get("size", 0) for p in positions) / total_size
+            if total_size > 0
+            else 0
+        )
+
+        position_type = positions[0].get("type") if positions else None
+        side = "LONG" if position_type == 1 else "SHORT" if position_type == 2 else None
+
+        creation_time = positions[0].get("creationTimestamp")
+        duration = 0
+        if creation_time:
+            try:
+                from dateutil import parser
+
+                entry_time = parser.parse(creation_time)
+                if entry_time.tzinfo is None:
+                    entry_time = entry_time.replace(tzinfo=timezone.utc)
+                duration = (datetime.now(timezone.utc) - entry_time).total_seconds() / 60
+            except Exception:
+                duration = 0
+
+        try:
+            from api import get_current_market_price
+
+            if current_price is None:
+                current_price, price_source = get_current_market_price(symbol="MES", max_age_seconds=600)
+            else:
+                price_source = "supplied"
+            contract_multiplier = 5
+            if current_price is None:
+                unrealized_pnl = 0
+            elif side == "LONG":
+                unrealized_pnl = (current_price - avg_price) * total_size * contract_multiplier
+            elif side == "SHORT":
+                unrealized_pnl = (avg_price - current_price) * total_size * contract_multiplier
+            else:
+                unrealized_pnl = 0
+            self.logger.debug(
+                "Light P&L calc: side=%s size=%s avg=%.4f px=%s src=%s pnl=%.2f",
+                side,
+                total_size,
+                avg_price,
+                current_price,
+                price_source,
+                unrealized_pnl,
+            )
+        except Exception as exc:
+            self.logger.debug("Light position P&L fallback: %s", exc)
+            current_price = None
+            unrealized_pnl = 0
+
+        return {
+            'has_position': True,
+            'size': total_size,
+            'side': side,
+            'entry_price': avg_price,
+            'current_price': current_price,
+            'current_pnl': unrealized_pnl,
+            'unrealized_pnl': unrealized_pnl,
+            'duration_minutes': duration,
+            'position_type': position_type,
+            'creationTimestamp': creation_time,
+        }
     
     def get_position_state(self, acct_id: int, cid: str) -> Dict:
         """
@@ -202,6 +291,19 @@ class PositionManager:
             'can_trade': self._can_trade(daily_pnl, consecutive_losses),
             'risk_level': self._assess_account_risk(daily_pnl, consecutive_losses, open_position_count)
         }
+
+    def get_account_state_cached(self, acct_id: int, max_age_seconds: int = 300) -> Dict:
+        """Cached account state to avoid frequent trade scans."""
+        now = time.time()
+        cached = self._account_state_cache.get(acct_id)
+        if cached:
+            ts, state = cached
+            if now - ts <= max_age_seconds:
+                return state
+
+        state = self.get_account_state(acct_id)
+        self._account_state_cache[acct_id] = (now, state)
+        return state
     
     def _can_trade(self, daily_pnl: float, consecutive_losses: int) -> bool:
         """Determine if account is allowed to trade based on risk limits"""
