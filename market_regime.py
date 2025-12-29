@@ -162,8 +162,20 @@ class MarketRegime:
             - risk_level: Risk assessment (low/medium/high)
         """
         try:
+            if not timeframe_data:
+                return self._get_fallback_regime("No timeframe data provided")
+
+            # Restrict analysis to configured timeframes (5m only)
+            filtered_data = {
+                tf: data for tf, data in timeframe_data.items() if tf in self.timeframes
+            }
+
+            if not filtered_data:
+                self.logger.warning("No 5m timeframe data supplied; falling back to safe regime")
+                return self._get_fallback_regime("Missing required 5m timeframe data")
+
             # Check cache first
-            cache_key = self._generate_cache_key(timeframe_data)
+            cache_key = self._generate_cache_key(filtered_data)
             cached_result = self._get_cached_result(cache_key)
             
             if cached_result:
@@ -171,7 +183,7 @@ class MarketRegime:
                 return cached_result
             
             # Extract key metrics from each timeframe
-            metrics = self._extract_metrics(timeframe_data)
+            metrics = self._extract_metrics(filtered_data)
             
             # If no valid metrics, return safe defaults
             if not metrics:

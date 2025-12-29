@@ -22,22 +22,28 @@ class OHLCRegimeDetector:
             Dict with regime analysis
         """
         try:
-            self.logger.info(f"Starting OHLC regime analysis with timeframes: {list(ohlc_data.keys())}")
-            
+            five_minute_data = ohlc_data.get('5m')
+
+            if not five_minute_data:
+                self.logger.warning("5m OHLC data missing; unable to analyze market regime")
+                return self._get_default_regime()
+
+            self.logger.info("Starting OHLC regime analysis with 5m timeframe only")
+
             timeframe_analysis = {}
-            
-            # Analyze each timeframe
-            for tf, data in ohlc_data.items():
-                if data and isinstance(data, dict) and 'close' in data:
-                    try:
-                        analysis = self._analyze_single_timeframe(data, tf)
-                        timeframe_analysis[tf] = analysis
-                        self.logger.info(f"✅ {tf}: {analysis.get('signal', 'HOLD')} signal, {analysis.get('trend', 'unknown')} trend")
-                    except Exception as e:
-                        self.logger.error(f"Error analyzing {tf}: {e}")
-                        continue
-                else:
-                    self.logger.warning(f"Invalid data for {tf}: {type(data)}")
+
+            # Analyze only the 5m timeframe
+            if isinstance(five_minute_data, dict) and 'close' in five_minute_data:
+                try:
+                    analysis = self._analyze_single_timeframe(five_minute_data, '5m')
+                    timeframe_analysis['5m'] = analysis
+                    self.logger.info(
+                        f"✅ 5m: {analysis.get('signal', 'HOLD')} signal, {analysis.get('trend', 'unknown')} trend"
+                    )
+                except Exception as e:
+                    self.logger.error(f"Error analyzing 5m: {e}")
+            else:
+                self.logger.warning(f"Invalid data for 5m: {type(five_minute_data)}")
             
             if not timeframe_analysis:
                 self.logger.warning("No timeframes successfully analyzed")
@@ -415,125 +421,88 @@ class OHLCRegimeDetector:
             return {'signal': 'HOLD', 'confidence': 50}
     
     def _determine_overall_regime(self, timeframe_analysis: Dict) -> Dict:
-        """Determine overall market regime from timeframe analysis"""
-    
+        """Determine overall market regime from a single 5m timeframe"""
+
         if not timeframe_analysis:
             return self._get_default_regime()
-    
+
         try:
-            # Extract signals and trends
-            signals = []
-            trends = []
-            confidences = []
-            momentum_scores = []
-            volatility_levels = []
-        
-            for tf, tf_data in timeframe_analysis.items():
-                signals.append(tf_data.get('signal', 'HOLD'))
-                trends.append(tf_data.get('trend', 'unknown'))
-                confidences.append(tf_data.get('signal_confidence', 'low'))
-                momentum_scores.append(tf_data.get('momentum_score', 50))
-                volatility_levels.append(tf_data.get('volatility', 'medium'))
-        
-            # Count occurrences
-            buy_count = signals.count('BUY')
-            sell_count = signals.count('SELL')
-            up_count = trends.count('up')
-            down_count = trends.count('down')
-            sideways_count = trends.count('sideways')
-        
-            # Determine primary regime
-            total_tfs = len(signals)
-        
-            if buy_count >= total_tfs * 0.6 or up_count >= total_tfs * 0.6:
+            primary_data = timeframe_analysis.get('5m') or next(iter(timeframe_analysis.values()))
+
+            signal = primary_data.get('signal', 'HOLD')
+            trend = primary_data.get('trend', 'unknown')
+            momentum_score = primary_data.get('momentum_score', 50)
+            volatility = primary_data.get('volatility', 'medium')
+            signal_confidence = primary_data.get('signal_confidence', 'low')
+
+            # Determine regime from the single timeframe
+            if signal == 'BUY' or trend == 'up':
                 primary_regime = 'trending_up'
-                confidence = min(85, 60 + (buy_count + up_count) * 8)
-                factors = [f"{buy_count}/{total_tfs} BUY signals", f"{up_count}/{total_tfs} uptrends"]
                 primary_trend = 'up'
-            
-            elif sell_count >= total_tfs * 0.6 or down_count >= total_tfs * 0.6:
+                factors = ['5m BUY bias', 'Uptrend on 5m']
+            elif signal == 'SELL' or trend == 'down':
                 primary_regime = 'trending_down'
-                confidence = min(85, 60 + (sell_count + down_count) * 8)
-                factors = [f"{sell_count}/{total_tfs} SELL signals", f"{down_count}/{total_tfs} downtrends"]
                 primary_trend = 'down'
-            
-            elif sideways_count >= total_tfs * 0.6:
+                factors = ['5m SELL bias', 'Downtrend on 5m']
+            elif trend == 'sideways':
                 primary_regime = 'ranging'
-                confidence = 70
-                factors = [f"{sideways_count}/{total_tfs} sideways trends", "Range-bound market"]
                 primary_trend = 'sideways'
-            
+                factors = ['Sideways 5m structure']
             else:
                 primary_regime = 'choppy'
-                confidence = 55
-                factors = ["Mixed signals across timeframes", "No clear directional bias"]
                 primary_trend = 'sideways'
-        
-            # Calculate alignment score
-            if primary_trend in ['up', 'down']:
-                aligned_count = up_count if primary_trend == 'up' else down_count
-                alignment_score = (aligned_count / total_tfs * 100) if total_tfs > 0 else 0
-            else:
-                alignment_score = (sideways_count / total_tfs * 100) if total_tfs > 0 else 0
-        
-            # Determine volatility regime
-            high_vol = volatility_levels.count('high')
-            low_vol = volatility_levels.count('low')
-            if high_vol > total_tfs / 2:
-                volatility_regime = 'high'
-            elif low_vol > total_tfs / 2:
-                volatility_regime = 'low'
-            else:
-                volatility_regime = 'medium'
-        
-            # Calculate momentum state
-            avg_momentum = sum(momentum_scores) / len(momentum_scores) if momentum_scores else 50
+                factors = ['Indecisive 5m action']
+
+            # Confidence tuned for single timeframe analysis
+            confidence_map = {'high': 85, 'medium': 70, 'low': 55}
+            confidence = confidence_map.get(signal_confidence, 50)
+            confidence += (momentum_score - 50) / 5
+            confidence += 5 if volatility == 'low' else -5 if volatility == 'high' else 0
+            confidence = int(max(30, min(95, round(confidence))))
+
+            alignment_score = 90 if primary_trend in ['up', 'down'] else 70 if primary_trend == 'sideways' else 40
+
+            volatility_regime = volatility if volatility in ['low', 'medium', 'high'] else 'medium'
+
+            avg_momentum = momentum_score
             if avg_momentum > 65:
                 momentum_state = 'strong'
             elif avg_momentum < 35:
                 momentum_state = 'weak'
             else:
                 momentum_state = 'neutral'
-        
-            # Build trend details dict
-            trends_by_timeframe = {}
-            for tf, tf_data in timeframe_analysis.items():
-                trends_by_timeframe[tf] = tf_data.get('trend', 'unknown')
-        
-            # Adjust confidence based on signal quality
-            high_conf_signals = sum(1 for c in confidences if c == 'high')
-            if high_conf_signals >= total_tfs * 0.5:
-                confidence += 5
-        
-            confidence = max(30, min(95, confidence))
-        
-            # Risk level based on confidence and volatility
-            if confidence > 80 and volatility_regime != 'high':
-                risk_level = 'low'
-            elif confidence > 65 or volatility_regime == 'low':
-                risk_level = 'medium'
-            else:
-                risk_level = 'high'
-        
+
+            trends_by_timeframe = {'5m': trend}
+
+            risk_level = (
+                'low' if confidence > 80 and volatility_regime != 'high' else
+                'medium' if confidence > 65 or volatility_regime == 'low' else
+                'high'
+            )
+
+            buy_count = 1 if signal == 'BUY' else 0
+            sell_count = 1 if signal == 'SELL' else 0
+            sideways_count = 1 if trend == 'sideways' else 0
+
             return {
                 'primary_regime': primary_regime,
                 'confidence': confidence,
                 'supporting_factors': factors,
                 'trade_recommendation': confidence > 65 and primary_regime != 'choppy',
                 'risk_level': risk_level,
-            
+
                 # CRITICAL: Add these nested dictionaries that the system expects
                 'trend_details': {
                     'primary_trend': primary_trend,
                     'alignment_score': alignment_score,
                     'is_aligned': alignment_score > 70,
-                    'has_conflict': (up_count > 0 and down_count > 0) or buy_count > 0 and sell_count > 0,
+                    'has_conflict': False,
                     'trends_by_timeframe': trends_by_timeframe,
                     'higher_tf_agreement': False,
                     'trend_strength': 'strong' if alignment_score > 80 else 'moderate' if alignment_score > 60 else 'weak',
                     'fast_vs_slow': 'aligned' if alignment_score > 70 else 'divergent'
                 },
-            
+
                 'volatility_details': {
                     'volatility_regime': volatility_regime,
                     'range_percent': 0.3 if volatility_regime == 'medium' else 0.5 if volatility_regime == 'high' else 0.2,
@@ -541,17 +510,17 @@ class OHLCRegimeDetector:
                     'is_contracting': volatility_regime == 'low',
                     'intraday_atr': 10  # Could calculate from actual ATR data
                 },
-            
+
                 'momentum_details': {
                     'average_momentum_score': avg_momentum,
                     'momentum_state': momentum_state,
                     'bullish_indicators': buy_count,
                     'bearish_indicators': sell_count,
-                    'indicator_bias': 'bullish' if buy_count > sell_count + 1 else 'bearish' if sell_count > buy_count + 1 else 'neutral',
+                    'indicator_bias': 'bullish' if buy_count > sell_count else 'bearish' if sell_count > buy_count else 'neutral',
                     'divergence_present': False,  # Could be enhanced
                     'momentum_quality': 'good' if momentum_state == 'strong' and alignment_score > 70 else 'poor'
                 },
-            
+
                 # Include session quality and scalping bias (expected by MarketRegime)
                 'scalping_bias': {
                     'bias': primary_trend if primary_trend in ['up', 'down'] else 'neutral',
@@ -559,14 +528,14 @@ class OHLCRegimeDetector:
                     'entry_allowed': confidence > 60 and primary_regime != 'choppy'
                 },
                 'session_quality': 'normal',  # Could be enhanced based on time
-            
+
                 # Keep the original data for reference
                 'timeframe_alignment': {
-                    'signals': {'BUY': buy_count, 'SELL': sell_count, 'HOLD': signals.count('HOLD')},
-                    'trends': {'up': up_count, 'down': down_count, 'sideways': sideways_count}
+                    'signals': {'BUY': buy_count, 'SELL': sell_count, 'HOLD': 1 - (buy_count + sell_count)},
+                    'trends': {'up': 1 if trend == 'up' else 0, 'down': 1 if trend == 'down' else 0, 'sideways': sideways_count}
                 }
             }
-        
+
         except Exception as e:
             self.logger.error(f"Error determining overall regime: {e}")
             return self._get_default_regime()
