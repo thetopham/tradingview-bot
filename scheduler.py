@@ -4,8 +4,10 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
 import logging
+import requests
 import re
 import time
+import concurrent.futures
 from config import load_config
 from position_manager import PositionManager
 from api import (
@@ -35,7 +37,129 @@ def start_scheduler(app):
     position_manager = PositionManager(ACCOUNTS)
 
     # ──────────────────────────────────────────────────────────────────────────────
-    # Market analysis job
+    # 5-minute cron job: trigger 5m chart + state analysis in n8n
+    # ──────────────────────────────────────────────────────────────────────────────
+    def cron_job():
+        """Runs after each 5-min candle close to refresh charts and state analysis"""
+
+        # Check if we're in the get-flat window
+        from auth import in_get_flat
+        now = datetime.now(CT)
+
+        if in_get_flat(now):
+            logging.info("[APScheduler] SKIPPING chart/regime fetch - in get-flat window")
+            return
+
+        logging.info("[APScheduler] Starting 5m refresh: charts + state analysis")
+
+        try:
+            # Clear any existing cache first
+            supabase = get_supabase_client()
+            cutoff = (datetime.utcnow() - timedelta(seconds=30)).isoformat()
+            supabase.table('market_regime_cache').delete().lt('timestamp', cutoff).execute()
+
+            # Get per-account AI URLs (same logic as tradingview_projectx_bot.py)
+            ai_endpoints = config.get("AI_ENDPOINTS", {})
+
+            # Use the first defined base URL as the shared chart/regime updater
+            if ai_endpoints:
+                first_url = next(iter(ai_endpoints.values()))
+                n8n_base_url = (first_url or "").split("/webhook/")[0].rstrip("/")
+            else:
+                n8n_base_url = ""
+                
+            if not n8n_base_url:
+                logging.error("[APScheduler] No N8N_AI_URL configured in AI_ENDPOINTS; skipping chart/regime fetch")
+                return
+            
+
+            # ===== TRIGGER N8N 5M CHART UPDATE =====
+            timeframes = ['5m']
+            logging.info("[APScheduler] Triggering n8n 5m chart analysis update...")
+
+            def trigger_n8n_update(tf):
+                """Trigger n8n with 60 second timeout"""
+                try:
+                    webhook_url = f"{n8n_base_url}/webhook/{tf}"
+                    response = requests.post(webhook_url, json={}, timeout=60)
+                    if response.status_code == 200:
+                        logging.info(f"[APScheduler] ✅ Triggered {tf} chart update successfully")
+                        return True
+                    else:
+                        logging.warning(f"[APScheduler] ❌ {tf} update returned: {response.status_code}")
+                        return False
+                except requests.Timeout:
+                    logging.error(f"[APScheduler] ⏱️ {tf} chart update timed out after 60s")
+                    return False
+                except Exception as e:
+                    logging.error(f"[APScheduler] Failed to trigger {tf} chart update: {e}")
+                    return False
+
+            successful_updates = 0
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(timeframes)) as executor:
+                future_to_tf = {executor.submit(trigger_n8n_update, tf): tf for tf in timeframes}
+                for future in concurrent.futures.as_completed(future_to_tf):
+                    if future.result():
+                        successful_updates += 1
+
+            if successful_updates > 0:
+                wait_time = 45  # n8n usually 25-40s; wait a bit more
+                logging.info(
+                    f"[APScheduler] {successful_updates}/{len(timeframes)} updates triggered. "
+                    f"Waiting {wait_time}s for n8n to complete processing..."
+                )
+                time.sleep(wait_time)
+            else:
+                logging.error("[APScheduler] No successful n8n chart updates; skipping state analysis trigger")
+                return
+
+            # ===== TRIGGER STATE ANALYSIS =====
+            logging.info("[APScheduler] Triggering n8n state analysis webhook...")
+            try:
+                state_url = f"{n8n_base_url}/webhook/state-analysis"
+                response = requests.post(state_url, json={}, timeout=60)
+                if response.status_code == 200:
+                    logging.info("[APScheduler] ✅ State analysis triggered successfully")
+                else:
+                    logging.warning(
+                        f"[APScheduler] ⚠️ State analysis webhook returned {response.status_code}: {response.text}"
+                    )
+            except requests.Timeout:
+                logging.error("[APScheduler] ⏱️ State analysis webhook timed out after 60s")
+                return
+            except Exception as e:
+                logging.error(f"[APScheduler] Failed to trigger state analysis: {e}")
+                return
+
+        except Exception as e:
+            logging.error(f"[APScheduler] Chart/regime fetch failed: {e}", exc_info=True)
+
+        # Then run the normal webhook (without any trade signals) FOR ALL ACCOUNTS
+        # Stagger 0..N-1 seconds to reduce any downstream race conditions
+        non_practice_accounts = [
+            name for name in ACCOUNTS.keys() if name.lower() != "practice"
+        ]
+
+        for idx, account_name in enumerate(non_practice_accounts):
+            data = {
+                "secret": WEBHOOK_SECRET,
+                "strategy": "brackmod",
+                "account": account_name,   # loop all funded accounts (skip practice)
+                "signal": "hold",
+                "symbol": "MES",
+                "size": 3,
+                "alert": "APScheduler 5m",
+            }
+            try:
+                if idx:
+                    time.sleep(1)  # tiny stagger per account
+                response = requests.post(f"http://localhost:{TV_PORT}/webhook", json=data, timeout=15)
+                logging.info(f"[APScheduler] Webhook -> {account_name}: {response.status_code}")
+            except Exception as e:
+                logging.error(f"[APScheduler] Webhook failed for {account_name}: {e}")
+
+    # ──────────────────────────────────────────────────────────────────────────────
+    # Market analysis job - runs every 15 minutes
     # ──────────────────────────────────────────────────────────────────────────────
     def market_analysis_job():
         """Log market conditions and alerts"""
@@ -48,15 +172,22 @@ def start_scheduler(app):
             from api import get_market_conditions_summary
             summary = get_market_conditions_summary(force_refresh=False)
 
-            trend = summary.get('regime', 'sideways')
-            if trend == 'sideways':
-                logging.warning("⚠️ Sideways market detected - holding fire")
-            elif summary.get('risk_level') == 'high':
-                logging.warning(f"⚠️ Elevated risk conditions: {summary.get('key_factors')}")
+            # Log warnings for dangerous market conditions
+            if summary['regime'] == 'choppy' and summary['confidence'] > 80:
+                logging.warning(f"⚠️ CHOPPY MARKET: Confidence {summary['confidence']}% - Trading not recommended")
 
+            if summary['risk_level'] == 'high':
+                logging.warning(f"⚠️ HIGH RISK CONDITIONS: {summary['key_factors']}")
+
+            if summary['trend_alignment'] < 30:
+                logging.warning(f"⚠️ POOR TREND ALIGNMENT: Only {summary['trend_alignment']}% aligned")
+
+            # Log general market state
             logging.info(
-                f"📊 Market Update: {trend.upper()} (conf: {summary.get('confidence', 0)}%) "
-                f"Signal: {summary.get('signal', 'HOLD')}"
+                f"📊 Market Update: {summary['regime'].upper()} regime "
+                f"(conf: {summary['confidence']}%) | "
+                f"Risk: {summary['risk_level']} | "
+                f"Trade OK: {summary['trade_recommended']}"
             )
 
         except Exception as e:
@@ -159,14 +290,31 @@ def start_scheduler(app):
             logging.info(f"🔔 Pre-{session_name} session analysis starting...")
             summary = get_market_conditions_summary(force_refresh=True)
 
-            if summary.get('regime') == 'sideways':
-                logging.warning(
-                    f"⚠️ {session_name} session: sideways/low conviction. Consider standing down."
-                )
-            else:
-                logging.info(
-                    f"✅ {session_name} session: {summary.get('regime')} with signal {summary.get('signal')}"
-                )
+            session_recommendations = {
+                'LONDON': {
+                    'good_regimes': ['trending_up', 'trending_down'],
+                    'warning': 'High volatility expected',
+                },
+                'NY_MORNING': {
+                    'good_regimes': ['trending_up', 'trending_down', 'breakout'],
+                    'warning': 'Highest volatility - reduce position sizes',
+                },
+                'NY_AFTERNOON': {
+                    'good_regimes': ['trending_up', 'trending_down', 'ranging'],
+                    'warning': 'Watch for trend exhaustion',
+                },
+            }
+
+            if session_name in session_recommendations:
+                rec = session_recommendations[session_name]
+                if summary['regime'] not in rec['good_regimes']:
+                    logging.warning(
+                        f"⚠️ {session_name} session: {summary['regime']} regime may be challenging. {rec['warning']}"
+                    )
+                else:
+                    logging.info(
+                        f"✅ {session_name} session: {summary['regime']} regime looks favorable. {rec['warning']}"
+                    )
 
         except Exception as e:
             logging.error(f"[Pre-session Analysis] Error: {e}")
@@ -342,6 +490,14 @@ def start_scheduler(app):
         metadata_cleanup_job,
         CronTrigger(minute=30, timezone=CT),  # Run at :30 every hour
         id='metadata_cleanup',
+        replace_existing=True,
+    )
+
+    # Chart fetch and regime update - every 5 minutes
+    scheduler.add_job(
+        cron_job,
+        CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=5, timezone=CT),
+        id='5m_job',
         replace_existing=True,
     )
 

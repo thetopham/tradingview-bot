@@ -1679,21 +1679,24 @@
             document.getElementById('confidence-fill').style.width = `${confidence}%`;
             document.getElementById('regime-confidence').textContent = `Confidence: ${confidence}%`;
 
-            const factors = data.key_factors || data.supporting_factors || [];
+            const factors = data.key_factors || [];
             document.getElementById('regime-factors').innerHTML = factors
                 .slice(0, 3)
                 .map(f => `• ${f}`)
                 .join('<br>');
 
-            const slope = data.market_state?.slope_norm ?? data.trend_alignment ?? 0;
-            document.getElementById('trend-alignment').textContent = `${slope.toFixed ? slope.toFixed(3) : slope}`;
-            document.getElementById('volatility').textContent = data.volatility || 'local';
-
+            document.getElementById('trend-alignment').textContent = `${data.trend_alignment || 0}%`;
+            document.getElementById('volatility').textContent = data.volatility || '--';
+            
             const riskLevel = document.getElementById('risk-level');
             riskLevel.textContent = (data.risk_level || '--').toUpperCase();
             riskLevel.className = `stat-value ${data.risk_level === 'high' ? 'negative' : data.risk_level === 'low' ? 'positive' : 'warning'}`;
 
             document.getElementById('session-name').textContent = data.session?.name || '--';
+
+            if (data.regime === 'choppy' && data.confidence > 80) {
+                showAlert('warning', 'Choppy Market', 'High confidence choppy conditions detected');
+            }
         }
 
         function getModelMeta(accountKey, accountData = {}) {
@@ -2097,19 +2100,22 @@
 
         function updateTimeframeAnalysis(data) {
             const container = document.getElementById('timeframe-analysis');
-            const timeframes = ['5m'];
-
+            const timeframes = ['5m', '15m', '30m',];
+            
             let html = '';
-
+            
             timeframes.forEach(tf => {
                 const tfData = data[tf];
                 if (tfData) {
-                    const signal = (tfData.signal || tfData.trend || 'HOLD').toUpperCase();
+                    const signal = tfData.signal || 'HOLD';
                     const trend = tfData.trend_direction || tfData.trend || 'sideways';
-                    const confidence = tfData.signal_confidence || tfData.confidence || 'medium';
-
+                    const momentum = tfData.momentum || 'neutral';
+                    const confidence = tfData.signal_confidence || 'low';
+                    const supports = tfData.support || [];
+                    const resistances = tfData.resistance || [];
+                    
                     html += `
-                        <div class="timeframe-card">
+                        <div class="timeframe-card" onclick="window.open('${tfData.url}', '_blank')">
                             <div class="timeframe-header">
                                 <div class="timeframe-label">${tf}</div>
                                 <span class="signal-badge signal-${signal.toLowerCase()}">${signal}</span>
@@ -2120,23 +2126,36 @@
                                     <span class="tf-metric-value">${trend} ${getTrendArrow(trend)}</span>
                                 </div>
                                 <div class="tf-metric">
+                                    <span class="tf-metric-label">Momentum</span>
+                                    <span class="tf-metric-value ${getMomentumClass(momentum)}">${momentum}</span>
+                                </div>
+                                <div class="tf-metric">
                                     <span class="tf-metric-label">Confidence</span>
                                     <span class="tf-metric-value ${getConfidenceClass(confidence)}">${confidence}</span>
                                 </div>
                                 <div class="tf-metric">
-                                    <span class="tf-metric-label">Slope</span>
-                                    <span class="tf-metric-value">${tfData.slope_norm ? tfData.slope_norm.toFixed(3) : '--'}</span>
-                                </div>
-                                <div class="tf-metric">
-                                    <span class="tf-metric-label">Last Close</span>
+                                    <span class="tf-metric-label">Price</span>
                                     <span class="tf-metric-value">${tfData.current_price ? '$' + tfData.current_price.toFixed(2) : '--'}</span>
                                 </div>
+                                ${supports.length > 0 ? `
+                                    <div class="tf-metric" style="grid-column: 1/-1;">
+                                        <span class="tf-metric-label">Support</span>
+                                        <span class="tf-metric-value positive">${supports.filter(s => s).slice(0, 2).map(s => '$' + s.toFixed(0)).join(', ')}</span>
+                                    </div>
+                                ` : ''}
+                                ${resistances.length > 0 ? `
+                                    <div class="tf-metric" style="grid-column: 1/-1;">
+                                        <span class="tf-metric-label">Resistance</span>
+                                        <span class="tf-metric-value negative">${resistances.filter(r => r).slice(0, 2).map(r => '$' + r.toFixed(0)).join(', ')}</span>
+                                    </div>
+                                ` : ''}
                             </div>
+                            ${tfData.url ? `<img src="${tfData.url}" class="chart-thumbnail" alt="${tf} chart" loading="lazy">` : ''}
                         </div>
                     `;
                 }
             });
-
+            
             container.innerHTML = html || '<div style="text-align: center; padding: 40px;" class="text-dim">No timeframe data available</div>';
         }
 

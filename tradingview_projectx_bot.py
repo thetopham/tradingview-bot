@@ -15,7 +15,7 @@ from config import load_config
 from api import (
     flatten_contract, get_contract, cancel_all_stops,
     search_pos, get_supabase_client, search_trades, search_open,
-    get_market_conditions_summary, ai_trade_decision_compact,
+    get_market_conditions_summary, ai_trade_decision_with_regime,
     # Added for /contracts endpoints
     search_contracts, get_active_contract_for_symbol_cached,
     get_active_contract_for_symbol,  # used in JSON response
@@ -35,7 +35,6 @@ import json
 import time
 import os
 from supabase import create_client
-from position_manager import PositionManager
 
 # --- Logging/Config/Globals ---
 setup_logging()
@@ -784,61 +783,41 @@ def handle_webhook_logic(data):
             get_market_conditions_summary()
             handle_webhook_logic.last_market_log = now
 
-        pm = PositionManager(ACCOUNTS)
-        try:
-            cid = get_contract(sym)
-        except Exception:
-            cid = None
-
-        account_state = pm.get_account_state(acct_id)
-        position_context = pm.get_position_context_for_ai(acct_id, cid) if cid else None
-        if not account_state.get('can_trade', True):
-            logging.warning(f"Risk guard blocked trade for {acct}: account cannot trade")
-            return
-
-        market_summary = get_market_conditions_summary(force_refresh=False)
-        market_state = market_summary.get('market_state', {})
-        regime = market_summary.get('regime', 'sideways')
-        regime_confidence = market_summary.get('confidence', 0)
-
-        base_signal = (market_summary.get('signal') or 'HOLD').upper()
-        if base_signal == 'HOLD':
-            logging.info("Market state sideways/unclear -> HOLD (no order sent)")
-            return
-
-        sig = base_signal
-
         # --- AI Overseer OR Direct Trading ---
         ai_decision = None
         if acct in AI_ENDPOINTS:
             ai_url = AI_ENDPOINTS[acct]
-            ai_decision = ai_trade_decision_compact(
-                acct, strat, sig, sym, size, alert, ai_url,
-                market_state=market_state,
-                position_context=position_context,
-                risk_status=account_state,
+            ai_decision = ai_trade_decision_with_regime(
+                acct, strat, sig, sym, size, alert, ai_url
             )
 
+            regime = ai_decision.get('regime', 'unknown')
+            regime_confidence = ai_decision.get('regime_confidence', 0)
+            logging.info(f"Market regime: {regime} (confidence: {regime_confidence}%)")
+
+            # Merge / normalize
             ai_strategy = (ai_decision.get("strategy") or "simple").lower()
             if ai_strategy != "simple":
                 logging.info(
                     f"AI suggested strategy '{ai_strategy}', but client enforces simple execution (server-side brackets)."
                 )
             strat = "simple"
-            sig   = (ai_decision.get("signal", sig)   or sig).upper()
+            sig   = (ai_decision.get("signal", sig)   or "HOLD").upper()
             sym   = ai_decision.get("symbol", sym)
             size  = ai_decision.get("size", size)
             alert = ai_decision.get("alert", alert)
             ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
 
+            # allow BUY/SELL/HOLD/FLAT to continue; block anything else
             if sig not in ("BUY", "SELL", "HOLD", "FLAT"):
                 logging.info(
                     f"AI decided {sig}; no action. Reason: {ai_decision.get('reason', 'n/a')}"
                 )
                 return
         else:
+            # NON-AI ACCOUNT - simple decision ID for tracking
             ai_decision_id = int(time.time() * 1000) % (2**62)
-            logging.info(f"Non-AI account {acct} - proceeding with deterministic market state signal {sig}")
+            logging.info(f"Non-AI account {acct} - proceeding with manual trade")
 
         # --- FLAT handling for manual or AI decisions ---
         if sig == "FLAT":
@@ -858,11 +837,10 @@ def handle_webhook_logic(data):
             return
 
         # Resolve contract (best effort; HOLD can still proceed without it)
-        if cid is None:
-            try:
-                cid = get_contract(sym)
-            except Exception:
-                cid = None
+        try:
+            cid = get_contract(sym)
+        except Exception:
+            cid = None
         if not cid and sig in ("BUY", "SELL"):
             logging.error("Could not determine contract ID for symbol %s; aborting entry", sym)
             return
