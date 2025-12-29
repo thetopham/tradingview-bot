@@ -13,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 from auth import ensure_token, get_token
 from config import load_config
 from dateutil import parser
-from market_state import RollingFiveMinuteEngine, compute_market_state
+from market_state import MarketStateConfig, RollingFiveMinuteEngine, compute_market_state
 from confluence import compute_confluence
 from supabase import create_client, Client
 from typing import Dict, List, Optional, Tuple
@@ -26,6 +26,7 @@ _CACHE = {}
 _CACHE_LOCK = RLock()
 _ENGINE_LOCK = RLock()
 _rolling_engine: Optional[RollingFiveMinuteEngine] = None
+_insufficient_bars_logged = False
 
 def _cache_get(key: str):
     with _CACHE_LOCK:
@@ -861,6 +862,7 @@ def update_market_state_incremental(symbol: str = "MES", bars_needed: int = 90) 
     cache_key = f"market_summary:{symbol}:5m"
     provisional_key = f"{cache_key}:provisional"
     bars_cache_key = f"market_bars:{symbol}:5m"
+    required_bars = MarketStateConfig().slope_lookback + 2
 
     try:
         engine = _get_engine(bars_needed)
@@ -892,15 +894,30 @@ def update_market_state_incremental(symbol: str = "MES", bars_needed: int = 90) 
             logging.debug("No new 1m bar for %s; skipping incremental update", symbol)
             return None
 
-        provisional_state = compute_market_state(engine.get_bars(include_partial=True))
+        bars_with_partial = engine.get_bars(include_partial=True)
+        if len(bars_with_partial) < required_bars:
+            global _insufficient_bars_logged
+            if not _insufficient_bars_logged:
+                logging.debug(
+                    "Not enough bars (%s/%s) for incremental market state; waiting for more.",
+                    len(bars_with_partial),
+                    required_bars,
+                )
+                _insufficient_bars_logged = True
+            return None
+
+        provisional_state = compute_market_state(bars_with_partial)
         provisional_summary = _build_market_summary(provisional_state)
-        provisional_summary = _apply_confluence(provisional_summary, engine.get_bars(include_partial=True), provisional_state)
+        provisional_summary = _apply_confluence(provisional_summary, bars_with_partial, provisional_state)
         _cache_set(provisional_key, provisional_summary, ttl=180)
 
         if completed_bar:
-            final_state = compute_market_state(engine.get_bars(include_partial=False))
+            bars_without_partial = engine.get_bars(include_partial=False)
+            if len(bars_without_partial) < required_bars:
+                return provisional_summary
+            final_state = compute_market_state(bars_without_partial)
             final_summary = _build_market_summary(final_state)
-            final_summary = _apply_confluence(final_summary, engine.get_bars(include_partial=False), final_state)
+            final_summary = _apply_confluence(final_summary, bars_without_partial, final_state)
             ttl = random.uniform(240, 290)
             _cache_set(cache_key, final_summary, ttl)
             _cache_set(provisional_key, final_summary, ttl)

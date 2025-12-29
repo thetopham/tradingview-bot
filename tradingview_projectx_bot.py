@@ -808,8 +808,15 @@ def handle_webhook_logic(data):
             'risk_level': account_state.get('risk_level', 'unknown'),
             'daily_pnl': account_state.get('daily_pnl'),
         }
+        confluence = summary.get('confluence', {})
+        has_position = bool(position_context and position_context.get('current_position', {}).get('has_position'))
+        should_call_ai = (
+            AI_ENDPOINTS
+            and acct in AI_ENDPOINTS
+            and (confluence.get('trade_recommended') is True or has_position)
+        )
 
-        if acct in AI_ENDPOINTS:
+        if should_call_ai:
             ai_payload = {
                 'alert': alert,
                 'symbol': sym,
@@ -817,6 +824,7 @@ def handle_webhook_logic(data):
                 'market_state': market_state,
                 'position_context': position_context,
                 'risk_status': risk_status,
+                'confluence': confluence,
             }
             ai_decision = request_ai_decision(ai_url_for(acct), ai_payload)
             ai_sig = (ai_decision.get('signal') or sig).upper()

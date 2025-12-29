@@ -90,15 +90,13 @@ def load_config():
         if legacy_map:
             config['AI_ENDPOINTS'] = legacy_map
         else:
-            raise RuntimeError("No AI endpoints configured. Set N8N_AI_URL_<ACCOUNT> or N8N_AI_URL.")
+            config['AI_ENDPOINTS'] = {}
 
     # Final guard: keep AI endpoints aligned with the active account list
     config['AI_ENDPOINTS'] = {
         name: url for name, url in config['AI_ENDPOINTS'].items()
         if name in config['ACCOUNTS']
     }
-    if not config['AI_ENDPOINTS']:
-        raise RuntimeError("No AI endpoints available after applying ACTIVE_ACCOUNTS filter.")
 
     # Trading day windows / tz
     config['OVERRIDE_CONTRACT_ID'] = os.getenv("OVERRIDE_CONTRACT_ID", None)
