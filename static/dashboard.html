@@ -1670,7 +1670,7 @@
 
         // Update Functions
         function updateMarketDisplay(data) {
-            const regime = data.regime || 'unknown';
+            const regime = data.regime || data.trend || 'sideways';
             const regimeBadge = document.getElementById('regime-badge');
             regimeBadge.textContent = regime.replace(/_/g, ' ').toUpperCase();
             regimeBadge.className = `regime-badge regime-${regime}`;
@@ -1679,23 +1679,25 @@
             document.getElementById('confidence-fill').style.width = `${confidence}%`;
             document.getElementById('regime-confidence').textContent = `Confidence: ${confidence}%`;
 
-            const factors = data.key_factors || [];
+            const factors = data.key_factors || data.supporting_factors || [];
             document.getElementById('regime-factors').innerHTML = factors
                 .slice(0, 3)
                 .map(f => `• ${f}`)
                 .join('<br>');
 
-            document.getElementById('trend-alignment').textContent = `${data.trend_alignment || 0}%`;
-            document.getElementById('volatility').textContent = data.volatility || '--';
-            
+            const slopeNorm = data.trend_alignment ?? data?.market_state?.slope_norm ?? 0;
+            document.getElementById('trend-alignment').textContent = `${(Number(slopeNorm) || 0).toFixed(3)}`;
+            document.getElementById('volatility').textContent = data.volatility || '5m';
+
             const riskLevel = document.getElementById('risk-level');
-            riskLevel.textContent = (data.risk_level || '--').toUpperCase();
-            riskLevel.className = `stat-value ${data.risk_level === 'high' ? 'negative' : data.risk_level === 'low' ? 'positive' : 'warning'}`;
+            const level = data.risk_level || 'medium';
+            riskLevel.textContent = level.toUpperCase();
+            riskLevel.className = `stat-value ${level === 'high' ? 'negative' : level === 'low' ? 'positive' : 'warning'}`;
 
             document.getElementById('session-name').textContent = data.session?.name || '--';
 
-            if (data.regime === 'choppy' && data.confidence > 80) {
-                showAlert('warning', 'Choppy Market', 'High confidence choppy conditions detected');
+            if (regime === 'sideways') {
+                showAlert('warning', 'Sideways Market', 'Defaulting to HOLD until trend resumes');
             }
         }
 
@@ -2100,7 +2102,7 @@
 
         function updateTimeframeAnalysis(data) {
             const container = document.getElementById('timeframe-analysis');
-            const timeframes = ['5m', '15m', '30m',];
+            const timeframes = ['5m'];
             
             let html = '';
             
