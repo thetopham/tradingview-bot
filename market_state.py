@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
+from dateutil import parser
+
 logger = logging.getLogger(__name__)
 
 
@@ -109,3 +111,79 @@ def _fallback_state(reason: str) -> Dict:
         "supporting_factors": [reason],
         "signal": "HOLD",
     }
+
+
+class RollingFiveMinuteEngine:
+    """Maintain rolling 5m bars using incremental 1m updates."""
+
+    def __init__(self, bars_needed: int = 90):
+        self.bars_needed = bars_needed
+        self.five_minute_bars: List[Dict] = []
+        self.current_bucket: List[Dict] = []
+        self.current_bucket_start: Optional[datetime] = None
+        self.last_1m_ts: Optional[datetime] = None
+
+    @staticmethod
+    def _bucket_start(ts: datetime) -> datetime:
+        return ts.replace(minute=ts.minute - ts.minute % 5, second=0, microsecond=0)
+
+    def _merge_bucket(self, bucket_start: datetime, bucket_bars: List[Dict]) -> Dict:
+        return {
+            "o": float(bucket_bars[0]["o"]),
+            "h": max(float(b["h"]) for b in bucket_bars),
+            "l": min(float(b["l"]) for b in bucket_bars),
+            "c": float(bucket_bars[-1]["c"]),
+            "v": sum(float(b.get("v", 0)) for b in bucket_bars),
+            "ts": bucket_start.isoformat(),
+        }
+
+    def prime(self, five_minute_bars: List[Dict]) -> None:
+        """Seed the engine with an existing list of 5m bars."""
+        self.five_minute_bars = list(five_minute_bars)[-self.bars_needed :]
+        self.current_bucket = []
+        self.current_bucket_start = None
+        self.last_1m_ts = None
+
+    def ingest_1m_bar(self, bar: Dict) -> Dict:
+        """Ingest a new 1m bar. Returns completed 5m bar when a bucket closes."""
+        ts_raw = bar.get("ts")
+        if not ts_raw:
+            return {}
+
+        try:
+            ts = parser.isoparse(ts_raw)
+        except Exception:
+            return {}
+
+        if self.last_1m_ts and ts <= self.last_1m_ts:
+            return {}
+
+        bucket_start = self._bucket_start(ts)
+        completed_bar: Dict = {}
+
+        if self.current_bucket_start and bucket_start != self.current_bucket_start:
+            completed_bar = self._merge_bucket(self.current_bucket_start, self.current_bucket)
+            self.five_minute_bars.append(completed_bar)
+            self.five_minute_bars = self.five_minute_bars[-self.bars_needed :]
+            self.current_bucket = []
+
+        self.current_bucket_start = bucket_start
+        self.current_bucket.append(bar)
+        self.last_1m_ts = ts
+        return completed_bar
+
+    def _current_partial_bar(self) -> Optional[Dict]:
+        if not self.current_bucket or not self.current_bucket_start:
+            return None
+        return self._merge_bucket(self.current_bucket_start, self.current_bucket)
+
+    def get_bars(self, include_partial: bool = False) -> List[Dict]:
+        bars = list(self.five_minute_bars)
+        if include_partial:
+            partial = self._current_partial_bar()
+            if partial:
+                bars.append(partial)
+        return bars[-self.bars_needed :]
+
+    def has_history(self) -> bool:
+        return bool(self.five_minute_bars)

@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from auth import ensure_token, get_token
 from config import load_config
 from dateutil import parser
-from market_state import compute_market_state
+from market_state import RollingFiveMinuteEngine, compute_market_state
 from supabase import create_client, Client
 from typing import Dict, List, Optional, Tuple
 from threading import RLock
@@ -22,6 +22,8 @@ from threading import RLock
 # ─────────────────────────────
 _CACHE = {}
 _CACHE_LOCK = RLock()
+_ENGINE_LOCK = RLock()
+_rolling_engine: Optional[RollingFiveMinuteEngine] = None
 
 def _cache_get(key: str):
     with _CACHE_LOCK:
@@ -37,6 +39,16 @@ def _cache_get(key: str):
 def _cache_set(key: str, val, ttl: float):
     with _CACHE_LOCK:
         _CACHE[key] = (val, time.time() + ttl)
+
+
+def _get_engine(bars_needed: int) -> RollingFiveMinuteEngine:
+    global _rolling_engine
+    with _ENGINE_LOCK:
+        if _rolling_engine is None:
+            _rolling_engine = RollingFiveMinuteEngine(bars_needed=bars_needed)
+        else:
+            _rolling_engine.bars_needed = max(_rolling_engine.bars_needed, bars_needed)
+        return _rolling_engine
 
 session = requests.Session()
 config = load_config()
@@ -132,6 +144,26 @@ def _fetch_5m_bars_from_1m(supabase: Client, symbol: str, bars_needed: int) -> L
             len(five_minute_bars), bars_needed, symbol,
         )
     return five_minute_bars
+
+
+def _cache_market_bars(symbol: str, five_minute_bars: List[Dict], ttl: float = 1800) -> None:
+    _cache_set(f"market_bars:{symbol}:5m", five_minute_bars, ttl)
+
+
+def _build_market_summary(market_state: Dict) -> Dict:
+    summary = {
+        'timestamp': datetime.now(CT).isoformat(),
+        'regime': market_state.get('regime', 'sideways'),
+        'trend': market_state.get('trend', 'sideways'),
+        'confidence': market_state.get('confidence', 0),
+        'trade_recommended': market_state.get('signal') in ('BUY', 'SELL'),
+        'risk_level': 'medium',
+        'key_factors': market_state.get('supporting_factors', ['Local analysis unavailable'])[:3],
+        'trend_alignment': market_state.get('slope_norm', 0),
+        'volatility': 'unknown'
+    }
+    summary['market_state'] = market_state
+    return summary
 
 def get_active_contract_for_symbol_cached(symbol: str, live: bool = False) -> Optional[str]:
     """
@@ -692,35 +724,54 @@ def get_all_positions_summary() -> Dict:
             'total_pnl': 0
         }
 
-def get_market_conditions_summary(force_refresh: bool = False) -> Dict:
-    """
-    Get a summary of current market conditions for logging
-    """
+def get_market_conditions_summary(
+    force_refresh: bool = False,
+    symbol: str = "MES",
+    bars_needed: int = 90,
+    cached_only: bool = False,
+) -> Dict:
+    """Get a summary of current market conditions for logging with TTL cache."""
+
+    cache_key = f"market_summary:{symbol}:5m"
+    provisional_key = f"{cache_key}:provisional"
+
     try:
+        if not force_refresh:
+            cached = _cache_get(cache_key)
+            if cached:
+                logging.info("Market summary cache hit for %s", symbol)
+                return cached
+
+            if cached_only:
+                provisional = _cache_get(provisional_key)
+                if provisional:
+                    logging.info("Using provisional cached market summary for %s", symbol)
+                    return provisional
+                logging.info(
+                    "No cached market summary for %s; skipping recompute (cached_only)",
+                    symbol,
+                )
+                return _build_market_summary(compute_market_state([]))
+
         supabase = get_supabase_client()
         bars = _fetch_5m_bars_from_1m(
-            supabase, config.get('DEFAULT_SYMBOL', 'MES'), bars_needed=150
+            supabase, symbol or config.get('DEFAULT_SYMBOL', 'MES'), bars_needed=bars_needed
         )
         if not bars:
             logging.warning("No 5m bars available after aggregating 1m feed")
+
         market_state = compute_market_state(bars)
-        trend_details = {
-            'slope_norm': market_state.get('slope_norm', 0),
-            'timeframe': '5m',
-            'ema_period': 21,
-        }
-        summary = {
-            'timestamp': datetime.now(CT).isoformat(),
-            'regime': market_state.get('regime', 'sideways'),
-            'trend': market_state.get('trend', 'sideways'),
-            'confidence': market_state.get('confidence', 0),
-            'trade_recommended': market_state.get('signal') in ('BUY', 'SELL'),
-            'risk_level': 'medium',
-            'key_factors': market_state.get('supporting_factors', ['Local analysis unavailable'])[:3],
-            'trend_alignment': market_state.get('slope_norm', 0),
-            'volatility': 'unknown'
-        }
-        summary['market_state'] = market_state
+        summary = _build_market_summary(market_state)
+
+        ttl = random.uniform(240, 290)
+        _cache_set(cache_key, summary, ttl)
+        _cache_set(provisional_key, summary, ttl)
+        _cache_market_bars(symbol, bars)
+
+        engine = _get_engine(bars_needed)
+        engine.prime(bars)
+
+        logging.info("Market summary recomputed for %s; cached for %ds", symbol, int(ttl))
         logging.info(f"Market Conditions: {summary}")
         return summary
     except Exception as e:
@@ -736,6 +787,64 @@ def get_market_conditions_summary(force_refresh: bool = False) -> Dict:
             'trend_alignment': 0,
             'volatility': 'unknown'
         }
+
+
+def update_market_state_incremental(symbol: str = "MES", bars_needed: int = 90) -> Optional[Dict]:
+    """Update market state cache using only the latest 1m bar."""
+
+    cache_key = f"market_summary:{symbol}:5m"
+    provisional_key = f"{cache_key}:provisional"
+    bars_cache_key = f"market_bars:{symbol}:5m"
+
+    try:
+        engine = _get_engine(bars_needed)
+        if not engine.has_history():
+            cached_bars = _cache_get(bars_cache_key)
+            if cached_bars:
+                engine.prime(cached_bars)
+
+        supabase = get_supabase_client()
+        result = (
+            supabase
+            .table('tv_datafeed')
+            .select('o, h, l, c, v, ts')
+            .eq('symbol', symbol)
+            .in_('timeframe', _timeframe_filters(1))
+            .order('ts', desc=True)
+            .limit(1)
+            .execute()
+        )
+
+        latest = (result.data or [None])[0]
+        if not latest or not latest.get('ts'):
+            return None
+
+        prev_ts = engine.last_1m_ts
+        completed_bar = engine.ingest_1m_bar(latest)
+
+        if engine.last_1m_ts == prev_ts:
+            logging.debug("No new 1m bar for %s; skipping incremental update", symbol)
+            return None
+
+        provisional_state = compute_market_state(engine.get_bars(include_partial=True))
+        provisional_summary = _build_market_summary(provisional_state)
+        _cache_set(provisional_key, provisional_summary, ttl=180)
+
+        if completed_bar:
+            final_state = compute_market_state(engine.get_bars(include_partial=False))
+            final_summary = _build_market_summary(final_state)
+            ttl = random.uniform(240, 290)
+            _cache_set(cache_key, final_summary, ttl)
+            _cache_set(provisional_key, final_summary, ttl)
+            _cache_market_bars(symbol, engine.get_bars(include_partial=False))
+            logging.info("Incremental 5m close cached for %s; ttl=%ds", symbol, int(ttl))
+        else:
+            logging.debug("Cached provisional market summary for %s", symbol)
+
+        return provisional_summary
+    except Exception as e:
+        logging.error(f"Error during incremental market update: {e}")
+        return None
 
 def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) -> Tuple[Optional[float], Optional[str]]:
     """
