@@ -36,7 +36,12 @@ def load_config():
         'STOP_LOSS_POINTS': float(os.getenv("STOP_LOSS_POINTS", 10.0)),
         'TP_POINTS': [float(x) for x in os.getenv("TP_POINTS", "2.5,5.0,10.0").split(",")],
         'DASHBOARD_DIAGNOSTICS_PUBLIC': os.getenv("DASHBOARD_DIAGNOSTICS_PUBLIC", "false").lower() == "true",
+        'DASHBOARD_USERNAME': os.getenv("DASHBOARD_USERNAME", "dashboard"),
+        'DASHBOARD_PASSWORD': os.getenv("DASHBOARD_PASSWORD"),
     }
+
+    if not config['DASHBOARD_PASSWORD']:
+        raise RuntimeError("DASHBOARD_PASSWORD is required to serve the dashboard.")
 
     # Mode/symbol
     config['USE_DYNAMIC_CONTRACTS'] = os.getenv("USE_DYNAMIC_CONTRACTS", "true").lower() == "true"

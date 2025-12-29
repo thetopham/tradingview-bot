@@ -8,7 +8,7 @@ Handles webhooks, AI decisions, trade execution, and scheduled processing.
 
 from datetime import time as dtime, timedelta
 from typing import Optional
-from flask import Flask, request, jsonify, send_from_directory, send_file
+from flask import Flask, request, jsonify, send_from_directory, send_file, Response
 from flask_cors import CORS
 from logging_config import setup_logging
 from config import load_config
@@ -37,6 +37,7 @@ import time
 import os
 from supabase import create_client
 import requests
+from functools import wraps
 
 # --- Logging/Config/Globals ---
 setup_logging()
@@ -50,6 +51,8 @@ CT              = config['CT']
 GET_FLAT_START  = config['GET_FLAT_START']
 GET_FLAT_END    = config['GET_FLAT_END']
 DIAGNOSTICS_PUBLIC = config.get('DASHBOARD_DIAGNOSTICS_PUBLIC', False)
+DASHBOARD_USERNAME = config['DASHBOARD_USERNAME']
+DASHBOARD_PASSWORD = config['DASHBOARD_PASSWORD']
 
 LOG_FILE_PATH = os.getenv('LOG_FILE', '/tmp/tradingview_projectx_bot.log')
 START_TIME = datetime.now(config['CT'])
@@ -132,6 +135,34 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for the dashboard
 
 
+def dashboard_auth_guard():
+    if not DASHBOARD_PASSWORD:
+        return Response(
+            "Dashboard password not configured",
+            503,
+            {"WWW-Authenticate": 'Basic realm="Trading Dashboard"'},
+        )
+    auth = request.authorization
+    if auth and auth.username == DASHBOARD_USERNAME and auth.password == DASHBOARD_PASSWORD:
+        return None
+    return Response(
+        "Authentication required",
+        401,
+        {"WWW-Authenticate": 'Basic realm="Trading Dashboard"'},
+    )
+
+
+def dashboard_route(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        auth_response = dashboard_auth_guard()
+        if auth_response is not None:
+            return auth_response
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
 def _parse_bool(value, default=True):
     if value is None:
         return default
@@ -167,12 +198,14 @@ def tv_webhook():
 # --- STATIC DASHBOARD + DATA ENDPOINTS (UNCOMMENTED) ---
 
 @app.route("/")
+@dashboard_route
 def serve_dashboard():
     # serve ./static/dashboard.html
     static_dir = os.path.join(os.path.dirname(__file__), "static")
     return send_from_directory(static_dir, "dashboard.html")
 
 @app.route("/ai/latest-decision", methods=["GET"])
+@dashboard_route
 def get_latest_ai_decision():
     """Get the latest AI trading decision from Supabase"""
     try:
@@ -233,6 +266,7 @@ def get_latest_ai_decision():
         }), 500
 
 @app.route("/analysis/latest-all", methods=["GET"])
+@dashboard_route
 def get_latest_analysis_all():
     """Get latest analysis for all timeframes from Supabase"""
     try:
@@ -424,6 +458,7 @@ def build_positions_summary():
 
 
 @app.route("/positions/summary", methods=["GET"])
+@dashboard_route
 def get_positions_summary():
     """Get a summary of all positions with proper account data + broker balances"""
     try:
@@ -434,6 +469,7 @@ def get_positions_summary():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/positions", methods=["GET"])
+@dashboard_route
 def get_positions():
     """Get current positions across all accounts"""
     try:
@@ -445,6 +481,7 @@ def get_positions():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/positions/<account>", methods=["GET"])
+@dashboard_route
 def get_account_positions(account):
     """Get positions for a specific account"""
     try:
@@ -473,6 +510,7 @@ def get_account_positions(account):
         return jsonify({"error": str(e)}), 500
 
 @app.route("/positions/<account>/manage", methods=["POST"])
+@dashboard_route
 def get_position_suggestions(account):
     """Get AI suggestions for position management (no autonomous actions)"""
     try:
@@ -504,6 +542,7 @@ def get_position_suggestions(account):
         return jsonify({"error": str(e)}), 500
 
 @app.route("/scan", methods=["POST"])
+@dashboard_route
 def scan_opportunities():
     """Manually trigger opportunity scan"""
     try:
@@ -534,6 +573,7 @@ def scan_opportunities():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/account/<account>/health", methods=["GET"])
+@dashboard_route
 def get_account_health(account):
     """Get account health metrics"""
     try:
@@ -563,6 +603,7 @@ def get_account_health(account):
         return jsonify({"error": str(e)}), 500
 
 @app.route("/market", methods=["GET"])
+@dashboard_route
 def get_market_status():
     """Get current market conditions and regime (resilient to None)."""
     try:
@@ -582,6 +623,7 @@ def get_market_status():
 
 
 @app.route("/diagnostics", methods=["GET"])
+@dashboard_route
 def diagnostics_view():
     """Lightweight operational snapshot for the dashboard diagnostics tab.
 
@@ -661,6 +703,7 @@ def diagnostics_view():
 
 
 @app.route("/logs/download", methods=["GET"])
+@dashboard_route
 def download_logs():
     if not allow_diagnostics(DIAGNOSTICS_PUBLIC, WEBHOOK_SECRET):
         return jsonify({"error": "unauthorized"}), 403
@@ -673,6 +716,7 @@ def download_logs():
 
 
 @app.route("/autonomous/toggle", methods=["POST"])
+@dashboard_route
 def toggle_autonomous():
     """Toggle autonomous trading on/off"""
     try:
@@ -690,6 +734,7 @@ def toggle_autonomous():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/positions/realtime", methods=["GET"])
+@dashboard_route
 def get_realtime_positions():
     """Get real-time positions with current P&L across all accounts"""
     try:
@@ -757,6 +802,7 @@ def get_realtime_positions():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/position-context/<account>", methods=["GET"])
+@dashboard_route
 def get_position_context(account):
     """Get position context for AI decision making"""
     try:
@@ -785,6 +831,7 @@ def get_position_context(account):
 # --- CONTRACTS ENDPOINTS ---
 
 @app.route("/contracts/<symbol>", methods=["GET"])
+@dashboard_route
 def get_symbol_contracts(symbol):
     """Get all contracts for a symbol"""
     try:
@@ -804,6 +851,7 @@ def get_symbol_contracts(symbol):
         return jsonify({"error": str(e)}), 500
 
 @app.route("/contracts/current", methods=["GET"])
+@dashboard_route
 def get_current_contracts():
     """Get current active contracts for configured symbols"""
     try:
