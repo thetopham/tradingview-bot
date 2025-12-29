@@ -46,11 +46,11 @@ def load_config():
 
     # NEW: per-account AI endpoints (N8N_AI_URL_ALPHA=..., etc.)
     ai_eps = {
-        'alpha':   os.getenv('N8N_AI_URL_ALPHA'),
+       # 'alpha':   os.getenv('N8N_AI_URL_ALPHA'),
         'beta':    os.getenv('N8N_AI_URL_BETA'),
-        'gamma':   os.getenv('N8N_AI_URL_GAMMA'),
-        'delta':   os.getenv('N8N_AI_URL_DELTA'),
-        'epsilon': os.getenv('N8N_AI_URL_EPSILON'),
+      #  'gamma':   os.getenv('N8N_AI_URL_GAMMA'),
+      #  'delta':   os.getenv('N8N_AI_URL_DELTA'),
+      #  'epsilon': os.getenv('N8N_AI_URL_EPSILON'),
     }
     # prune Nones so you can mix legacy + new during transition
     config['AI_ENDPOINTS'] = {k: v for k, v in ai_eps.items() if v}
