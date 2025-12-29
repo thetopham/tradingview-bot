@@ -247,21 +247,45 @@ def _channel_component(df: pd.DataFrame, base_bias: str, atr_value: Optional[flo
     signal = 0
     confidence = 0.0
     trendline_ok = True
+    vol_ok = True
 
     if base_bias == "SELL":
         trendline_ok = not broken_up
-        if trendline_ok and CHANNEL_DISTANCE_RANGE[0] <= dist_to_upper <= CHANNEL_DISTANCE_RANGE[1]:
+        metrics["trendline_ok"] = trendline_ok
+        metrics["vol_ok"] = vol_ok
+        gates_pass = bos_ok and trendline_ok and vol_ok
+
+        if broken_down and gates_pass:
+            if -1.0 <= dist_to_lower <= 0.0:
+                signal = -1
+                confidence = max(0.0, min(1.0, 1 - abs(dist_to_lower)))
+                tags.append("trend_continuation")
+            elif dist_to_lower < -1.0:
+                tags.append("too_extended")
+        elif trendline_ok and CHANNEL_DISTANCE_RANGE[0] <= dist_to_upper <= CHANNEL_DISTANCE_RANGE[1]:
             signal = -1
             confidence = _zone_confidence(dist_to_upper, CHANNEL_DISTANCE_RANGE[0], CHANNEL_DISTANCE_RANGE[1], 0.4)
             tags.append("near_upper_channel")
     elif base_bias == "BUY":
         trendline_ok = not broken_down
-        if trendline_ok and CHANNEL_DISTANCE_RANGE[0] <= dist_to_lower <= CHANNEL_DISTANCE_RANGE[1]:
+        metrics["trendline_ok"] = trendline_ok
+        metrics["vol_ok"] = vol_ok
+        gates_pass = bos_ok and trendline_ok and vol_ok
+
+        if broken_up and gates_pass:
+            if -1.0 <= dist_to_upper <= 0.0:
+                signal = 1
+                confidence = max(0.0, min(1.0, 1 - abs(dist_to_upper)))
+                tags.append("trend_continuation")
+            elif dist_to_upper < -1.0:
+                tags.append("too_extended")
+        elif trendline_ok and CHANNEL_DISTANCE_RANGE[0] <= dist_to_lower <= CHANNEL_DISTANCE_RANGE[1]:
             signal = 1
             confidence = _zone_confidence(dist_to_lower, CHANNEL_DISTANCE_RANGE[0], CHANNEL_DISTANCE_RANGE[1], 0.4)
             tags.append("near_lower_channel")
-
-    metrics["trendline_ok"] = trendline_ok
+    else:
+        metrics["trendline_ok"] = trendline_ok
+        metrics["vol_ok"] = vol_ok
 
     return {
         "name": "trend_channel",
@@ -272,7 +296,11 @@ def _channel_component(df: pd.DataFrame, base_bias: str, atr_value: Optional[flo
     }
 
 
-def compute_confluence(ohlc5m: pd.DataFrame, base_signal: Optional[str] = None) -> Dict:
+def compute_confluence(
+    ohlc5m: pd.DataFrame,
+    base_signal: Optional[str] = None,
+    market_state: Optional[Dict] = None,
+) -> Dict:
     """Compute confluence score from 5m OHLCV + indicator data."""
 
     if ohlc5m is None:
@@ -289,7 +317,8 @@ def compute_confluence(ohlc5m: pd.DataFrame, base_signal: Optional[str] = None) 
     if atr_value is None or atr_value == 0:
         atr_value = _compute_atr(ohlc5m)
 
-    bias = base_signal or _infer_base_bias(ohlc5m, atr_value)
+    market_bias = market_state.get("signal") if market_state else None
+    bias = base_signal or market_bias or _infer_base_bias(ohlc5m, atr_value)
     components = []
 
     pullback = _pullback_component(ohlc5m, bias, atr_value)
@@ -314,19 +343,63 @@ def compute_confluence(ohlc5m: pd.DataFrame, base_signal: Optional[str] = None) 
 
     trendline_ok = bool(trend_channel.get("metrics", {}).get("trendline_ok", True))
     bos_ok = bool(trend_channel.get("metrics", {}).get("bos_ok", True))
+    vol_ok = bool(trend_channel.get("metrics", {}).get("vol_ok", True))
     gates = {
         "trendline_ok": bool(trendline_ok),
         "bos_ok": bool(bos_ok),
-        "vol_ok": True,
+        "vol_ok": bool(vol_ok),
     }
+
+    threshold = 1.0
+    score_satisfies = abs(score) >= threshold
+    gates_ok = all(gates.values())
+    market_signal = (market_state or {}).get("signal") if market_state else None
+    market_confidence = float((market_state or {}).get("confidence", 0)) if market_state else 0.0
+    market_trend_strong = market_signal in {"BUY", "SELL"} and market_confidence >= 80
+
+    trend_tags = trend_channel.get("tags", []) if isinstance(trend_channel, dict) else []
+    continuation_allowed = "trend_continuation" in trend_tags and "too_extended" not in trend_tags
+
+    trade_by_score = score_satisfies and gates_ok
+    trade_by_continuation = (
+        market_trend_strong
+        and gates_ok
+        and (score_satisfies or continuation_allowed)
+    )
+
+    trade_recommended = trade_by_score or trade_by_continuation
 
     confluence = {
         "score": float(score),
         "bias": confluence_bias,
         "components": components,
         "gates": gates,
-        "trade_recommended": abs(score) >= 1.0 and gates["trendline_ok"] and gates["bos_ok"],
+        "trade_recommended": trade_recommended,
     }
 
-    logger.debug("Confluence computed: %s", confluence)
+    if trade_recommended:
+        path = "continuation" if trade_by_continuation and not trade_by_score else "pullback"
+        logger.info(
+            "Confluence trade via %s path: score=%.3f, gates_ok=%s, continuation=%s",
+            path,
+            score,
+            gates_ok,
+            continuation_allowed,
+        )
+    else:
+        veto_reasons = []
+        if not gates_ok:
+            veto_reasons.append("gates_failed")
+        if not score_satisfies:
+            veto_reasons.append("score_below_threshold")
+        if "too_extended" in trend_tags:
+            veto_reasons.append("too_extended")
+        logger.info(
+            "Confluence vetoed: reasons=%s, score=%.3f, gates=%s, continuation_allowed=%s",
+            ",".join(veto_reasons) or "unknown",
+            score,
+            gates,
+            continuation_allowed,
+        )
+
     return {"confluence": sanitize(confluence)}
