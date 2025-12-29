@@ -196,7 +196,11 @@ def _build_market_summary(market_state: Dict) -> Dict:
 def _apply_confluence(summary: Dict, bars: List[Dict], market_state: Dict) -> Dict:
     try:
         ohlc5m_df = pd.DataFrame(bars)
-        confluence = compute_confluence(ohlc5m_df, base_signal=market_state.get('signal'))
+        confluence = compute_confluence(
+            ohlc5m_df,
+            base_signal=market_state.get('signal'),
+            market_state=market_state,
+        )
         summary.update(confluence)
 
         confluence_tags = []
