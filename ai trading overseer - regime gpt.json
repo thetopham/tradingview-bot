@@ -179,7 +179,7 @@
         "resource": "object",
         "operation": "create",
         "bucketName": "tradingview-chart",
-        "objectName": "=charts/{{ $json.id }}/{{ $json.timeframe }}.jpg",
+        "objectName": "=charts/{{ $json.ai_decision_id }}/5m.jpg",
         "createData": {},
         "createQuery": {},
         "encryptionHeaders": {},
@@ -214,7 +214,7 @@
             {
               "id": "4147d304-bbd3-449e-93aa-f04536862b9b",
               "name": "urls['5m']",
-              "value": "={{ $json.urls['5m'] }}",
+              "value": "={{ $('HTTP Request2').item.json.url }}",
               "type": "string"
             },
             {
@@ -292,7 +292,7 @@
     },
     {
       "parameters": {
-        "url": "={{ $json.url }}",
+        "url": "={{ $('HTTP Request2').item.json.url }}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -312,7 +312,7 @@
       "typeVersion": 2,
       "position": [
         3424,
-        464
+        720
       ],
       "id": "c92a26b1-e813-42d2-94d1-17e8cdfa2852",
       "name": "Code1"
@@ -324,25 +324,25 @@
             {
               "id": "27b01d5c-b00a-4266-b6aa-ae9a2472d2db",
               "name": "url",
-              "value": "=https://storage.googleapis.com/tradingview-chart/charts/{{ $('Code1').item.json.id }}/{{ $('Code1').item.json.timeframe }}.jpg",
+              "value": "=https://storage.googleapis.com/tradingview-chart/charts/{{ $('HTTP Request').item.json.ai_decision_id }}/5m.jpg",
               "type": "string"
             },
             {
               "id": "6d0b4721-0211-4acb-9d58-882bd7bfe0a8",
               "name": "timeframe",
-              "value": "={{ $('HTTP Request').item.json.timeframe }}",
+              "value": "=5m",
               "type": "string"
             },
             {
               "id": "45c55a40-6d76-4234-9217-b249ec4d4656",
               "name": "id",
-              "value": "={{ $('Code1').item.json.id }}",
+              "value": "={{ $('HTTP Request').item.json.ai_decision_id }}",
               "type": "number"
             },
             {
               "id": "b5c9f6f5-0d42-4303-9716-9c88bf061b12",
               "name": "chart_time",
-              "value": "={{ $('Code1').item.json.chart_time }}",
+              "value": "={{ $('Code').item.json.timestamp }}",
               "type": "string"
             }
           ]
@@ -457,7 +457,7 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "=Today is {{ $now }}.\n\nYou are the trading overseer for MES.\nYou ONLY decide:\n1) signal: BUY | SELL | HOLD | FLAT\n2) size: 0 | 1 | 2 | 3\n3) short reason (≤20 words)\n\nYou DO NOT analyze charts, indicators, levels, entries, stops, or targets.\nYou MUST NOT invent data or fields. If anything critical is missing, choose the safest default.\n\nInputs (from webhook only):\n- alert (string)\n- symbol (string)\n- account (string)\n- market_state (object): { signal: \"BUY|SELL|HOLD\", trend: \"up|down|flat|unknown\", confidence: 0-100, ... }\n- confluence (object): may include { trade_recommended: boolean, ... }\n- position_context (object):\n  - account_metrics: { can_trade: boolean, risk_level: \"low|medium|high\", consecutive_losses: int }\n  - current_position: { has_position: boolean, side: \"LONG|SHORT|null\", size: int, current_pnl: number }\n\nIMPORTANT EXECUTION CONSTRAINTS (simple strategy):\n- If a position already exists, you may ONLY output HOLD or FLAT. (No adding, no reversing.)\n- BUY/SELL only allowed when current_position.has_position == false.\n- FLAT only allowed when current_position.has_position == true.\n\nPRIORITIES (in order):\n1) Safety (can_trade, risk_level)\n2) Existing position management\n3) Market-state defaults\n4) New entries\n\nRULES (apply in order):\n\nA) HARD STOP\n- If position_context missing OR account_metrics missing OR can_trade != true => signal=HOLD, size=0.\n\nB) MARKET DEFAULT (NO TRADE ZONE)\n- If market_state missing OR market_state.signal not in {BUY, SELL}\n  OR market_state.trend in {flat, unknown}\n  OR market_state.confidence < 55\n  => signal=HOLD, size=0.\n- If confluence.trade_recommended == false AND current_position.has_position == false => signal=HOLD, size=0.\n  (If confluence missing or trade_recommended missing, ignore this line.)\n\nC) EXISTING POSITION (current_position.has_position == true)\n- You must NOT open a new trade. Only HOLD or FLAT.\n- If market_state.signal implies OPPOSITE direction to current_position.side:\n    - If current_pnl <= -20 => signal=FLAT, size=0. (cut loser)\n    - Else => signal=HOLD, size=0. (no reverse)\n- If market_state.signal implies SAME direction => signal=HOLD, size=0. (no add)\n\nD) NO POSITION (current_position.has_position == false)\n- If market_state.signal in {BUY, SELL}:\n  - base size = 1\n  - If risk_level == \"high\" => size = 1\n  - If consecutive_losses >= 1 => size = 1\n  - If confidence >= 80 AND risk_level == \"low\" AND consecutive_losses == 0 => size = 2\n  - If confidence >= 90 AND risk_level == \"low\" AND consecutive_losses == 0 => size = 3 (rare)\n- Otherwise => signal=HOLD, size=0.\n\nOUTPUT REQUIREMENTS:\n- Return ONLY valid JSON (no markdown, no extra keys, no commentary).\n- strategy must be \"simple\"\n- timestamp must be \"{{ $now }}\"\n- size must be an integer 0..3\n- reason must be ≤20 words and cite the first blocking/allowing rule (e.g., \"Rule B: confidence<55\").\n\nRETURN ONLY THIS JSON:\n{\n  \"strategy\": \"simple\",\n  \"signal\": \"BUY|SELL|HOLD|FLAT\",\n  \"alert\": \"{{ $('Webhook').item.json.body.alert }}\",\n  \"timestamp\": \"{{ $now }}\",\n  \"symbol\": \"{{ $('Webhook').item.json.body.symbol || 'MES' }}\",\n  \"account\": \"{{ $('Webhook').item.json.body.account }}\",\n  \"size\": 0,\n  \"reason\": \"≤20 words; cite rule\",\n  \"ai_decision_id\": {{ $('Webhook').item.json.body.ai_decision_id || 0 }},\n  \"market_state\": {{ JSON.stringify($('Webhook').item.json.body.market_state) }},\n  \"confluence\": {{ JSON.stringify($('Webhook').item.json.body.confluence) }},\n  \"position_context\": {{ JSON.stringify($('Webhook').item.json.body.position_context) }},\n  \"urls\": {{ JSON.stringify($('Webhook').item.json.body.chart_urls || {}) }}\n}\n",
+        "text": "=Today is {{ $now }}.\n\nYou are the trading overseer for MES.\nYou ONLY decide:\n1) signal: BUY | SELL | HOLD | FLAT\n2) size: 0 | 1 | 2 | 3\n3) short reason (≤20 words)\n\nInputs (from webhook only):\n- alert (string)\n- symbol (string)\n- account (string)\n- market_state (object): { signal: \"BUY|SELL|HOLD\", trend: \"up|down|flat|unknown\", confidence: 0-100, ... }\n- confluence (object): may include { trade_recommended: boolean, ... }\n- position_context (object):\n  - account_metrics: { can_trade: boolean, risk_level: \"low|medium|high\", consecutive_losses: int }\n  - current_position: { has_position: boolean, side: \"LONG|SHORT|null\", size: int, current_pnl: number }\n\nIMPORTANT EXECUTION CONSTRAINTS (simple strategy):\n- If a position already exists, you may ONLY output HOLD or FLAT. (No adding, no reversing.)\n- BUY/SELL only allowed when current_position.has_position == false.\n- FLAT only allowed when current_position.has_position == true.\n\nPRIORITIES (in order):\n1) Safety (can_trade, risk_level)\n2) Existing position management\n3) Market-state defaults\n4) New entries\n\nRULES (apply in order):\n\nA) HARD STOP\n- If position_context missing OR account_metrics missing OR can_trade != true => signal=HOLD, size=0.\n\nB) MARKET DEFAULT (NO TRADE ZONE)\n- If market_state missing OR market_state.signal not in {BUY, SELL}\n  OR market_state.trend in {flat, unknown}\n  OR market_state.confidence < 55\n  => signal=HOLD, size=0.\n- If confluence.trade_recommended == false AND current_position.has_position == false => signal=HOLD, size=0.\n  (If confluence missing or trade_recommended missing, ignore this line.)\n\nC) EXISTING POSITION (current_position.has_position == true)\n- You must NOT open a new trade. Only HOLD or FLAT.\n- If market_state.signal implies OPPOSITE direction to current_position.side:\n    - If current_pnl <= -20 => signal=FLAT, size=0. (cut loser)\n    - Else => signal=HOLD, size=0. (no reverse)\n- If market_state.signal implies SAME direction => signal=HOLD, size=0. (no add)\n\nD) NO POSITION (current_position.has_position == false)\n- If market_state.signal in {BUY, SELL}:\n  - base size = 1\n  - If risk_level == \"high\" => size = 1\n  - If consecutive_losses >= 1 => size = 1\n  - If confidence >= 80 AND risk_level == \"low\" AND consecutive_losses == 0 => size = 2\n  - If confidence >= 90 AND risk_level == \"low\" AND consecutive_losses == 0 => size = 3 (rare)\n- Otherwise => signal=HOLD, size=0.\n\nOUTPUT REQUIREMENTS:\n- Return ONLY valid JSON (no markdown, no extra keys, no commentary).\n- strategy must be \"simple\"\n- timestamp must be \"{{ $now }}\"\n- size must be an integer 0..3\n- reason must be ≤20 words and cite the first blocking/allowing rule (e.g., \"Rule B: confidence<55\").\n\nRETURN ONLY THIS JSON:\n{\n  \"strategy\": \"simple\",\n  \"signal\": \"BUY|SELL|HOLD|FLAT\",\n  \"alert\": \"{{ $('Webhook').item.json.body.alert }}\",\n  \"timestamp\": \"{{ $now }}\",\n  \"symbol\": \"{{ $('Webhook').item.json.body.symbol || 'MES' }}\",\n  \"account\": \"{{ $('Webhook').item.json.body.account }}\",\n  \"size\": 0,\n  \"reason\": \"≤20 words; cite rule\",\n  \"market_state\": {{ JSON.stringify($('Webhook').item.json.body.market_state) }},\n  \"confluence\": {{ JSON.stringify($('Webhook').item.json.body.confluence) }},\n  \"position_context\": {{ JSON.stringify($('Webhook').item.json.body.position_context) }},\n  \"urls\": {{ $json.response }}\n}\n",
         "messages": {
           "messageValues": [
             {
@@ -484,8 +484,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1968,
-        368
+        1888,
+        -112
       ],
       "id": "53756236-ef35-49d2-9f25-e5408c01647d",
       "name": "HTTP Request1"
@@ -531,8 +531,8 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        1328,
-        -16
+        784,
+        1216
       ],
       "id": "2900c224-d821-4b49-90d9-a833c4c6e396",
       "name": "15m",
@@ -559,8 +559,8 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        1728,
-        368
+        1568,
+        -112
       ],
       "id": "8f38a31e-94cc-44c3-8049-ca805cd62241",
       "name": "5m",
@@ -587,8 +587,8 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        1504,
-        0
+        944,
+        1216
       ],
       "id": "49de3f66-128e-4670-a1f7-2e08e7975beb",
       "name": "30m",
@@ -637,15 +637,386 @@
           "name": "DeepSeek account"
         }
       }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.chart-img.com/v2/tradingview/layout-chart/storage/1LucwVmQ",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "tradingview-session-id",
+              "value": "xpy37kx3hnmae3v1s5ef6x7daimwi9j8"
+            },
+            {
+              "name": "tradingview-session-id-sign",
+              "value": "v3:ACiGDw6hGbRCPE1XPmC3F8Ui41D7L6BSb/zqECFveFE="
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "format",
+              "value": "jpeg"
+            },
+            {
+              "name": "interval",
+              "value": "5m"
+            },
+            {
+              "name": "width",
+              "value": "1920"
+            },
+            {
+              "name": "height",
+              "value": "1080"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "42249732-fc8b-4278-a065-c3cdae768536",
+      "name": "Tradingview Chart",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1488,
+        368
+      ],
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ZleHrixI7F5TA8Yb",
+          "name": "chart-img"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "694cc668-54e1-4b18-94e7-51a381764295",
+              "name": "response",
+              "value": "={{ $json.url }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "includeBinary": true
+        }
+      },
+      "id": "6a7b8f44-261a-4c30-a2fd-7506607d9236",
+      "name": "Set 'response' value",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1968,
+        368
+      ],
+      "typeVersion": 3.3
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-5-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1792,
+        -272
+      ],
+      "id": "ab74de17-652c-410a-a81f-d5e7a0d1c0fe",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "hOvrgCZvpztkucKb",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "chart_analysis",
+        "dataToSend": "autoMapInputData"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2560,
+        -512
+      ],
+      "id": "852aa0e5-00ef-4a02-9684-9d1b99aa1738",
+      "name": "Supabase2",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        368
+      ],
+      "id": "335fb5b5-7a35-41d8-9c7b-8f07dd8073a8",
+      "name": "HTTP Request2"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a minimalist 5m chart observer for MES.\nYour job is ONLY to output:\n- trend: up | down | flat | unknown\n- signal: BUY | SELL | HOLD\n- confidence: 0-100\n- note: a short 1-sentence description of what the right edge is doing\n\nRules:\n- Focus ONLY on the last ~10 candles (right edge).\n- If unsure, choose trend=\"flat\" and signal=\"HOLD\".\n- Do not output levels, targets, stops, indicators, patterns, or long analysis.\n- Return valid JSON only.\n\nJSON FORMAT:\n{\n  \"timeframe\": \"5m\",\n  \"trend\": \"up|down|flat|unknown\",\n  \"signal\": \"BUY|SELL|HOLD\",\n  \"confidence\": 0,\n  \"note\": \"short 1 sentence\",\n  \"chart_time\": \"{{ $now }}\",\n  \"url\": \"{{ $json.response }}\"\n}\n",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "messageType": "imageBinary"
+            }
+          ]
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [
+        1872,
+        -512
+      ],
+      "id": "7533d297-ce40-4e3e-856f-9388e4614438",
+      "name": "Basic LLM Chain1"
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $input.first().json.text;\n\n// Strip code block markers, leading/trailing quotes, and whitespace\nraw = raw.trim()\n    .replace(/^```json\\s*/i, '')\n    .replace(/^```\\s*/i, '')\n    .replace(/```$/i, '')\n    .replace(/^'|'$/g, '');\n\nreturn [ JSON.parse(raw) ];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2224,
+        -512
+      ],
+      "id": "d7abb54a-71da-4479-8d37-24fae65b67e3",
+      "name": "Code4"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "latest_chart_analysis",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "symbol",
+              "condition": "eq",
+              "keyValue": "MES"
+            },
+            {
+              "keyName": "timeframe",
+              "condition": "eq",
+              "keyValue": "={{ $json.timeframe }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "snapshot",
+              "fieldValue": "={{ $json }}"
+            },
+            {
+              "fieldId": "timestamp",
+              "fieldValue": "={{ $json.chart_time }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2576,
+        -288
+      ],
+      "id": "9fb38b59-7468-45b9-bc5a-6616a2c2b795",
+      "name": "Supabase3",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2592,
+        -80
+      ],
+      "id": "a243fecf-ddcc-4b7f-b8cc-b4b2532bb00e",
+      "name": "Edit Fields3"
     }
   ],
-  "pinData": {},
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n.thetopham.com",
+            "user-agent": "python-requests/2.32.5",
+            "content-length": "1716",
+            "accept": "*/*",
+            "accept-encoding": "gzip, br",
+            "cdn-loop": "cloudflare; loops=1",
+            "cf-connecting-ip": "71.218.241.177",
+            "cf-ipcountry": "US",
+            "cf-ray": "9b58fe130a36e73d-DEN",
+            "cf-visitor": "{\"scheme\":\"https\"}",
+            "cf-warp-tag-id": "73d14a44-2fb8-4750-9319-0d8f61e08a39",
+            "connection": "keep-alive",
+            "content-type": "application/json",
+            "x-forwarded-for": "71.218.241.177",
+            "x-forwarded-proto": "https"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "alert": "AUTO_5M",
+            "symbol": "MES",
+            "account": "beta",
+            "market_state": {
+              "timestamp": "2025-12-29T11:35:00+00:00",
+              "trend": "trending_down",
+              "regime": "trending_down",
+              "slope_norm": -0.5404329169466541,
+              "confidence": 100,
+              "supporting_factors": [
+                "EMA21 slope over 20 bars",
+                "ATR14=1.6964"
+              ],
+              "signal": "SELL"
+            },
+            "confluence": {
+              "score": -0.875891558590428,
+              "bias": "HOLD",
+              "components": [
+                {
+                  "name": "pullback_to_mean",
+                  "signal": 0,
+                  "confidence": 0,
+                  "tags": [],
+                  "metrics": {
+                    "z_ema21": 2.2138774780145294,
+                    "z_vwap": -9.160939913833467
+                  }
+                },
+                {
+                  "name": "trend_channel",
+                  "signal": -1,
+                  "confidence": 0.72990963215869,
+                  "tags": [
+                    "near_upper_channel"
+                  ],
+                  "metrics": {
+                    "upper_y": 6964.511658031087,
+                    "lower_y": 6961.135147601474,
+                    "pivot_highs": 7,
+                    "pivot_lows": 8,
+                    "dist_to_upper_atr": 0.5890632574889171,
+                    "dist_to_lower_atr": 3.298256224994044,
+                    "broken_up": false,
+                    "broken_down": false,
+                    "bos_ok": true,
+                    "trendline_ok": true,
+                    "vol_ok": true
+                  }
+                }
+              ],
+              "gates": {
+                "trendline_ok": true,
+                "bos_ok": true,
+                "vol_ok": true
+              },
+              "trade_recommended": false
+            },
+            "position_context": {
+              "current_position": {
+                "has_position": true,
+                "size": 3,
+                "side": "SHORT",
+                "entry_price": 6962.25,
+                "current_price": 6964,
+                "current_pnl": -26.25,
+                "unrealized_pnl": -26.25,
+                "realized_pnl": 0,
+                "duration_minutes": 39.15986193333333,
+                "stop_count": 1,
+                "target_count": 1
+              },
+              "account_metrics": {
+                "can_trade": true,
+                "risk_level": "low",
+                "consecutive_losses": 0
+              },
+              "risk_limits": {
+                "max_daily_loss": -500,
+                "profit_target": 99999999,
+                "max_consecutive_losses": 999999,
+                "consecutive_loss_guard_enabled": true
+              },
+              "warnings": [],
+              "suggestions": [
+                "Consider cutting losses"
+              ]
+            },
+            "risk_context": {
+              "can_trade": true,
+              "risk_level": "low",
+              "daily_pnl": -1.11,
+              "consecutive_losses": 0
+            },
+            "chart_urls": {}
+          },
+          "webhookUrl": "https://n8n.thetopham.com/webhook/gpt-overseer",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
   "connections": {
     "Webhook": {
       "main": [
         [
           {
-            "node": "5m",
+            "node": "Tradingview Chart",
             "type": "main",
             "index": 0
           }
@@ -672,7 +1043,7 @@
       "main": [
         [
           {
-            "node": "5m",
+            "node": "Tradingview Chart",
             "type": "main",
             "index": 0
           }
@@ -699,7 +1070,7 @@
       "main": [
         [
           {
-            "node": "5m",
+            "node": "Tradingview Chart",
             "type": "main",
             "index": 0
           }
@@ -753,7 +1124,7 @@
       "main": [
         [
           {
-            "node": "Code1",
+            "node": "HTTP Request",
             "type": "main",
             "index": 0
           }
@@ -762,13 +1133,7 @@
     },
     "Code1": {
       "main": [
-        [
-          {
-            "node": "HTTP Request",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     },
     "HTTP Request": {
@@ -849,13 +1214,7 @@
     },
     "HTTP Request1": {
       "main": [
-        [
-          {
-            "node": "Basic LLM Chain",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     },
     "Anthropic Chat Model": {
@@ -894,6 +1253,82 @@
       "ai_languageModel": [
         []
       ]
+    },
+    "Tradingview Chart": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set 'response' value": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "Set 'response' value",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain1": {
+      "main": [
+        [
+          {
+            "node": "Code4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code4": {
+      "main": [
+        [
+          {
+            "node": "Supabase2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Supabase3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Edit Fields3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": true,
@@ -901,7 +1336,7 @@
     "callerPolicy": "workflowsFromSameOwner",
     "executionOrder": "v1"
   },
-  "versionId": "7d7d6bae-77a2-4ddf-bccf-77ff625857a0",
+  "versionId": "44231e3b-2dd6-4f84-8890-8900bd34065c",
   "meta": {
     "templateId": "2569",
     "templateCredsSetupCompleted": true,
