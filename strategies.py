@@ -139,8 +139,31 @@ def _compute_entry_fill(acct_id: int, oid: int) -> float | None:
         time.sleep(0.25)
     return price
 
-#def run_simple(acct_id, sym, sig, size, alert, ai_decision_id=None):
-    #simple script that just sends a buy or sell signal to the api, size is defaulted to 1
+def run_simple(acct_id: int, sym: str, sig: str, size: int, alert: str, ai_decision_id=None):
+    """Execute a simple market order without brackets or automation."""
+    cid = get_contract(sym)
+    side = 0 if sig == "BUY" else 1
+
+    positions = [p for p in search_pos(acct_id) if p["contractId"] == cid]
+
+    # Skip if a position already exists in the same direction
+    if any((side == 0 and p.get("type") == 1) or (side == 1 and p.get("type") == 2) for p in positions):
+        logging.info("run_simple: position already open in same direction; skipping entry")
+        return
+
+    # Flatten opposing exposure before sending a new order
+    if any((side == 0 and p.get("type") == 2) or (side == 1 and p.get("type") == 1) for p in positions):
+        if not flatten_contract(acct_id, cid, timeout=10):
+            logging.error("run_simple: unable to flatten opposing position; aborting entry")
+            return
+
+    entry = place_market(acct_id, cid, side, size)
+    fill_price = _compute_entry_fill(acct_id, entry.get("orderId")) or entry.get("fillPrice")
+
+    logging.info(
+        "run_simple: %s %s size=%s price=%s alert=%s",
+        sig, sym, size, fill_price, alert,
+    )
 
 def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
     cid = get_contract(sym)
