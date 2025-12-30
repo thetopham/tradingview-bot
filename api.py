@@ -16,7 +16,7 @@ from config import load_config
 from dateutil import parser
 from market_state import MarketStateConfig, RollingFiveMinuteEngine, compute_market_state
 from confluence import compute_confluence
-from adaptive_confluence import AdaptiveConfluenceParams, filter_learning_series
+from adaptive_confluence import AdaptiveConfluenceParams
 from supabase import create_client, Client
 from typing import Dict, List, Optional, Tuple
 from threading import RLock
@@ -115,28 +115,12 @@ def _update_adaptive_params(ohlc5m_df: pd.DataFrame, market_state: Dict) -> Tupl
         z_series = _compute_z_ema21_series(ohlc5m_df, params.n)
         sample_count = len(z_series)
         side = (market_state or {}).get("signal")
-        regime = (market_state or {}).get("regime")
-        learnable_count = 0
-        updated = False
-        if side in {"BUY", "SELL"} and regime != "sideways":
-            filtered_series = filter_learning_series(z_series, side)
-            learnable_count = len(filtered_series)
-            updated = params.update_from_series(filtered_series, side)
+        if side in {"BUY", "SELL"}:
+            updated = params.update_from_series(z_series, side)
             if updated:
                 _adaptive_update_counter += 1
                 if _adaptive_update_counter % _ADAPTIVE_SAVE_FREQUENCY == 0:
                     params.save()
-        logging.info(
-            "Adaptive params learn: side=%s regime=%s z_total=%d z_learn=%d updated=%s sell_zone=%s buy_zone=%s threshold=%.3f",
-            side,
-            regime,
-            sample_count,
-            learnable_count,
-            updated,
-            params.sell_zone,
-            params.buy_zone,
-            params.threshold,
-        )
         return params, sample_count
 
 
