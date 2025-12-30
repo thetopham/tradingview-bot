@@ -1902,7 +1902,6 @@
                 const mergedDiagnostics = {
                     ...data,
                     log: shouldIncludeLog ? data.log : (lastData?.diagnostics?.log || data.log),
-                    log_highlights: shouldIncludeLog ? data.log_highlights : (lastData?.diagnostics?.log_highlights || data.log_highlights),
                 };
 
                 lastData.diagnostics = mergedDiagnostics;
