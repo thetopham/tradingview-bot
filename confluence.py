@@ -352,22 +352,9 @@ def compute_confluence(
     }
 
     score = 0.0
-    component_breakdown = []
     for comp in components:
         w = weights.get(comp["name"], 1.0)
-        signal = comp.get("signal", 0)
-        confidence = comp.get("confidence", 0)
-        contribution = w * signal * confidence
-        score += contribution
-        component_breakdown.append(
-            {
-                "name": comp.get("name"),
-                "signal": signal,
-                "confidence": confidence,
-                "weight": w,
-                "contribution": contribution,
-            }
-        )
+        score += w * comp.get("signal", 0) * comp.get("confidence", 0)
 
     confluence_bias = "HOLD"
     if score >= 1.0:
@@ -415,12 +402,11 @@ def compute_confluence(
     if trade_recommended:
         path = "continuation" if trade_by_continuation and not trade_by_score else "pullback"
         logger.info(
-            "Confluence trade via %s path: score=%.3f, gates_ok=%s, continuation=%s, components=%s",
+            "Confluence trade via %s path: score=%.3f, gates_ok=%s, continuation=%s",
             path,
             score,
             gates_ok,
             continuation_allowed,
-            component_breakdown,
         )
     else:
         veto_reasons = []
@@ -431,14 +417,11 @@ def compute_confluence(
         if "too_extended" in trend_tags:
             veto_reasons.append("too_extended")
         logger.info(
-            "Confluence vetoed: reasons=%s, score=%.3f, gates=%s, continuation_allowed=%s, bias=%s, market_signal=%s, components=%s",
+            "Confluence vetoed: reasons=%s, score=%.3f, gates=%s, continuation_allowed=%s",
             ",".join(veto_reasons) or "unknown",
             score,
             gates,
             continuation_allowed,
-            bias,
-            market_signal,
-            component_breakdown,
         )
 
     return {"confluence": sanitize(confluence)}
