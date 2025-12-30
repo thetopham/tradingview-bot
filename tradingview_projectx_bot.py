@@ -38,7 +38,6 @@ import os
 from supabase import create_client
 import requests
 from functools import wraps
-from bracket_math import clamp_size_for_min_stop
 
 # --- Logging/Config/Globals ---
 setup_logging()
@@ -60,13 +59,6 @@ START_TIME = datetime.now(config['CT'])
 SCHEDULER_REF = None
 
 AI_ENDPOINTS = config['AI_ENDPOINTS']
-BRACKET_SL_USD = float(config.get('BRACKET_SL_USD', 50))
-BRACKET_TP_USD = float(config.get('BRACKET_TP_USD', 100))
-BRACKET_POINT_VALUE = float(config.get('BRACKET_POINT_VALUE', 5.0))
-BRACKET_TICK_SIZE = float(config.get('BRACKET_TICK_SIZE', 0.25))
-BRACKET_MIN_SL_POINTS = config.get('BRACKET_MIN_SL_POINTS')
-BRACKET_MIN_SL_TICKS = config.get('BRACKET_MIN_SL_TICKS') or None
-BRACKET_MAX_SIZE = int(config.get('BRACKET_MAX_SIZE', 3))
 
 def ai_url_for(account_name: str) -> str:
     url = AI_ENDPOINTS.get(account_name)
@@ -956,7 +948,6 @@ def handle_webhook_logic(data):
         acct = (data.get("account") or DEFAULT_ACCOUNT).lower()
         sym = data.get("symbol", config['DEFAULT_SYMBOL'])
         size = int(data.get("size", 1))
-        size = max(0, min(size, BRACKET_MAX_SIZE))
         alert = data.get("alert", "")
         ai_decision_id = data.get("ai_decision_id", int(time.time() * 1000) % (2**62))
 
@@ -1044,7 +1035,6 @@ def handle_webhook_logic(data):
             if ai_sig in {"BUY", "SELL", "HOLD"}:
                 sig = ai_sig
             size = int(ai_decision.get('size', size))
-            size = max(0, min(size, BRACKET_MAX_SIZE))
             alert = ai_decision.get('reason', alert)
 
         if sig == "HOLD" and scalp_ok:
@@ -1076,29 +1066,6 @@ def handle_webhook_logic(data):
 
         if not open_pos:
             cancel_all_stops(acct_id, cid)
-
-        requested_size = size
-        if sig in {"BUY", "SELL"} and not open_pos:
-            size, distances = clamp_size_for_min_stop(
-                requested_size,
-                BRACKET_SL_USD,
-                BRACKET_TP_USD,
-                point_value=BRACKET_POINT_VALUE,
-                tick_size=BRACKET_TICK_SIZE,
-                min_sl_points=BRACKET_MIN_SL_POINTS,
-                min_sl_ticks=BRACKET_MIN_SL_TICKS,
-            )
-            if size != requested_size:
-                sl_points = distances.get("sl_points") if distances else None
-                logging.info(
-                    "[BRACKET] size clamped from %s->%s due to min_sl_points (sl_points=%s)",
-                    requested_size,
-                    size,
-                    f"{sl_points:.2f}" if sl_points is not None else "unknown",
-                )
-            if size <= 0:
-                logging.info("[BRACKET] Converted to HOLD - stop distance below minimum")
-                return
 
         logging.info(
             f"Executing simple strategy: {sig} {size} {sym} (pos={total_size})"
