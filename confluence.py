@@ -6,7 +6,7 @@ ease testing and future extensions.
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -36,7 +36,6 @@ def sanitize(obj: Any) -> Any:
 PULLBACK_ZONE_SELL = (-0.2, 0.8, 0.3)  # lower, upper, sweet spot
 PULLBACK_ZONE_BUY = (-0.8, 0.2, -0.3)
 CHANNEL_DISTANCE_RANGE = (-0.2, 1.2)
-SCALP_RANGE_LOOKBACK = 20
 
 
 def _component_result(
@@ -330,147 +329,6 @@ def _channel_component(df: pd.DataFrame, base_bias: str, atr_value: Optional[flo
     )
 
 
-def _candle_rejection(df: pd.DataFrame, direction: str) -> Tuple[float, bool]:
-    """Compute rejection strength for the last candle.
-
-    Returns a tuple of (strength_ratio, is_rejection) where strength_ratio is
-    0..1 based on wick-to-range proportion.
-    """
-
-    if df.empty:
-        return 0.0, False
-
-    last = df.iloc[-1]
-    high = float(last.get("h", 0))
-    low = float(last.get("l", 0))
-    close = float(last.get("c", 0))
-    open_ = float(last.get("o", close))
-    rng = max(high - low, 1e-9)
-
-    if direction == "BUY":
-        wick = close - low
-        body_ok = close >= open_
-    else:
-        wick = high - close
-        body_ok = close <= open_
-
-    strength = min(1.0, max(0.0, wick / rng))
-    return strength, body_ok and strength >= 0.35
-
-
-def _range_scalp_component(
-    df: pd.DataFrame,
-    atr_value: Optional[float],
-    market_state: Optional[Dict] = None,
-    params: Optional[Any] = None,
-) -> Dict:
-    if df.empty or atr_value in {None, 0}:
-        return _component_result("range_scalp", tags=["missing_data"])
-
-    regime = (market_state or {}).get("regime")
-    slope_norm = float((market_state or {}).get("slope_norm", 0) or 0)
-    deadband = float((market_state or {}).get("deadband", 0.05) or 0.05)
-    sideways = regime == "sideways" or abs(slope_norm) <= deadband * 1.5
-    if not sideways:
-        return _component_result("range_scalp", tags=["inactive_regime"], metrics={"sideways": False})
-
-    subset = df.tail(max(SCALP_RANGE_LOOKBACK, 5)).copy()
-    close = float(subset["c"].iloc[-1])
-    high = float(subset["h"].iloc[-1])
-    low = float(subset["l"].iloc[-1])
-    open_ = float(subset["o"].iloc[-1])
-    vwap = _safe_latest(subset.get("vwap"))
-    ema = _safe_latest(subset.get("ema21")) or close
-    bb_upper = _safe_latest(subset.get("bb_upper"))
-    bb_lower = _safe_latest(subset.get("bb_lower"))
-    bb_middle = _safe_latest(subset.get("bb_middle")) or ema
-
-    z_ema = (close - ema) / atr_value
-    z_vwap = (close - vwap) / atr_value if vwap is not None else None
-    range_high = subset["h"].tail(SCALP_RANGE_LOOKBACK).max()
-    range_low = subset["l"].tail(SCALP_RANGE_LOOKBACK).min()
-    dist_to_high_atr = (range_high - close) / atr_value
-    dist_to_low_atr = (close - range_low) / atr_value
-    bb_width_atr = None
-    if bb_upper is not None and bb_lower is not None:
-        bb_width_atr = (bb_upper - bb_lower) / atr_value if atr_value else None
-
-    def _dist_conf(val: float, sweet_low: float = 0.8, sweet_high: float = 1.6) -> float:
-        abs_val = abs(val)
-        if abs_val <= 0:
-            return 0.0
-        if abs_val < sweet_low:
-            return abs_val / sweet_low * 0.6
-        if abs_val > sweet_high:
-            return max(0.1, (sweet_high + 0.4 - abs_val) / (sweet_high + 0.4))
-        return 0.8 + (abs_val - sweet_low) / (sweet_high - sweet_low) * 0.2
-
-    rejection_buy, buy_reject = _candle_rejection(subset, "BUY")
-    rejection_sell, sell_reject = _candle_rejection(subset, "SELL")
-
-    signal = 0
-    confidence = 0.0
-    tags: List[str] = ["scalp"]
-    metrics: Dict[str, Any] = {
-        "z_ema": z_ema,
-        "z_vwap": z_vwap,
-        "bb_width_atr": bb_width_atr,
-        "dist_to_high_atr": dist_to_high_atr,
-        "dist_to_low_atr": dist_to_low_atr,
-        "range_high": range_high,
-        "range_low": range_low,
-        "bb_middle": bb_middle,
-        "sideways": True,
-    }
-
-    candidates: List[Tuple[int, float, str]] = []  # (signal, confidence, tag)
-
-    # Mean reversion around EMA/VWAP
-    if z_ema <= -0.8 or (z_vwap is not None and z_vwap <= -0.8):
-        if buy_reject:
-            base_conf = _dist_conf(min(z_ema, z_vwap or z_ema))
-            candidates.append((1, base_conf * (0.8 + 0.2 * rejection_buy), "scalp_meanrev"))
-    if z_ema >= 0.8 or (z_vwap is not None and z_vwap >= 0.8):
-        if sell_reject:
-            base_conf = _dist_conf(max(z_ema, z_vwap or z_ema))
-            candidates.append((-1, base_conf * (0.8 + 0.2 * rejection_sell), "scalp_meanrev"))
-
-    # Bollinger fade on compressed bands
-    if bb_width_atr is not None and bb_width_atr < 2.0:
-        compression = min(1.0, max(0.5, (2.0 - bb_width_atr) / 2))
-        if bb_lower is not None and close <= bb_lower + 0.1 * atr_value and buy_reject:
-            dist_conf = _dist_conf((bb_middle - close) / atr_value if bb_middle else 1.0)
-            candidates.append((1, compression * dist_conf, "scalp_bb_fade"))
-        if bb_upper is not None and close >= bb_upper - 0.1 * atr_value and sell_reject:
-            dist_conf = _dist_conf((close - bb_middle) / atr_value if bb_middle else 1.0)
-            candidates.append((-1, compression * dist_conf, "scalp_bb_fade"))
-
-    # Range edges
-    if dist_to_low_atr <= 0.35 and buy_reject:
-        candidates.append((1, _dist_conf(dist_to_low_atr + 0.5), "scalp_range_edge"))
-    if dist_to_high_atr <= 0.35 and sell_reject:
-        candidates.append((-1, _dist_conf(dist_to_high_atr + 0.5), "scalp_range_edge"))
-
-    # Failed breakouts beyond range extremes
-    if high > range_high and close <= range_high + 0.15 * atr_value and sell_reject:
-        candidates.append((-1, _dist_conf((high - close) / atr_value), "scalp_failed_break"))
-    if low < range_low and close >= range_low - 0.15 * atr_value and buy_reject:
-        candidates.append((1, _dist_conf((close - low) / atr_value), "scalp_failed_break"))
-
-    if candidates:
-        signal, confidence, tag = max(candidates, key=lambda x: x[1])
-        tags.append(tag)
-    confidence = float(min(1.0, confidence))
-
-    return _component_result(
-        "range_scalp",
-        signal=signal,
-        confidence=confidence,
-        tags=tags,
-        metrics=metrics,
-    )
-
-
 def compute_confluence(
     ohlc5m: pd.DataFrame,
     base_signal: Optional[str] = None,
@@ -495,10 +353,6 @@ def compute_confluence(
         atr_value = _compute_atr(ohlc5m)
 
     market_bias = market_state.get("signal") if market_state else None
-    slope_norm = float((market_state or {}).get("slope_norm", 0) or 0)
-    deadband = float((market_state or {}).get("deadband", 0.05) or 0.05)
-    regime = (market_state or {}).get("regime")
-    is_sideways = regime == "sideways" or abs(slope_norm) <= deadband * 1.5
     bias = base_signal or market_bias or _infer_base_bias(ohlc5m, atr_value)
     components = []
 
@@ -518,19 +372,9 @@ def compute_confluence(
     trend_channel = _channel_component(ohlc5m, bias, atr_value)
     components.extend([sanitize(pullback), sanitize(trend_channel)])
 
-    if is_sideways:
-        range_scalp = _range_scalp_component(
-            ohlc5m,
-            atr_value,
-            market_state=market_state,
-            params=params,
-        )
-        components.append(sanitize(range_scalp))
-
     weights = {
         "pullback_to_mean": 1.0,
         "trend_channel": 1.2,
-        "range_scalp": 1.0,
     }
 
     score = 0.0
@@ -551,22 +395,10 @@ def compute_confluence(
             }
         )
 
-    confluence_tags = sorted({t for comp in components for t in comp.get("tags", []) if t})
-    scalp_present = any("scalp" in t for t in confluence_tags)
-
-    threshold_val = getattr(params, "threshold", 1.0) if params is not None else 1.0
-    threshold = 1.0 if threshold_val in {None, 0} else float(threshold_val)
-    scalp_threshold_val = getattr(params, "scalp_threshold", None)
-    scalp_threshold = (
-        float(scalp_threshold_val)
-        if scalp_threshold_val not in {None, 0}
-        else min(threshold, 0.6)
-    )
-
     confluence_bias = "HOLD"
-    if score >= threshold:
+    if score >= 1.0:
         confluence_bias = "BUY"
-    elif score <= -threshold:
+    elif score <= -1.0:
         confluence_bias = "SELL"
 
     trendline_ok = bool(trend_channel.get("metrics", {}).get("trendline_ok", True))
@@ -578,8 +410,9 @@ def compute_confluence(
         "vol_ok": bool(vol_ok),
     }
 
+    threshold_val = getattr(params, "threshold", 1.0) if params is not None else 1.0
+    threshold = 1.0 if threshold_val in {None, 0} else float(threshold_val)
     score_satisfies = abs(score) >= threshold
-    scalp_score_satisfies = is_sideways and scalp_present and abs(score) >= scalp_threshold
     gates_ok = all(gates.values())
     market_signal = (market_state or {}).get("signal") if market_state else None
     market_confidence = float((market_state or {}).get("confidence", 0)) if market_state else 0.0
@@ -589,17 +422,13 @@ def compute_confluence(
     continuation_allowed = "trend_continuation" in trend_tags and "too_extended" not in trend_tags
 
     trade_by_score = score_satisfies and gates_ok
-    trade_by_scalp = scalp_score_satisfies and gates_ok
     trade_by_continuation = (
         market_trend_strong
         and gates_ok
         and (score_satisfies or continuation_allowed)
     )
 
-    trade_recommended = trade_by_score or trade_by_continuation or trade_by_scalp
-
-    if confluence_bias == "HOLD" and trade_by_scalp:
-        confluence_bias = "BUY" if score > 0 else "SELL"
+    trade_recommended = trade_by_score or trade_by_continuation
 
     confluence = {
         "score": float(score),
@@ -607,9 +436,6 @@ def compute_confluence(
         "components": components,
         "gates": gates,
         "trade_recommended": trade_recommended,
-        "threshold": threshold,
-        "scalp_threshold": scalp_threshold,
-        "tags": confluence_tags,
     }
 
     if trade_recommended:
@@ -622,23 +448,6 @@ def compute_confluence(
             continuation_allowed,
             component_breakdown,
         )
-        if trade_by_scalp:
-            range_comp = next((c for c in components if c.get("name") == "range_scalp"), {})
-            metrics = range_comp.get("metrics", {}) if isinstance(range_comp, dict) else {}
-            setup_tag = next((t for t in confluence_tags if t.startswith("scalp_")), "scalp")
-            dist_to_range = min(
-                abs(metrics.get("dist_to_high_atr", 0) or 0),
-                abs(metrics.get("dist_to_low_atr", 0) or 0),
-            )
-            logger.info(
-                "Confluence scalp: tag=%s score=%.3f threshold=%.2f z_ema=%.2f bb_width_atr=%s dist_to_range=%.3f",
-                setup_tag,
-                score,
-                scalp_threshold,
-                float(metrics.get("z_ema", 0) or 0),
-                metrics.get("bb_width_atr"),
-                dist_to_range,
-            )
     else:
         veto_reasons = []
         if not gates_ok:
