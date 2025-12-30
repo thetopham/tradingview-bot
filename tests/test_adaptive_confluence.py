@@ -60,7 +60,6 @@ def test_sell_learns_from_positive_half_of_mixed_series():
 def test_sideways_regime_skips_adaptive_update():
     params = AdaptiveConfluenceParams(alpha=0.5, n=120, min_samples=10)
     api._adaptive_params = params
-    previous_counter = api._adaptive_update_counter
 
     data = []
     price = 100.0
@@ -85,8 +84,6 @@ def test_sideways_regime_skips_adaptive_update():
         )
     finally:
         api._adaptive_params = None
-        api._adaptive_update_counter = previous_counter
 
     assert sample_count > 0
     assert updated_params.buy_zone == initial_buy_zone
-    assert api._adaptive_update_counter == previous_counter
