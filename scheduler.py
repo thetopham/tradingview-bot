@@ -16,10 +16,8 @@ from api import (
     get_market_conditions_summary,
     check_contract_rollover,
     get_contract,
-    flatten_contract,
 )
-from state import get_last_event_id, set_last_event_id, get_pm_meta, set_pm_meta
-from position_management import decide_pm_action
+from state import get_last_event_id, set_last_event_id
 
 
 config = load_config()
@@ -28,15 +26,6 @@ CT = pytz.timezone("America/Chicago")
 TV_PORT = config['TV_PORT']
 ACCOUNTS = config['ACCOUNTS']
 AUTOTRADE_ACCOUNTS = config.get('AUTOTRADE_ACCOUNTS', list(ACCOUNTS.keys()))
-POSITION_MANAGEMENT_ENABLED = config.get('POSITION_MANAGEMENT_ENABLED', True)
-PM_FLAT_POLL_SECONDS = int(config.get('PM_FLAT_POLL_SECONDS', 300))
-PM_IN_POSITION_POLL_SECONDS = int(config.get('PM_IN_POSITION_POLL_SECONDS', 90))
-PM_CUT_LOSS = float(config.get('PM_CUT_LOSS', -20.0))
-PM_OPPOSITE_PERSIST_K = int(config.get('PM_OPPOSITE_PERSIST_K', 2))
-PM_OPPOSITE_MIN_PNL = float(config.get('PM_OPPOSITE_MIN_PNL', -5.0))
-PM_TIME_STOP_MINUTES = float(config.get('PM_TIME_STOP_MINUTES', 20))
-PM_TIME_STOP_PNL_BAND = float(config.get('PM_TIME_STOP_PNL_BAND', 5.0))
-PM_MIN_SECONDS_BETWEEN_FLATS = int(config.get('PM_MIN_SECONDS_BETWEEN_FLATS', 60))
 
 LAST_JOB_RUN = {}
 
@@ -383,150 +372,48 @@ def start_scheduler(app):
             logging.error(f"[Incremental Market Update] Error: {e}")
 
     # ──────────────────────────────────────────────────────────────────────────────
-    # Position management job - runs every 2 minutes (dynamic throttling inside)
+    # Position monitoring job - runs every 2 minutes
     # ──────────────────────────────────────────────────────────────────────────────
-    def position_management_job():
-        """Lightweight position management loop."""
+    def position_monitoring_job():
+        """Monitor existing positions and log alerts"""
         try:
-            symbol = config.get('DEFAULT_SYMBOL', 'MES')
-            if not POSITION_MANAGEMENT_ENABLED:
-                logging.info("[PM] Position management disabled; running logging-only mode")
+            logging.info("🔄 Running position monitoring...")
+
+            from api import get_contract
+            cid = get_contract('MES')
+
+            for account_name, acct_id in ACCOUNTS.items():
                 try:
-                    cid = get_contract(symbol)
-                except Exception as exc:
-                    logging.error("[PM] Unable to resolve contract: %s", exc)
-                    return
-                for account_name, acct_id in ACCOUNTS.items():
-                    try:
-                        position_state = position_manager.get_position_state(acct_id, cid)
-                        if position_state.get('has_position'):
-                            logging.info(
-                                "[PM] %s logging: %s contracts %s pnl=%.2f duration=%.0f",
-                                account_name,
-                                position_state.get('size'),
-                                position_state.get('side'),
-                                position_state.get('current_pnl', 0),
-                                position_state.get('duration_minutes', 0),
+                    # Get position state
+                    position_state = position_manager.get_position_state(acct_id, cid)
+
+                    # If we have a position, log its status
+                    if position_state['has_position']:
+                        logging.info(
+                            f"Position Monitor - {account_name}: "
+                            f"{position_state['size']} contracts {position_state['side']}, "
+                            f"P&L: ${position_state['current_pnl']:.2f} "
+                            f"(unrealized: ${position_state.get('unrealized_pnl', 0):.2f}), "
+                            f"Duration: {position_state['duration_minutes']:.0f} min"
+                        )
+
+                        # Log alerts for concerning positions
+                        if position_state['current_pnl'] < -100:
+                            logging.warning(f"⚠️ {account_name}: Large loss ${position_state['current_pnl']:.2f}")
+
+                        if position_state['duration_minutes'] > 120:
+                            logging.warning(
+                                f"⚠️ {account_name}: Stale position ({position_state['duration_minutes']:.0f} min)"
                             )
-                    except Exception as exc:
-                        logging.error("[PM] Logging mode error for %s: %s", account_name, exc)
-                return
 
-            now = time.time()
-            summary = get_market_conditions_summary(cached_only=True, symbol=symbol) or {}
-            market_state = summary.get('market_state') or summary or {}
-            market_signal = (market_state or {}).get('signal', 'HOLD')
+                        if len(position_state['stop_orders']) == 0:
+                            logging.warning(f"⚠️ {account_name}: No stop loss detected!")
 
-            try:
-                cid = get_contract(symbol)
-            except Exception as exc:
-                logging.error("[PM] Unable to resolve contract for %s: %s", symbol, exc)
-                return
-
-            for account_name in AUTOTRADE_ACCOUNTS:
-                if account_name not in ACCOUNTS:
-                    logging.warning("[PM] Unknown account '%s' in AUTOTRADE_ACCOUNTS", account_name)
-                    continue
-                acct_id = ACCOUNTS[account_name]
-                pm_key = f"{account_name}:pm:{symbol}"
-                meta = get_pm_meta(pm_key) or {}
-                last_check_ts = float(meta.get('last_check_ts') or 0)
-                last_has_position = bool(meta.get('last_has_position'))
-                last_flatten_ts = float(meta.get('last_flatten_ts') or 0)
-                last_pos_open_ts = meta.get('last_pos_open_ts')
-                opp_count = int(meta.get('opp_count') or 0)
-
-                if not last_has_position and now - last_check_ts < PM_FLAT_POLL_SECONDS:
-                    continue
-                if last_has_position and now - last_check_ts < PM_IN_POSITION_POLL_SECONDS:
-                    continue
-
-                try:
-                    position_state = position_manager.get_position_state_light(acct_id, cid)
-                except Exception as exc:
-                    logging.error("[PM] %s position snapshot error: %s", account_name, exc)
-                    continue
-
-                has_position = bool(position_state.get('has_position'))
-                meta['last_has_position'] = has_position
-                meta['last_check_ts'] = now
-
-                if not has_position:
-                    meta['opp_count'] = 0
-                    meta['last_pos_side'] = None
-                    meta['last_pos_open_ts'] = None
-                    set_pm_meta(pm_key, meta)
-                    continue
-
-                creation_ts = position_state.get('creationTimestamp')
-                if creation_ts and creation_ts != last_pos_open_ts:
-                    opp_count = 0
-                    meta['last_pos_open_ts'] = creation_ts
-
-                side = position_state.get('side')
-                opposite = (side == "LONG" and market_signal == "SELL") or (side == "SHORT" and market_signal == "BUY")
-                if opposite:
-                    opp_count += 1
-                else:
-                    opp_count = 0
-
-                meta['opp_count'] = opp_count
-                meta['last_pos_side'] = side
-
-                try:
-                    account_state = position_manager.get_account_state_cached(acct_id, max_age_seconds=300)
-                except Exception as exc:
-                    logging.error("[PM] %s account state error: %s", account_name, exc)
-                    set_pm_meta(pm_key, meta)
-                    continue
-
-                action, reason = decide_pm_action(
-                    position_state,
-                    market_signal,
-                    account_state,
-                    opp_count,
-                    {
-                        'PM_CUT_LOSS': PM_CUT_LOSS,
-                        'PM_OPPOSITE_PERSIST_K': PM_OPPOSITE_PERSIST_K,
-                        'PM_OPPOSITE_MIN_PNL': PM_OPPOSITE_MIN_PNL,
-                        'PM_TIME_STOP_MINUTES': PM_TIME_STOP_MINUTES,
-                        'PM_TIME_STOP_PNL_BAND': PM_TIME_STOP_PNL_BAND,
-                        'opposite': opposite,
-                    },
-                )
-
-                logging.info(
-                    "[PM] %s side=%s pnl=%.2f dur=%.1f opp=%d signal=%s action=%s reason=%s",
-                    account_name,
-                    side,
-                    position_state.get('current_pnl', 0),
-                    position_state.get('duration_minutes', 0),
-                    opp_count,
-                    market_signal,
-                    action,
-                    reason,
-                )
-
-                if action == "FLAT":
-                    if now - last_flatten_ts < PM_MIN_SECONDS_BETWEEN_FLATS:
-                        logging.info("[PM] %s flatten throttled (reason=%s)", account_name, reason)
-                        set_pm_meta(pm_key, meta)
-                        continue
-                    try:
-                        flattened = flatten_contract(acct_id, cid, timeout=10)
-                        if flattened:
-                            logging.warning("[PM] %s flattened (%s)", account_name, reason)
-                            meta['last_flatten_ts'] = now
-                            meta['opp_count'] = 0
-                        else:
-                            logging.error("[PM] %s flatten call returned falsy (%s)", account_name, reason)
-                    except Exception as exc:
-                        logging.error("[PM] %s flatten failed (%s): %s", account_name, reason, exc)
-
-                set_pm_meta(pm_key, meta)
+                except Exception as e:
+                    logging.error(f"[Position Monitor] Error for {account_name}: {e}")
 
         except Exception as e:
-            logging.error(f"[PM] General error: {e}")
+            logging.error(f"[Position Monitor] General error: {e}")
 
     # ──────────────────────────────────────────────────────────────────────────────
     # Account health check - runs every 30 minutes
@@ -799,15 +686,15 @@ def start_scheduler(app):
         replace_existing=True,
     )
 
-    # Position management every 2 minutes (internal throttle reduces API pressure)
+    # Position monitoring every 2 minutes
     scheduler.add_job(
-        _wrap_job('position_management', position_management_job),
+        _wrap_job('position_monitoring', position_monitoring_job),
         CronTrigger(
             minute='1,3,6,8,11,13,16,18,21,23,26,28,31,33,36,38,41,43,46,48,51,53,56,58',
             second=0,
             timezone=CT,
         ),
-        id='position_management',
+        id='position_monitoring',
         replace_existing=True,
     )
 
