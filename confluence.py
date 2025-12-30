@@ -1,12 +1,5 @@
-"""Confluence scoring helpers for intraday trade signals.
-
-This module combines multiple lightweight technical components to produce a
-single trade bias and confidence score. Functions are intentionally small to
-ease testing and future extensions.
-"""
-
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -14,23 +7,19 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
-def sanitize(obj: Any) -> Any:
+def sanitize(obj):
     """Convert numpy/pandas objects to JSON-serializable Python types."""
 
     if isinstance(obj, np.generic):
         return obj.item()
     if isinstance(obj, np.ndarray):
         return obj.tolist()
-    if isinstance(obj, pd.Series):
-        return sanitize(obj.tolist())
     if isinstance(obj, dict):
         return {k: sanitize(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [sanitize(v) for v in obj]
     if isinstance(obj, tuple):
         return [sanitize(v) for v in obj]
-    if isinstance(obj, pd.Timestamp):
-        return obj.isoformat()
     return obj
 
 PULLBACK_ZONE_SELL = (-0.2, 0.8, 0.3)  # lower, upper, sweet spot
@@ -38,27 +27,7 @@ PULLBACK_ZONE_BUY = (-0.8, 0.2, -0.3)
 CHANNEL_DISTANCE_RANGE = (-0.2, 1.2)
 
 
-def _component_result(
-    name: str,
-    signal: int = 0,
-    confidence: float = 0.0,
-    tags: Optional[List[str]] = None,
-    metrics: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """Standardize component return payloads to reduce duplication."""
-
-    return {
-        "name": name,
-        "signal": signal,
-        "confidence": float(confidence),
-        "tags": tags or [],
-        "metrics": metrics or {},
-    }
-
-
 def _safe_latest(series: pd.Series) -> Optional[float]:
-    """Return the last non-null value of a series as a float."""
-
     if series is None or series.empty:
         return None
     last_valid = series.dropna()
@@ -68,8 +37,6 @@ def _safe_latest(series: pd.Series) -> Optional[float]:
 
 
 def _compute_atr(df: pd.DataFrame, period: int = 14) -> Optional[float]:
-    """Compute Average True Range for the provided dataframe."""
-
     if df.empty or len(df) < period + 1:
         return None
     highs = df["h"].astype(float)
@@ -86,16 +53,12 @@ def _compute_atr(df: pd.DataFrame, period: int = 14) -> Optional[float]:
 
 
 def _compute_ema(df: pd.DataFrame, period: int = 21) -> Optional[pd.Series]:
-    """Compute an EMA series for closing prices."""
-
     if df.empty:
         return None
     return df["c"].astype(float).ewm(span=period, adjust=False).mean()
 
 
 def _infer_base_bias(df: pd.DataFrame, atr_value: Optional[float]) -> str:
-    """Infer directional bias from EMA slope normalized by ATR."""
-
     ema_series = df.get("ema21")
     if ema_series is None or ema_series.isna().all():
         ema_series = _compute_ema(df)
@@ -113,8 +76,6 @@ def _infer_base_bias(df: pd.DataFrame, atr_value: Optional[float]) -> str:
 
 
 def _zone_confidence(value: float, lower: float, upper: float, sweet: float) -> float:
-    """Calculate confidence for values within a preferred range."""
-
     if value < lower or value > upper:
         return 0.0
     half_range = (upper - lower) / 2 or 1
@@ -129,7 +90,13 @@ def _pullback_component(
 ) -> Dict:
     tags: List[str] = []
     if atr_value is None or atr_value == 0:
-        return _component_result("pullback_to_mean", tags=["missing_data"])
+        return {
+            "name": "pullback_to_mean",
+            "signal": 0,
+            "confidence": 0.0,
+            "tags": ["missing_data"],
+            "metrics": {},
+        }
 
     ema_series = df.get("ema21")
     if ema_series is None or ema_series.isna().all():
@@ -142,7 +109,13 @@ def _pullback_component(
     vwap_last = _safe_latest(df.get("vwap"))
 
     if ema_last is None or close_last is None:
-        return _component_result("pullback_to_mean", tags=["missing_data"])
+        return {
+            "name": "pullback_to_mean",
+            "signal": 0,
+            "confidence": 0.0,
+            "tags": ["missing_data"],
+            "metrics": {},
+        }
 
     z_ema21 = (close_last - ema_last) / atr_value
     metrics = {"z_ema21": z_ema21}
@@ -167,18 +140,16 @@ def _pullback_component(
             confidence = _zone_confidence(z_ema21, low, high, sweet)
             tags.append("pullback_zone")
 
-    return _component_result(
-        "pullback_to_mean",
-        signal=signal,
-        confidence=float(confidence),
-        tags=tags,
-        metrics=metrics,
-    )
+    return {
+        "name": "pullback_to_mean",
+        "signal": signal,
+        "confidence": float(confidence),
+        "tags": tags,
+        "metrics": metrics,
+    }
 
 
 def _detect_pivots(df: pd.DataFrame, lookback: int = 3) -> Dict[str, List[Dict]]:
-    """Identify local highs and lows within a rolling window."""
-
     pivots_high: List[Dict] = []
     pivots_low: List[Dict] = []
     highs = df["h"].values
@@ -194,25 +165,19 @@ def _detect_pivots(df: pd.DataFrame, lookback: int = 3) -> Dict[str, List[Dict]]
 
 
 def _fit_line(points: List[Dict]) -> Optional[Dict[str, float]]:
-    """Fit a simple line through pivot points returning slope and intercept."""
-
     if len(points) < 2:
         return None
     xs = np.array([p["x"] for p in points], dtype=float)
     ys = np.array([p["y"] for p in points], dtype=float)
-    try:
-        if len(points) >= 3:
-            m, b = np.polyfit(xs, ys, 1)
-        else:
-            x1, x2 = xs
-            y1, y2 = ys
-            if x2 == x1:
-                return None
-            m = (y2 - y1) / (x2 - x1)
-            b = y1 - m * x1
-    except (TypeError, np.linalg.LinAlgError):
-        logger.debug("Failed to fit line for points: %s", points)
-        return None
+    if len(points) >= 3:
+        m, b = np.polyfit(xs, ys, 1)
+    else:
+        x1, x2 = xs
+        y1, y2 = ys
+        if x2 == x1:
+            return None
+        m = (y2 - y1) / (x2 - x1)
+        b = y1 - m * x1
     return {"m": float(m), "b": float(b)}
 
 
@@ -224,7 +189,13 @@ def _line_value(line: Dict[str, float], x: float) -> Optional[float]:
 
 def _channel_component(df: pd.DataFrame, base_bias: str, atr_value: Optional[float]) -> Dict:
     if df.empty or atr_value is None or atr_value == 0:
-        return _component_result("trend_channel", tags=["missing_data"])
+        return {
+            "name": "trend_channel",
+            "signal": 0,
+            "confidence": 0.0,
+            "tags": ["missing_data"],
+            "metrics": {},
+        }
 
     subset = df.tail(80).reset_index(drop=True)
     pivots = _detect_pivots(subset)
@@ -248,9 +219,13 @@ def _channel_component(df: pd.DataFrame, base_bias: str, atr_value: Optional[flo
     }
 
     if upper_y is None or lower_y is None:
-        return _component_result(
-            "trend_channel", tags=["insufficient_pivots"], metrics=metrics
-        )
+        return {
+            "name": "trend_channel",
+            "signal": 0,
+            "confidence": 0.0,
+            "tags": ["insufficient_pivots"],
+            "metrics": metrics,
+        }
 
     dist_to_upper = (upper_y - close_last) / atr_value
     dist_to_lower = (close_last - lower_y) / atr_value
@@ -320,13 +295,13 @@ def _channel_component(df: pd.DataFrame, base_bias: str, atr_value: Optional[flo
         metrics["trendline_ok"] = trendline_ok
         metrics["vol_ok"] = vol_ok
 
-    return _component_result(
-        "trend_channel",
-        signal=signal,
-        confidence=float(confidence),
-        tags=tags,
-        metrics=metrics,
-    )
+    return {
+        "name": "trend_channel",
+        "signal": signal,
+        "confidence": float(confidence),
+        "tags": tags,
+        "metrics": metrics,
+    }
 
 
 def compute_confluence(
@@ -342,8 +317,7 @@ def compute_confluence(
     else:
         ohlc5m = ohlc5m.copy()
 
-    required_columns = {"o", "h", "l", "c"}
-    if not required_columns.issubset(ohlc5m.columns):
+    if not set(["o", "h", "l", "c"]).issubset(ohlc5m.columns):
         return {"confluence": {"score": 0.0, "bias": "HOLD", "components": [], "gates": {}}}
 
     ohlc5m = ohlc5m.sort_values("ts") if "ts" in ohlc5m.columns else ohlc5m
