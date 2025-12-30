@@ -104,12 +104,7 @@ def start_scheduler(app):
         score = float(confluence.get('score', 0) or 0)
         confluence_ok = bool(confluence.get('trade_recommended'))
         require_confluence = config.get('AUTOTRADE_REQUIRE_CONFLUENCE', True)
-        confluence_tags = confluence.get('tags', []) if isinstance(confluence, dict) else []
         min_score = float(config.get('AUTOTRADE_MIN_SCORE', 1.0))
-        if (market_state.get('regime') == 'sideways') and any(
-            'scalp' in t for t in confluence_tags
-        ):
-            min_score = float(config.get('AUTOTRADE_MIN_SCORE_SCALP', 0.6))
         summary_trade_recommended = bool(summary.get('trade_recommended', False))
 
         if require_confluence:

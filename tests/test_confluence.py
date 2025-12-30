@@ -1,10 +1,6 @@
-import os
-import sys
 from unittest.mock import patch
 
 import pandas as pd
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from confluence import compute_confluence
 
@@ -138,65 +134,3 @@ def test_strong_trend_continuation_allows_trade_when_score_low():
     assert abs(result["score"]) < 1.0
     trend = next(c for c in result["components"] if c["name"] == "trend_channel")
     assert "trend_continuation" in trend.get("tags", [])
-
-
-def _sideways_df(z_val: float) -> pd.DataFrame:
-    base_price = 100.0
-    atr = 1.0
-    rows = []
-    for i in range(25):
-        price = base_price + (0.05 if i % 2 else -0.05)
-        rows.append(
-            {
-                "ts": f"2024-01-01T00:{i:02d}:00",
-                "o": price,
-                "h": price + 0.6,
-                "l": price - 0.6,
-                "c": price,
-                "ema21": price,
-                "vwap": price,
-                "atr": atr,
-                "bb_upper": price + 1.0,
-                "bb_lower": price - 1.0,
-                "bb_middle": price,
-            }
-        )
-
-    close = base_price + z_val * atr
-    rows[-1]["c"] = close
-    rows[-1]["o"] = close - (0.4 if z_val < 0 else -0.4)
-    rows[-1]["l"] = close - (0.8 if z_val < 0 else 0.4)
-    rows[-1]["h"] = close + (0.2 if z_val < 0 else 1.0)
-    return pd.DataFrame(rows)
-
-
-def test_sideways_scalp_buy_triggers_with_rejection():
-    df = _sideways_df(-0.9)
-    market_state = {"regime": "sideways", "signal": "HOLD", "slope_norm": 0.0, "deadband": 0.05}
-
-    result = compute_confluence(df, market_state=market_state)["confluence"]
-
-    assert result["bias"] == "BUY"
-    assert result["trade_recommended"] is True
-    assert any("scalp" in t for t in result.get("tags", []))
-
-
-def test_sideways_scalp_sell_triggers_with_rejection():
-    df = _sideways_df(0.95)
-    market_state = {"regime": "sideways", "signal": "HOLD", "slope_norm": 0.0, "deadband": 0.05}
-
-    result = compute_confluence(df, market_state=market_state)["confluence"]
-
-    assert result["bias"] == "SELL"
-    assert result["trade_recommended"] is True
-    assert any("scalp" in t for t in result.get("tags", []))
-
-
-def test_scalp_not_active_in_trend():
-    df = _sideways_df(-0.9)
-    market_state = {"regime": "trending_up", "signal": "BUY", "slope_norm": 0.2, "deadband": 0.05}
-
-    result = compute_confluence(df, market_state=market_state)["confluence"]
-
-    assert result["bias"] in {"BUY", "HOLD"}
-    assert not any("scalp" in t for t in result.get("tags", []))
