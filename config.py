@@ -38,15 +38,6 @@ def load_config():
         'DASHBOARD_DIAGNOSTICS_PUBLIC': os.getenv("DASHBOARD_DIAGNOSTICS_PUBLIC", "false").lower() == "true",
         'DASHBOARD_USERNAME': os.getenv("DASHBOARD_USERNAME", "dashboard"),
         'DASHBOARD_PASSWORD': os.getenv("DASHBOARD_PASSWORD"),
-        'POSITION_MANAGEMENT_ENABLED': os.getenv("POSITION_MANAGEMENT_ENABLED", "true").lower() == "true",
-        'PM_FLAT_POLL_SECONDS': int(os.getenv("PM_FLAT_POLL_SECONDS", 300)),
-        'PM_IN_POSITION_POLL_SECONDS': int(os.getenv("PM_IN_POSITION_POLL_SECONDS", 90)),
-        'PM_CUT_LOSS': float(os.getenv("PM_CUT_LOSS", -20.0)),
-        'PM_OPPOSITE_PERSIST_K': int(os.getenv("PM_OPPOSITE_PERSIST_K", 2)),
-        'PM_OPPOSITE_MIN_PNL': float(os.getenv("PM_OPPOSITE_MIN_PNL", -5.0)),
-        'PM_TIME_STOP_MINUTES': float(os.getenv("PM_TIME_STOP_MINUTES", 20)),
-        'PM_TIME_STOP_PNL_BAND': float(os.getenv("PM_TIME_STOP_PNL_BAND", 5.0)),
-        'PM_MIN_SECONDS_BETWEEN_FLATS': int(os.getenv("PM_MIN_SECONDS_BETWEEN_FLATS", 60)),
     }
 
     if not config['DASHBOARD_PASSWORD']:

@@ -13,7 +13,6 @@ _state_lock = threading.Lock()
 _state = {
     "last_event": {},
     "last_action_ts": {},
-    "pm_meta": {},
 }
 
 session = requests.Session()
@@ -29,7 +28,6 @@ def _load_state_from_disk():
             _state.update({
                 "last_event": data.get("last_event", {}),
                 "last_action_ts": data.get("last_action_ts", {}),
-                "pm_meta": data.get("pm_meta", {}),
             })
     except Exception as exc:
         logging.error("Failed to load autotrade state: %s", exc)
@@ -63,17 +61,6 @@ def get_last_action_ts(account: str) -> float | None:
 def set_last_action_ts(account: str, ts: float | None = None):
     with _state_lock:
         _state.setdefault("last_action_ts", {})[account] = ts or time.time()
-        _persist_state()
-
-
-def get_pm_meta(key: str) -> dict | None:
-    with _state_lock:
-        return _state.get("pm_meta", {}).get(key)
-
-
-def set_pm_meta(key: str, meta: dict):
-    with _state_lock:
-        _state.setdefault("pm_meta", {})[key] = meta
         _persist_state()
 
 
