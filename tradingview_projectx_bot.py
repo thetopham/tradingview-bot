@@ -8,11 +8,10 @@ Handles webhooks, AI decisions, trade execution, and scheduled processing.
 
 from datetime import time as dtime, timedelta
 from typing import Optional
-from flask import Flask, request, jsonify, send_from_directory, send_file
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from logging_config import setup_logging
 from config import load_config
-from diagnostics import allow_diagnostics, get_log_tail
 from api import (
     flatten_contract, get_contract, cancel_all_stops,
     search_pos, get_supabase_client, search_trades, search_open,
@@ -25,7 +24,7 @@ from api import (
     search_accounts,  # <—— uses /api/Account/search
 )
 from strategies import run_simple
-from scheduler import start_scheduler, LAST_JOB_RUN
+from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token
 from signalr_listener import launch_signalr_listener
 from threading import Thread
@@ -49,11 +48,6 @@ DEFAULT_ACCOUNT = config['DEFAULT_ACCOUNT']
 CT              = config['CT']
 GET_FLAT_START  = config['GET_FLAT_START']
 GET_FLAT_END    = config['GET_FLAT_END']
-DIAGNOSTICS_PUBLIC = config.get('DASHBOARD_DIAGNOSTICS_PUBLIC', False)
-
-LOG_FILE_PATH = os.getenv('LOG_FILE', '/tmp/tradingview_projectx_bot.log')
-START_TIME = datetime.now(config['CT'])
-SCHEDULER_REF = None
 
 AI_ENDPOINTS = config['AI_ENDPOINTS']
 
@@ -130,24 +124,6 @@ AUTH_LOCK = threading.Lock()
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for the dashboard
-
-
-def _parse_bool(value, default=True):
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    return str(value).lower() in {"1", "true", "yes", "y", "on"}
-
-
-def _seconds_since(timestamp_str: Optional[str]) -> Optional[float]:
-    if not timestamp_str:
-        return None
-    try:
-        ts = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-        return (datetime.now(CT) - ts).total_seconds()
-    except Exception:
-        return None
 
 
 # --- Health Check Route (optional, but recommended for uptime monitoring) ---
@@ -267,168 +243,163 @@ def get_latest_analysis_all():
         logging.error(f"Error fetching analysis data: {e}")
         return jsonify({"error": str(e)}), 500
 
-def build_positions_summary():
-    """Build positions summary reused by API and diagnostics."""
-    from position_manager import PositionManager
-    from api import get_contract, get_current_market_price
-
-    pm = PositionManager(ACCOUNTS)
-    cid = get_contract('MES')
-
-    # Current market price
-    try:
-        current_price, price_source = get_current_market_price(symbol="MES")
-    except Exception:
-        current_price = None
-        price_source = "unavailable"
-
-    # --- NEW: one call to get all accounts + balances from ProjectX
-    balances_by_id = {}
-    try:
-        # { account_id: {"name":..., "balance": float, "canTrade": bool, "isVisible": bool}, ... }
-        balances_by_id = search_accounts(only_active=True)
-    except Exception as e:
-        logging.warning(f"Account search failed (balances unavailable): {e}")
-
-    def _is_practice_account(name: str, balance_info: Optional[dict] = None) -> bool:
-        """Determine if an account should be hidden from dashboards (practice/demo)."""
-        tokens = (name or '').lower()
-        practice_markers = ('practice', 'sim', 'simulation', 'paper', 'demo')
-        if any(marker in tokens for marker in practice_markers):
-            return True
-
-        if balance_info:
-            for candidate_key in ('name', 'accountType', 'account_type', 'label'):
-                candidate_val = balance_info.get(candidate_key)
-                if isinstance(candidate_val, str) and any(
-                    marker in candidate_val.lower() for marker in practice_markers
-                ):
-                    return True
-
-        return False
-
-    summary = {
-        'market_price': current_price,
-        'price_source': price_source,
-        'accounts': {},
-        'total_positions': 0,
-        'total_unrealized_pnl': 0,
-        'total_realized_pnl': 0,
-        'total_daily_pnl': 0,
-        'total_fees': 0.0,
-        'total_equity': 0.0,          # <—— NEW rollup
-        'timestamp': datetime.now(CT).isoformat()
-    }
-
-    for account_name, acct_id in ACCOUNTS.items():
-        bal_info = balances_by_id.get(acct_id)
-
-        if _is_practice_account(account_name, bal_info):
-            logging.debug(f"Skipping practice account {account_name}")
-            continue
-
-        try:
-            position_state = pm.get_position_state(acct_id, cid)
-            account_state = pm.get_account_state(acct_id)
-
-            account_data = {
-                'position': None,
-                'daily_stats': {
-                    'daily_pnl': account_state['daily_pnl'],
-                    'daily_fees': account_state.get('daily_fees', 0.0),
-                    'gross_pnl': account_state.get('gross_pnl', account_state['daily_pnl']),
-                    'trades_today': account_state['trade_count'],
-                    'win_rate': f"{account_state['win_rate']:.1%}" if account_state['win_rate'] else "0.0%",
-                    'winning_trades': account_state['winning_trades'],
-                    'losing_trades': account_state['losing_trades'],
-                    'consecutive_losses': account_state['consecutive_losses'],
-                    'can_trade': account_state['can_trade'],
-                    'risk_level': account_state['risk_level']
-                }
-            }
-
-            # Attach live broker balance if available
-            if bal_info:
-                try:
-                    bal_val = float(bal_info.get("balance"))
-                except (TypeError, ValueError):
-                    bal_val = None
-                account_data['balances'] = {
-                    'balance': bal_val,
-                    'canTrade': bal_info.get('canTrade'),
-                    'isVisible': bal_info.get('isVisible'),
-                    'name': bal_info.get('name'),
-                }
-                if isinstance(bal_val, float):
-                    summary['total_equity'] += bal_val
-
-            summary['total_daily_pnl'] += account_state['daily_pnl']
-            summary['total_fees'] += account_state.get('daily_fees', 0.0)
-
-            if position_state['has_position']:
-                if current_price and position_state['entry_price']:
-                    contract_multiplier = 5  # MES multiplier
-                    if position_state['side'] == 'LONG':
-                        unrealized_pnl = (current_price - position_state['entry_price']) * position_state['size'] * contract_multiplier
-                    elif position_state['side'] == 'SHORT':
-                        unrealized_pnl = (position_state['entry_price'] - current_price) * position_state['size'] * contract_multiplier
-                    else:
-                        unrealized_pnl = 0
-                else:
-                    unrealized_pnl = position_state.get('unrealized_pnl', 0)
-
-                account_data['position'] = {
-                    'size': position_state['size'],
-                    'side': position_state['side'],
-                    'entry_price': position_state['entry_price'],
-                    'current_price': current_price or position_state.get('current_price'),
-                    'unrealized_pnl': unrealized_pnl,
-                    'realized_pnl': position_state.get('realized_pnl', 0),
-                    'total_pnl': position_state.get('realized_pnl', 0) + unrealized_pnl,
-                    'duration_minutes': int(position_state['duration_minutes']),
-                    'stops': len(position_state['stop_orders']),
-                    'targets': len(position_state['limit_orders'])
-                }
-
-                summary['total_positions'] += 1
-                summary['total_unrealized_pnl'] += unrealized_pnl
-                summary['total_realized_pnl'] += position_state.get('realized_pnl', 0)
-
-            summary['accounts'][account_name] = account_data
-
-        except Exception as e:
-            logging.error(f"Error getting data for account {account_name}: {e}")
-            summary['accounts'][account_name] = {
-                'error': str(e),
-                'position': None,
-                'daily_stats': {
-                    'daily_pnl': 0,
-                    'trades_today': 0,
-                    'win_rate': '0.0%',
-                    'can_trade': False,
-                    'risk_level': 'unknown'
-                }
-            }
-
-    summary['summary'] = {
-        'total_pnl': summary['total_unrealized_pnl'] + summary['total_realized_pnl'],
-        'positions_open': summary['total_positions'],
-        'market_status': 'OPEN' if not in_get_flat(datetime.now(CT)) else 'FLAT_WINDOW'
-    }
-
-    # If no balances were fetched, avoid returning 0.0 which can be misleading
-    if not balances_by_id:
-        summary['total_equity'] = None
-
-    return summary
-
-
 @app.route("/positions/summary", methods=["GET"])
 def get_positions_summary():
     """Get a summary of all positions with proper account data + broker balances"""
     try:
-        summary = build_positions_summary()
+        from position_manager import PositionManager
+        from api import get_contract, get_current_market_price
+
+        pm = PositionManager(ACCOUNTS)
+        cid = get_contract('MES')
+
+        # Current market price
+        try:
+            current_price, price_source = get_current_market_price(symbol="MES")
+        except Exception:
+            current_price = None
+            price_source = "unavailable"
+
+        # --- NEW: one call to get all accounts + balances from ProjectX
+        balances_by_id = {}
+        try:
+            # { account_id: {"name":..., "balance": float, "canTrade": bool, "isVisible": bool}, ... }
+            balances_by_id = search_accounts(only_active=True)
+        except Exception as e:
+            logging.warning(f"Account search failed (balances unavailable): {e}")
+
+        def _is_practice_account(name: str, balance_info: Optional[dict] = None) -> bool:
+            """Determine if an account should be hidden from dashboards (practice/demo)."""
+            tokens = (name or '').lower()
+            practice_markers = ('practice', 'sim', 'simulation', 'paper', 'demo')
+            if any(marker in tokens for marker in practice_markers):
+                return True
+
+            if balance_info:
+                for candidate_key in ('name', 'accountType', 'account_type', 'label'):
+                    candidate_val = balance_info.get(candidate_key)
+                    if isinstance(candidate_val, str) and any(
+                        marker in candidate_val.lower() for marker in practice_markers
+                    ):
+                        return True
+
+            return False
+
+        summary = {
+            'market_price': current_price,
+            'price_source': price_source,
+            'accounts': {},
+            'total_positions': 0,
+            'total_unrealized_pnl': 0,
+            'total_realized_pnl': 0,
+            'total_daily_pnl': 0,
+            'total_fees': 0.0,
+            'total_equity': 0.0,          # <—— NEW rollup
+            'timestamp': datetime.now(CT).isoformat()
+        }
+
+        for account_name, acct_id in ACCOUNTS.items():
+            bal_info = balances_by_id.get(acct_id)
+
+            if _is_practice_account(account_name, bal_info):
+                logging.debug(f"Skipping practice account {account_name}")
+                continue
+
+            try:
+                position_state = pm.get_position_state(acct_id, cid)
+                account_state = pm.get_account_state(acct_id)
+
+                account_data = {
+                    'position': None,
+                    'daily_stats': {
+                        'daily_pnl': account_state['daily_pnl'],
+                        'daily_fees': account_state.get('daily_fees', 0.0),
+                        'gross_pnl': account_state.get('gross_pnl', account_state['daily_pnl']),
+                        'trades_today': account_state['trade_count'],
+                        'win_rate': f"{account_state['win_rate']:.1%}" if account_state['win_rate'] else "0.0%",
+                        'winning_trades': account_state['winning_trades'],
+                        'losing_trades': account_state['losing_trades'],
+                        'consecutive_losses': account_state['consecutive_losses'],
+                        'can_trade': account_state['can_trade'],
+                        'risk_level': account_state['risk_level']
+                    }
+                }
+
+                # Attach live broker balance if available
+                if bal_info:
+                    try:
+                        bal_val = float(bal_info.get("balance"))
+                    except (TypeError, ValueError):
+                        bal_val = None
+                    account_data['balances'] = {
+                        'balance': bal_val,
+                        'canTrade': bal_info.get('canTrade'),
+                        'isVisible': bal_info.get('isVisible'),
+                        'name': bal_info.get('name'),
+                    }
+                    if isinstance(bal_val, float):
+                        summary['total_equity'] += bal_val
+
+                summary['total_daily_pnl'] += account_state['daily_pnl']
+                summary['total_fees'] += account_state.get('daily_fees', 0.0)
+
+                if position_state['has_position']:
+                    if current_price and position_state['entry_price']:
+                        contract_multiplier = 5  # MES multiplier
+                        if position_state['side'] == 'LONG':
+                            unrealized_pnl = (current_price - position_state['entry_price']) * position_state['size'] * contract_multiplier
+                        elif position_state['side'] == 'SHORT':
+                            unrealized_pnl = (position_state['entry_price'] - current_price) * position_state['size'] * contract_multiplier
+                        else:
+                            unrealized_pnl = 0
+                    else:
+                        unrealized_pnl = position_state.get('unrealized_pnl', 0)
+
+                    account_data['position'] = {
+                        'size': position_state['size'],
+                        'side': position_state['side'],
+                        'entry_price': position_state['entry_price'],
+                        'current_price': current_price or position_state.get('current_price'),
+                        'unrealized_pnl': unrealized_pnl,
+                        'realized_pnl': position_state.get('realized_pnl', 0),
+                        'total_pnl': position_state.get('realized_pnl', 0) + unrealized_pnl,
+                        'duration_minutes': int(position_state['duration_minutes']),
+                        'stops': len(position_state['stop_orders']),
+                        'targets': len(position_state['limit_orders'])
+                    }
+
+                    summary['total_positions'] += 1
+                    summary['total_unrealized_pnl'] += unrealized_pnl
+                    summary['total_realized_pnl'] += position_state.get('realized_pnl', 0)
+
+                summary['accounts'][account_name] = account_data
+
+            except Exception as e:
+                logging.error(f"Error getting data for account {account_name}: {e}")
+                summary['accounts'][account_name] = {
+                    'error': str(e),
+                    'position': None,
+                    'daily_stats': {
+                        'daily_pnl': 0,
+                        'trades_today': 0,
+                        'win_rate': '0.0%',
+                        'can_trade': False,
+                        'risk_level': 'unknown'
+                    }
+                }
+
+        summary['summary'] = {
+            'total_pnl': summary['total_unrealized_pnl'] + summary['total_realized_pnl'],
+            'positions_open': summary['total_positions'],
+            'market_status': 'OPEN' if not in_get_flat(datetime.now(CT)) else 'FLAT_WINDOW'
+        }
+
+        # If no balances were fetched, avoid returning 0.0 which can be misleading
+        if not balances_by_id:
+            summary['total_equity'] = None
+
         return jsonify(summary), 200
+
     except Exception as e:
         logging.error(f"Error getting positions summary: {e}")
         return jsonify({"error": str(e)}), 500
@@ -579,97 +550,6 @@ def get_market_status():
     except Exception as e:
         logging.error(f"Error getting market status: {e}")
         return jsonify({"error": str(e), "regime": "unknown", "confidence": 0}), 200
-
-
-@app.route("/diagnostics", methods=["GET"])
-def diagnostics_view():
-    """Lightweight operational snapshot for the dashboard diagnostics tab.
-
-    Secured via WEBHOOK_SECRET unless DASHBOARD_DIAGNOSTICS_PUBLIC=true.
-    """
-    if not allow_diagnostics(DIAGNOSTICS_PUBLIC, WEBHOOK_SECRET):
-        return jsonify({"error": "unauthorized"}), 403
-
-    lines = request.args.get("lines", 200)
-    try:
-        lines = max(0, min(int(lines), 2000))
-    except (TypeError, ValueError):
-        lines = 200
-
-    include_log = _parse_bool(request.args.get("include_log", True), True)
-    include_positions = _parse_bool(request.args.get("include_positions", True), True)
-
-    market_summary = get_market_conditions_summary() or {}
-    market_state = market_summary.get('market_state', {}) or market_summary
-    confluence = market_summary.get('confluence', {}) or {}
-
-    positions_summary = build_positions_summary() if include_positions else None
-
-    log_data = get_log_tail(LOG_FILE_PATH, lines) if include_log else None
-    highlights = []
-    if log_data and log_data.get("lines"):
-        keywords = [
-            "[AutoTrade]", "Market summary", "Market Conditions", "Confluence", "SignalR",
-            "[Position Monitor]", "ERROR", "WARNING",
-        ]
-        for entry in reversed(log_data["lines"]):
-            if any(key.lower() in entry.lower() for key in keywords):
-                highlights.append(entry)
-                if len(highlights) >= 20:
-                    break
-
-    scheduler_jobs = []
-    if SCHEDULER_REF:
-        try:
-            for job in SCHEDULER_REF.get_jobs():
-                scheduler_jobs.append({
-                    "id": job.id,
-                    "next_run": job.next_run_time.isoformat() if job.next_run_time else None,
-                    "last_run": LAST_JOB_RUN.get(job.id),
-                })
-        except Exception as exc:
-            logging.warning("Diagnostics failed to enumerate jobs: %s", exc)
-
-    data = {
-        "timestamp": datetime.now(CT).isoformat(),
-        "uptime_sec": (datetime.now(CT) - START_TIME).total_seconds(),
-        "process": {
-            "pid": os.getpid(),
-            "start_time": START_TIME.isoformat(),
-        },
-        "log": log_data,
-        "log_highlights": highlights,
-        "scheduler": {
-            "running": bool(SCHEDULER_REF),
-            "jobs": scheduler_jobs,
-        },
-        "market_filter": {
-            "market_state": market_state,
-            "confluence": confluence,
-            "trade_recommended": bool(market_summary.get('trade_recommended')),
-            "ages_sec": {
-                "market_state": _seconds_since(market_state.get('timestamp') or market_summary.get('timestamp')),
-            },
-        },
-        "positions_summary": positions_summary,
-    }
-
-    if positions_summary:
-        data.setdefault("ages_sec", {})['positions_summary'] = _seconds_since(positions_summary.get('timestamp'))
-
-    return jsonify(data)
-
-
-@app.route("/logs/download", methods=["GET"])
-def download_logs():
-    if not allow_diagnostics(DIAGNOSTICS_PUBLIC, WEBHOOK_SECRET):
-        return jsonify({"error": "unauthorized"}), 403
-    try:
-        return send_file(LOG_FILE_PATH, as_attachment=True)
-    except FileNotFoundError:
-        return jsonify({"error": "log file not found"}), 404
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/autonomous/toggle", methods=["POST"])
@@ -1049,7 +929,7 @@ if __name__ == "__main__":
             authenticate=authenticate,
             auth_lock=AUTH_LOCK
         )
-        SCHEDULER_REF = start_scheduler(app)
+        scheduler = start_scheduler(app)
         app.logger.info("Starting server.")
         app.run(host="0.0.0.0", port=TV_PORT, threaded=True)
     except Exception as e:

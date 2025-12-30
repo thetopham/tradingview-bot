@@ -35,7 +35,6 @@ def load_config():
         'MAX_CONSECUTIVE_LOSSES': int(os.getenv("MAX_CONSECUTIVE_LOSSES", 3)),
         'STOP_LOSS_POINTS': float(os.getenv("STOP_LOSS_POINTS", 10.0)),
         'TP_POINTS': [float(x) for x in os.getenv("TP_POINTS", "2.5,5.0,10.0").split(",")],
-        'DASHBOARD_DIAGNOSTICS_PUBLIC': os.getenv("DASHBOARD_DIAGNOSTICS_PUBLIC", "false").lower() == "true",
     }
 
     # Mode/symbol
