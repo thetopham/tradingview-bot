@@ -1,8 +1,9 @@
 # scheduler.py
 
 import logging
+import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytz
 import requests
@@ -82,7 +83,6 @@ def start_scheduler(app):
             return
 
         if not config.get('AUTOTRADE_ENABLED'):
-            logging.info("[AutoTrade] Disabled by AUTOTRADE_ENABLED=false")
             return
 
         overseer_url = config.get('N8N_OVERSEER_URL', '')
@@ -100,17 +100,15 @@ def start_scheduler(app):
             return
 
         market_state = summary.get('market_state') or summary
-        confluence = summary.get('confluence') or {}
+        confluence = summary.get('confluence', {}) or {}
         score = float(confluence.get('score', 0) or 0)
         confluence_ok = bool(confluence.get('trade_recommended'))
-        require_confluence = config.get('AUTOTRADE_REQUIRE_CONFLUENCE', True)
-        min_score = float(config.get('AUTOTRADE_MIN_SCORE', 1.0))
-        summary_trade_recommended = bool(summary.get('trade_recommended', False))
+        trade_recommended = summary.get('trade_recommended', False)
 
-        if require_confluence:
-            should_trade = confluence_ok and abs(score) >= min_score
+        if config.get('AUTOTRADE_REQUIRE_CONFLUENCE', True):
+            should_trade = confluence_ok and abs(score) >= config.get('AUTOTRADE_MIN_SCORE', 1.0)
         else:
-            should_trade = summary_trade_recommended or (confluence_ok and abs(score) >= min_score)
+            should_trade = bool(trade_recommended)
 
         try:
             cid = get_contract(symbol)
@@ -118,20 +116,17 @@ def start_scheduler(app):
             logging.error("[AutoTrade] Unable to resolve contract for %s: %s", symbol, exc)
             return
 
-        market_state_ts = market_state.get('timestamp') or summary.get('timestamp')
-        if market_state_ts is not None:
-            event_id = f"{symbol}:{market_state_ts}"
-        else:
-            event_id = f"{symbol}:{int(time.time() // 300)}"
+        event_id = str(
+            market_state.get('timestamp')
+            or summary.get('timestamp')
+            or int(time.time() // 300)
+        )
 
         logging.info(
-            "[AutoTrade] AUTO 5m event_id=%s score=%.2f min=%.2f conf_ok=%s require_conf=%s summary_recommended=%s tradeable=%s",
+            "[AutoTrade] AUTO 5m event_id=%s confluence_score=%.2f bias=%s tradeable=%s",
             event_id,
             score,
-            min_score,
-            confluence_ok,
-            require_confluence,
-            summary_trade_recommended,
+            confluence.get('bias'),
             should_trade,
         )
 
@@ -149,21 +144,16 @@ def start_scheduler(app):
                 continue
 
             if not account_state.get('can_trade', False):
-                logging.info("[AutoTrade] %s skip: risk can_trade=false", account_name)
+                logging.info("[AutoTrade] %s blocked by risk limits", account_name)
                 continue
 
-            position_context = position_manager.get_position_context_for_ai(acct_id, cid) or {}
-            position_context["account_metrics"] = {
-                "can_trade": bool(account_state.get("can_trade", False)),
-                "risk_level": account_state.get("risk_level", "unknown"),
-                "consecutive_losses": int(account_state.get("consecutive_losses") or 0),
-            }
+            position_context = position_manager.get_position_context_for_ai(acct_id, cid)
             has_position = position_context.get('current_position', {}).get('has_position')
 
             should_call = should_trade or has_position
             if not should_call:
                 logging.info(
-                    "[AutoTrade] %s skip: no setup and flat (event_id=%s)",
+                    "[AutoTrade] %s skipping event_id=%s (no trade setup and flat)",
                     account_name,
                     event_id,
                 )
@@ -171,7 +161,7 @@ def start_scheduler(app):
 
             if get_last_event_id(account_name) == event_id:
                 logging.info(
-                    "[AutoTrade] %s skip: idempotent event already processed (event_id=%s)",
+                    "[AutoTrade] %s already processed event_id=%s; enforcing idempotency",
                     account_name,
                     event_id,
                 )
@@ -195,23 +185,17 @@ def start_scheduler(app):
                 'risk_context': risk_context,
                 'chart_urls': {},
             }
+
             decision = {}
             try:
                 resp = requests.post(overseer_url, json=payload, timeout=10)
                 resp.raise_for_status()
-                try:
-                    decision = resp.json()
-                except ValueError:
-                    logging.error("[AutoTrade] %s overseer JSON parse failed", account_name)
-                    decision = {}
+                decision = resp.json()
             except Exception as exc:
                 logging.error("[AutoTrade] Overseer call failed for %s: %s", account_name, exc)
                 decision = {}
 
-            signal = str(decision.get('signal', 'HOLD') or 'HOLD').upper()
-            if signal not in {'BUY', 'SELL', 'HOLD', 'FLAT'}:
-                logging.info("[AutoTrade] %s skip: invalid signal=%s", account_name, signal)
-                signal = 'HOLD'
+            signal = (decision.get('signal') or 'HOLD').upper()
             reason = decision.get('reason', '')
             strategy = decision.get('strategy', 'simple') or 'simple'
 
@@ -223,30 +207,18 @@ def start_scheduler(app):
             size = max(0, min(size, 3))
 
             logging.info(
-                "[AutoTrade] %s decision=%s size=%s reason=%s has_position=%s",
+                "[AutoTrade] %s decision=%s size=%s reason=%s",
                 account_name,
                 signal,
                 size,
                 reason,
-                has_position,
             )
 
             if signal == 'HOLD' or signal not in {'BUY', 'SELL', 'FLAT'}:
-                logging.info("[AutoTrade] %s skip: signal=%s", account_name, signal)
                 set_last_event_id(account_name, event_id)
                 continue
 
             current_side = (position_context.get('current_position', {}).get('side') or '').upper()
-
-            if has_position and signal in {'BUY', 'SELL'}:
-                logging.info(
-                    "[AutoTrade] %s skip: in position (%s), blocking %s to avoid reversal",
-                    account_name,
-                    current_side,
-                    signal,
-                )
-                set_last_event_id(account_name, event_id)
-                continue
 
             if signal == 'FLAT':
                 if has_position:
@@ -267,7 +239,7 @@ def start_scheduler(app):
 
             if (signal == 'BUY' and current_side == 'LONG') or (signal == 'SELL' and current_side == 'SHORT'):
                 logging.info(
-                    "[AutoTrade] %s skip: already aligned with %s",
+                    "[AutoTrade] %s already aligned with %s; skipping entry",
                     account_name,
                     signal,
                 )
@@ -275,7 +247,7 @@ def start_scheduler(app):
                 continue
 
             if size == 0:
-                logging.info("[AutoTrade] %s skip: size=0", account_name)
+                logging.info("[AutoTrade] %s size=0 -> no order placed", account_name)
                 set_last_event_id(account_name, event_id)
                 continue
 
@@ -292,7 +264,7 @@ def start_scheduler(app):
                     'side': side,
                     'size': size,
                     'ai_decision_id': event_id,
-                    'alert': reason or 'AUTO_5M',
+                    'reason': reason,
                 })
                 logging.info(
                     "[AutoTrade] %s executed=%s (event_id=%s)",
@@ -746,17 +718,10 @@ def start_scheduler(app):
     )
 
     scheduler.start()
-
-    autotrade_enabled = config.get('AUTOTRADE_ENABLED')
-    overseer_configured = bool(config.get('N8N_OVERSEER_URL'))
-    logging.info("[APScheduler] Scheduler started (auto-trade=%s overseer=%s)", autotrade_enabled, overseer_configured)
-    logging.info("[AutoTrade] Startup AUTOTRADE_ACCOUNTS=%s", AUTOTRADE_ACCOUNTS)
     logging.info(
-        "[AutoTrade] Startup gating: require_confluence=%s min_score=%.2f overseer_configured=%s",
-        config.get('AUTOTRADE_REQUIRE_CONFLUENCE', True),
-        float(config.get('AUTOTRADE_MIN_SCORE', 1.0)),
-        overseer_configured,
+        "[APScheduler] Scheduler started (auto-trade=%s overseer=%s)",
+        config.get('AUTOTRADE_ENABLED'),
+        bool(config.get('N8N_OVERSEER_URL')),
     )
-    logging.info("[AutoTrade] Startup AUTOTRADE_ENABLED=%s", autotrade_enabled)
 
     return scheduler
