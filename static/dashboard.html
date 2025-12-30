@@ -2515,21 +2515,20 @@
 
             const highlights = data.log_highlights || [];
             const highlightContainer = document.getElementById('diag-highlights');
-            highlightContainer.innerHTML = highlights.length
-                ? highlights.map(line => `<li>${line}</li>`).join('')
-                : '<li class="text-dim">No highlights</li>';
+            highlightContainer.innerHTML = highlights.length ? highlights.map(line => `<li>${line}</li>`).join('') : '<li class="text-dim">No highlights</li>';
 
-            renderLogs(includeLog ? data.log : lastData?.diagnostics?.log);
+            if (includeLog) {
+                renderLogs(data.log);
+            }
         }
 
         function renderLogs(logData) {
             const viewer = document.getElementById('log-viewer');
             if (!viewer) return;
-            const logSource = logData || lastData?.diagnostics?.log;
             const searchTerm = (document.getElementById('log-search')?.value || '').toLowerCase();
-            const lines = logSource?.lines || [];
+            const lines = logData?.lines || [];
             const filtered = searchTerm ? lines.filter(l => l.toLowerCase().includes(searchTerm)) : lines;
-            viewer.textContent = filtered.length ? filtered.join('\n') : (lines.length ? 'No matching log entries' : 'Logs unavailable');
+            viewer.textContent = filtered.join('\n');
             if (logAutoFollow) {
                 viewer.scrollTop = viewer.scrollHeight;
             }
