@@ -178,7 +178,6 @@ def start_scheduler(app):
                 'alert': 'AUTO_5M',
                 'symbol': symbol,
                 'account': account_name,
-                'ai_decision_id': event_id,
                 'market_state': market_state,
                 'confluence': confluence,
                 'position_context': position_context,
@@ -188,7 +187,7 @@ def start_scheduler(app):
 
             decision = {}
             try:
-                resp = requests.post(overseer_url, json=payload, timeout=10)
+                resp = requests.post(overseer_url, json=payload, timeout=120)
                 resp.raise_for_status()
                 decision = resp.json()
             except Exception as exc:
@@ -263,8 +262,7 @@ def start_scheduler(app):
                     'symbol': symbol,
                     'side': side,
                     'size': size,
-                    'ai_decision_id': event_id,
-                    'reason': reason,
+                    'alert': reason or 'AUTO_5M',
                 })
                 logging.info(
                     "[AutoTrade] %s executed=%s (event_id=%s)",
