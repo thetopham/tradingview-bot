@@ -301,22 +301,10 @@ def _log_market_state_to_supabase(summary: Dict, symbol: str = "MES", timeframe:
         supabase.table('chart_analysis').insert(record).execute()
 
         # Latest pointer for dashboards/consumers
-        try:
-            update_result = (
-                supabase.table('latest_chart_analysis')
-                .update(record)
-                .eq('symbol', symbol)
-                .eq('timeframe', timeframe)
-                .execute()
-            )
-            if not update_result.data:
-                supabase.table('latest_chart_analysis').insert(record).execute()
-        except Exception as latest_exc:
-            logging.warning(
-                "Updating latest_chart_analysis failed; retrying with insert: %s",
-                latest_exc,
-            )
-            supabase.table('latest_chart_analysis').insert(record).execute()
+        supabase.table('latest_chart_analysis').upsert(
+            record,
+            on_conflict="symbol,timeframe",
+        ).execute()
 
         logging.info("Logged 5m market state snapshot to Supabase for %s", symbol)
     except Exception as exc:
