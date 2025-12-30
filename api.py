@@ -112,15 +112,16 @@ def _update_adaptive_params(ohlc5m_df: pd.DataFrame, market_state: Dict) -> Tupl
     global _adaptive_update_counter
     with _ADAPTIVE_LOCK:
         params = _get_adaptive_params()
-        z_series = _compute_z_ema21_series(ohlc5m_df, params.n).dropna()
+        z_series = _compute_z_ema21_series(ohlc5m_df, params.n)
         sample_count = len(z_series)
         side = (market_state or {}).get("signal")
         regime = (market_state or {}).get("regime")
         learnable_count = 0
         updated = False
         if side in {"BUY", "SELL"} and regime != "sideways":
-            learnable_count = len(filter_learning_series(z_series, side))
-            updated = params.update_from_series(z_series, side)
+            filtered_series = filter_learning_series(z_series, side)
+            learnable_count = len(filtered_series)
+            updated = params.update_from_series(filtered_series, side)
             if updated:
                 _adaptive_update_counter += 1
                 if _adaptive_update_counter % _ADAPTIVE_SAVE_FREQUENCY == 0:
