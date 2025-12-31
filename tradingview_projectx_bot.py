@@ -100,13 +100,13 @@ def handle_webhook_logic(data):
             alert = ai_decision.get("alert", alert)
             ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
             
-        '''
+       
         # Cancel all stops before every new entry (safety)
         positions = search_pos(acct_id)
         open_pos = [p for p in positions if p["contractId"] == cid and p.get("size", 0) != 0]
         if not open_pos:
             cancel_all_stops(acct_id, cid)
-        '''
+        
         
         # --- Strategy Dispatch ---
         if strat == "bracket":
