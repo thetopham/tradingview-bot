@@ -42,16 +42,25 @@ class SignalRTradingListener(threading.Thread):
         self.hub = None
         self.stop_event = threading.Event()
         self.last_token = None
+        self.needs_reconnect = False
 
     def run(self):
         while not self.stop_event.is_set():
             try:
                 self.ensure_token_valid()
                 token = self.token_getter()
-                if token != self.last_token:
+                token_changed = token != self.last_token
+
+                if token_changed:
+                    logging.info("JWT token changed; restarting SignalR connection with the new token.")
+
+                if self.hub is None or self.needs_reconnect or token_changed:
+                    self.connect_signalr(token)
+                    self.needs_reconnect = False
                     self.last_token = token
-                self.connect_signalr(token)
-                self.stop_event.wait(3600)
+
+                # Poll frequently so we can refresh tokens and reconnect without waiting an hour
+                self.stop_event.wait(30)
             except Exception as e:
                 logging.error(f"SignalRListener error: {e}", exc_info=True)
                 time.sleep(10)
@@ -93,7 +102,7 @@ class SignalRTradingListener(threading.Thread):
         self.hub.on("GatewayUserTrade", self.event_handlers.get("on_trade_update", self.default_handler))
 
         self.hub.on_open(lambda: self.on_open())
-        self.hub.on_close(lambda: logging.info("SignalR connection closed."))
+        self.hub.on_close(self.on_close)
         self.hub.on_reconnect(self.on_reconnected)
         self.hub.on_error(lambda err: logging.error(f"SignalR connection error: {err}"))
         self.hub.start()
@@ -114,6 +123,10 @@ class SignalRTradingListener(threading.Thread):
     def on_reconnected(self):
         logging.info("SignalR reconnected! Resubscribing to all events...")
         self.subscribe_all()
+
+    def on_close(self):
+        logging.info("SignalR connection closed. Flagging for reconnect.")
+        self.needs_reconnect = True
 
     def default_handler(self, args):
         logging.info(f"SignalR event: {args}")
