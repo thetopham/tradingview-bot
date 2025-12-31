@@ -2,7 +2,7 @@ import os
 import time
 import threading
 import logging
-from api import search_pos, log_trade_results_to_supabase
+from api import search_pos, log_trade_results_to_supabase, check_for_phantom_orders
 from datetime import datetime
 from signalrcore.hub_connection_builder import HubConnectionBuilder
 
