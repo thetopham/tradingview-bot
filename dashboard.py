@@ -238,7 +238,126 @@ def _fetch_ai_reasons(ids: List[object]) -> Tuple[Dict[object, Dict[str, object]
     return reasons, None
 
 
+def _fetch_merged_feed(limit: int = 50) -> Tuple[List[Dict[str, object]], Optional[str]]:
+    """Retrieve pre-merged AI trade feed if the Supabase table exists."""
+
+    rows: List[Dict[str, object]] = []
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        logging.warning("Dashboard Supabase client unavailable for ai_trade_feed: %s", e)
+        return rows, str(e)
+
+    try:
+        res = (
+            supabase.table("ai_trade_feed")
+            .select(
+                "ai_decision_id,decision_time,entry_time,exit_time,account,symbol,signal,size,total_pnl,reason,screenshot_url,strategy"
+            )
+            .order("decision_time", desc=True)
+            .limit(limit)
+            .execute()
+        )
+
+        for row in res.data or []:
+            row["entry_time"] = _format_ts(row.get("entry_time"))
+            row["exit_time"] = _format_ts(row.get("exit_time"))
+            row["decision_time"] = _format_ts(row.get("decision_time"))
+            rows.append(row)
+    except Exception as e:
+        logging.error("Failed to fetch ai_trade_feed: %s", e)
+        return rows, str(e)
+
+    return rows, None
+
+
+def _merge_trades_and_decisions(
+    trades: List[Dict[str, object]], ai_decisions: List[Dict[str, object]]
+) -> List[Dict[str, object]]:
+    """Combine trade results and AI decisions into a unified feed.
+
+    - Prefers trade timestamps for sorting and display when present.
+    - Fills missing contextual fields from the AI decision rows (reason, screenshot).
+    - Includes AI decisions that do not yet have trade results so the dashboard shows
+      the full pipeline in one place.
+    """
+
+    decision_lookup = {
+        row.get("ai_decision_id"): row for row in ai_decisions if row.get("ai_decision_id")
+    }
+
+    def _sortable(ts: object) -> float:
+        if isinstance(ts, datetime):
+            return ts.timestamp()
+        if isinstance(ts, (int, float)):
+            return float(ts)
+        if isinstance(ts, str):
+            try:
+                return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                return 0.0
+        return 0.0
+
+    merged: List[Dict[str, object]] = []
+    seen_ids = set()
+
+    for trade in trades:
+        ai_id = trade.get("ai_decision_id")
+        decision = decision_lookup.get(ai_id, {})
+
+        merged.append(
+            {
+                "entry_time": _format_ts(trade.get("entry_time")),
+                "exit_time": _format_ts(trade.get("exit_time")),
+                "decision_time": decision.get("decision_time") or "",
+                "account": trade.get("account") or decision.get("account"),
+                "symbol": trade.get("symbol") or decision.get("symbol"),
+                "signal": trade.get("signal") or decision.get("signal"),
+                "size": trade.get("size") if trade.get("size") is not None else decision.get("size"),
+                "total_pnl": trade.get("total_pnl"),
+                "ai_decision_id": ai_id or decision.get("ai_decision_id"),
+                "reason": decision.get("reason") or trade.get("comment") or "",
+                "screenshot_url": decision.get("screenshot_url"),
+                "strategy": decision.get("strategy") or trade.get("strategy"),
+                "_sort_key": _sortable(trade.get("entry_time")),
+            }
+        )
+
+        if ai_id:
+            seen_ids.add(ai_id)
+
+    for decision in ai_decisions:
+        ai_id = decision.get("ai_decision_id")
+        if ai_id and ai_id in seen_ids:
+            continue
+
+        merged.append(
+            {
+                "entry_time": "",
+                "exit_time": "",
+                "decision_time": decision.get("decision_time") or "",
+                "account": decision.get("account"),
+                "symbol": decision.get("symbol"),
+                "signal": decision.get("signal"),
+                "size": decision.get("size"),
+                "total_pnl": None,
+                "ai_decision_id": ai_id,
+                "reason": decision.get("reason") or "",
+                "screenshot_url": decision.get("screenshot_url"),
+                "strategy": decision.get("strategy"),
+                "_sort_key": _sortable(decision.get("timestamp")),
+            }
+        )
+
+    merged.sort(key=lambda row: row.get("_sort_key", 0.0), reverse=True)
+    for row in merged:
+        row.pop("_sort_key", None)
+
+    return merged
+
+
 def _dashboard_payload() -> Dict[str, object]:
+    merged_feed, merged_error = _fetch_merged_feed()
     trade_rows, trade_error = _fetch_trade_results()
     ai_decisions, ai_error = _fetch_ai_decisions()
     active_sessions = _collect_active_sessions()
@@ -267,15 +386,24 @@ def _dashboard_payload() -> Dict[str, object]:
     for decision in ai_decisions:
         ai_id = decision.get("ai_decision_id")
         result = trade_lookup.get(ai_id) or {}
+        reason_details = ai_reasons.get(ai_id, {})
         decision["total_pnl"] = result.get("total_pnl")
         decision["result_entry_time"] = _format_ts(result.get("entry_time"))
         decision["result_exit_time"] = _format_ts(result.get("exit_time"))
+        decision["reason"] = decision.get("reason") or reason_details.get("reason")
+        decision["screenshot_url"] = decision.get("screenshot_url") or reason_details.get("screenshot_url")
+
+    if not merged_feed:
+        merged_feed = _merge_trades_and_decisions(trade_rows, ai_decisions)
+        merged_error = merged_error or trade_error or ai_error or reason_error
 
     return {
         "updated_at": datetime.now(CT).isoformat(),
         "active_sessions": active_sessions,
         "trade_results": trade_rows,
         "ai_decisions": ai_decisions,
+        "merged_trades": merged_feed,
+        "merged_error": merged_error,
         "trade_results_error": trade_error,
         "ai_decision_error": ai_error,
         "ai_reason_error": reason_error,
