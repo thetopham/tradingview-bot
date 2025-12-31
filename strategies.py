@@ -16,6 +16,37 @@ STOP_LOSS_POINTS = config.get('STOP_LOSS_POINTS', 10.0)
 TP_POINTS = config.get('TP_POINTS', [2.5, 5.0, 10.0])
 CT = config['CT']
 
+def run_simple(acct_id: int, sym: str, sig: str, size: int, alert: str, ai_decision_id=None):
+    """Execute a simple market order; server-side brackets handled by broker."""
+    cid = get_contract(sym)
+    side = 0 if sig == "BUY" else 1
+
+    positions = [p for p in search_pos(acct_id) if p.get("contractId") == cid]
+
+    # Skip if a position already exists in the same direction
+    if any((side == 0 and p.get("type") == 1) or (side == 1 and p.get("type") == 2) for p in positions):
+        logging.info("run_simple: position already open in same direction; skipping entry")
+        return
+
+    # Flatten opposing exposure before sending a new order
+    if any((side == 0 and p.get("type") == 2) or (side == 1 and p.get("type") == 1) for p in positions):
+        if not flatten_contract(acct_id, cid, timeout=10):
+            logging.error("run_simple: unable to flatten opposing position; aborting entry")
+            return
+
+    entry = place_market(acct_id, cid, side, size)
+    fill_price = _compute_entry_fill(acct_id, entry.get("orderId")) or entry.get("fillPrice")
+
+    logging.info(
+        "run_simple: %s %s size=%s price=%s alert=%s decision_id=%s",
+        sig,
+        sym,
+        size,
+        fill_price,
+        alert,
+        ai_decision_id,
+    )
+
 def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
     cid = get_contract(sym)
     side = 0 if sig == "BUY" else 1
