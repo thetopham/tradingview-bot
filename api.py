@@ -65,6 +65,27 @@ def place_stop(acct_id, cid, side, size, px):
         "type": 4, "side": side, "size": size, "stopPrice": px
     })
 
+def place_market_bracket(acct_id, cid, side, size, *, stop_loss_ticks=None, take_profit_ticks=None, custom_tag=None):
+    payload = {
+        "accountId": acct_id,
+        "contractId": cid,
+        "type": 2,
+        "side": side,
+        "size": size,
+        "customTag": custom_tag
+    }
+
+    if stop_loss_ticks is not None:
+        payload["stopLossBracket"] = {"ticks": int(stop_loss_ticks), "type": 4}
+    if take_profit_ticks is not None:
+        payload["takeProfitBracket"] = {"ticks": int(take_profit_ticks), "type": 1}
+
+    logging.info(
+        "Placing bracket market order acct=%s cid=%s side=%s size=%s sl_ticks=%s tp_ticks=%s",
+        acct_id, cid, side, size, stop_loss_ticks, take_profit_ticks,
+    )
+    return post("/api/Order/place", payload)
+
 def search_open(acct_id):
     orders = post("/api/Order/searchOpen", {"accountId": acct_id}).get("orders", [])
     logging.debug("Open orders for %s: %s", acct_id, orders)
@@ -180,9 +201,8 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url):
             "error": True
         }
 
-'''
 def check_for_phantom_orders(acct_id, cid):
-  
+
     # 1. Check for open position(s)
     positions = [p for p in search_pos(acct_id) if p["contractId"] == cid]
     open_orders = [o for o in search_open(acct_id) if o["contractId"] == cid]
@@ -203,7 +223,7 @@ def check_for_phantom_orders(acct_id, cid):
                     cancel(acct_id, o["id"])
                 except Exception as e:
                     logging.error(f"Error cancelling phantom order {o['id']}: {e}")
-'''
+
 
 
 
