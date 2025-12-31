@@ -17,6 +17,7 @@ from strategies import run_simple
 from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token
 from signalr_listener import launch_signalr_listener
+from dashboard import dashboard_bp
 from threading import Thread
 import threading
 from datetime import datetime
@@ -42,7 +43,8 @@ AI_ENDPOINTS = {
 AUTH_LOCK = threading.Lock()
 POSITION_MANAGER = PositionManager(ACCOUNTS)
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder="templates", static_folder="static")
+app.register_blueprint(dashboard_bp)
 
 # --- Health Check Route (optional, but recommended for uptime monitoring) ---
 @app.route("/healthz")

@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Trading Dashboard</title>
+    <style>
+        :root {
+            color-scheme: light dark;
+            --bg: #0f172a;
+            --card: #111827;
+            --text: #e5e7eb;
+            --muted: #9ca3af;
+            --accent: #22c55e;
+            --danger: #ef4444;
+            --border: #1f2937;
+        }
+        body {
+            font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+            margin: 0;
+            background: linear-gradient(135deg, var(--bg), #0b1220 60%);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        header {
+            padding: 24px;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        h1 {
+            margin: 0;
+            font-size: 24px;
+            letter-spacing: 0.5px;
+        }
+        .meta {
+            color: var(--muted);
+            font-size: 14px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 16px;
+            padding: 0 24px 24px;
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
+        }
+        .card h2 {
+            margin: 0 0 12px;
+            font-size: 18px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            color: var(--text);
+        }
+        th, td {
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border);
+            text-align: left;
+            font-size: 14px;
+        }
+        th {
+            color: var(--muted);
+            font-weight: 600;
+        }
+        tr:last-child td {
+            border-bottom: none;
+        }
+        .pill {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.2px;
+        }
+        .pill.buy { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
+        .pill.sell { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+        .pill.hold { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+        .pill.flat { background: rgba(125, 211, 252, 0.15); color: #67e8f9; }
+        .pill.strategy { background: rgba(167, 139, 250, 0.16); color: #c4b5fd; }
+        .muted { color: var(--muted); }
+        .pnl-positive { color: #22c55e; }
+        .pnl-negative { color: #ef4444; }
+        .error { color: #f87171; font-size: 14px; }
+        .table-wrapper {
+            max-height: 420px;
+            overflow: auto;
+        }
+        @media (max-width: 640px) {
+            header { padding: 16px; }
+            .grid { padding: 0 16px 16px; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div>
+            <h1>AI Trading Oversight</h1>
+            <div class="meta">Monitoring AI decisions, open sessions, and recent results</div>
+        </div>
+        <div class="meta">Last updated: <span id="updated">—</span></div>
+    </header>
+
+    <div class="grid">
+        <section class="card">
+            <h2>Active AI Decisions</h2>
+            <div class="table-wrapper">
+                <table id="sessions">
+                    <thead>
+                        <tr>
+                            <th>Account</th>
+                            <th>Symbol</th>
+                            <th>Signal</th>
+                            <th>Strategy</th>
+                            <th>Size</th>
+                            <th>Entry</th>
+                            <th>AI ID</th>
+                            <th>Trace</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="meta" id="sessions-empty">Loading…</div>
+        </section>
+
+        <section class="card">
+            <h2>Recent Trade Results</h2>
+            <div id="trade-error" class="error" style="display:none"></div>
+            <div class="table-wrapper">
+                <table id="trades">
+                    <thead>
+                        <tr>
+                            <th>Entry</th>
+                            <th>Exit</th>
+                            <th>Symbol</th>
+                            <th>Signal</th>
+                            <th>Size</th>
+                            <th>PnL</th>
+                            <th>AI ID</th>
+                            <th>Account</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="meta" id="trades-empty">Loading…</div>
+        </section>
+    </div>
+
+    <script>
+        const sessionsBody = document.querySelector('#sessions tbody');
+        const tradesBody = document.querySelector('#trades tbody');
+        const sessionsEmpty = document.getElementById('sessions-empty');
+        const tradesEmpty = document.getElementById('trades-empty');
+        const tradeError = document.getElementById('trade-error');
+        const updatedEl = document.getElementById('updated');
+
+        function pill(label, type) {
+            const cls = (type || '').toLowerCase();
+            return `<span class="pill ${cls}">${label || ''}</span>`;
+        }
+
+        function renderSessions(sessions) {
+            sessionsBody.innerHTML = '';
+            if (!sessions || sessions.length === 0) {
+                sessionsEmpty.textContent = 'No active sessions';
+                return;
+            }
+            sessionsEmpty.textContent = '';
+            sessions.forEach((s) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${s.account || ''}</td>
+                    <td>${s.symbol || ''}</td>
+                    <td>${pill(s.signal, s.signal)}</td>
+                    <td>${s.strategy ? pill(s.strategy, 'strategy') : ''}</td>
+                    <td>${s.size ?? ''}</td>
+                    <td class="muted">${s.entry_time || ''}</td>
+                    <td>${s.ai_decision_id ?? ''}</td>
+                    <td class="muted">${s.trace_id || ''}</td>
+                `;
+                sessionsBody.appendChild(row);
+            });
+        }
+
+        function formatPnL(value) {
+            const num = Number(value);
+            if (Number.isNaN(num)) return value || '';
+            const cls = num >= 0 ? 'pnl-positive' : 'pnl-negative';
+            return `<span class="${cls}">${num.toFixed(2)}</span>`;
+        }
+
+        function renderTrades(trades) {
+            tradesBody.innerHTML = '';
+            if (!trades || trades.length === 0) {
+                tradesEmpty.textContent = 'No trade results available';
+                return;
+            }
+            tradesEmpty.textContent = '';
+            trades.forEach((t) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="muted">${t.entry_time || ''}</td>
+                    <td class="muted">${t.exit_time || ''}</td>
+                    <td>${t.symbol || ''}</td>
+                    <td>${pill(t.signal, t.signal)}</td>
+                    <td>${t.size ?? ''}</td>
+                    <td>${formatPnL(t.total_pnl)}</td>
+                    <td>${t.ai_decision_id ?? ''}</td>
+                    <td>${t.account || ''}</td>
+                `;
+                tradesBody.appendChild(row);
+            });
+        }
+
+        async function refresh() {
+            try {
+                const response = await fetch('/dashboard/data');
+                const data = await response.json();
+                updatedEl.textContent = new Date(data.updated_at).toLocaleString();
+                renderSessions(data.active_sessions || []);
+                renderTrades(data.trade_results || []);
+
+                if (data.trade_results_error) {
+                    tradeError.style.display = 'block';
+                    tradeError.textContent = `Supabase error: ${data.trade_results_error}`;
+                } else {
+                    tradeError.style.display = 'none';
+                }
+            } catch (err) {
+                tradeError.style.display = 'block';
+                tradeError.textContent = 'Failed to refresh dashboard: ' + err;
+            }
+        }
+
+        refresh();
+        setInterval(refresh, 15000);
+    </script>
+</body>
+</html>
