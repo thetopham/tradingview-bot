@@ -143,7 +143,9 @@ def on_order_update(args):
     orders_state.setdefault(account_id, {})[order_data.get("id")] = order_data
 
     if order_data.get("type") == 1 and status == 2:  # TP filled
-        
+        logging.info(
+            f"Take-profit order filled for acct={account_id}, cid={contract_id}: {order_data}"
+        )
     if status == 2:
         # Only add missing fields to meta, never overwrite!
         meta = trade_meta.setdefault((account_id, contract_id), {})
