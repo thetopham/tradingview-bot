@@ -13,8 +13,8 @@ from signalr_listener import track_trade
 from config import load_config
 
 config = load_config()
-STOP_LOSS_POINTS = config.get('STOP_LOSS_POINTS', 10.0)
-TP_POINTS = config.get('TP_POINTS', [2.5, 5.0, 10.0])
+STOP_LOSS_POINTS = config.get('STOP_LOSS_POINTS', 5.75)
+TP_POINTS = config.get('TP_POINTS', [2.5, 5.0])
 TICKS_PER_POINT = config.get('TICKS_PER_POINT', 4)
 CT = config['CT']
 
@@ -142,10 +142,12 @@ def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
             return  # Could not flatten contract
     entry_time = datetime.now(CT)
     stop_loss_ticks = points_to_ticks(STOP_LOSS_POINTS)
-    tp_points = TP_POINTS or [2.5, 5.0]
+    tp_points = (TP_POINTS or [2.5, 5.0])[:2]
     tp_ticks = [points_to_ticks(p) for p in tp_points]
 
-    leg_sizes = [min(size, 2), max(size - 2, 0)]
+    base_leg = size // len(tp_ticks)
+    remainder = size % len(tp_ticks)
+    leg_sizes = [base_leg + (1 if i < remainder else 0) for i in range(len(tp_ticks))]
     orders = []
 
     for leg_size, tp_tick in zip(leg_sizes, tp_ticks):
