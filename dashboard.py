@@ -69,6 +69,31 @@ def _collect_active_sessions() -> List[Dict[str, object]]:
     return sorted(sessions, key=_sort_key, reverse=True)
 
 
+def _extract_first_url(value: object) -> str:
+    """Return the first URL-like entry from nested url payloads."""
+
+    if not value:
+        return ""
+
+    if isinstance(value, str):
+        return value
+
+    if isinstance(value, dict):
+        for candidate in value.values():
+            found = _extract_first_url(candidate)
+            if found:
+                return found
+        return ""
+
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            found = _extract_first_url(item)
+            if found:
+                return found
+
+    return ""
+
+
 def _fetch_trade_results(limit: int = 25) -> Tuple[List[Dict[str, object]], Optional[str]]:
     rows: List[Dict[str, object]] = []
     try:
@@ -95,6 +120,43 @@ def _fetch_trade_results(limit: int = 25) -> Tuple[List[Dict[str, object]], Opti
     return rows, None
 
 
+def _fetch_ai_decisions(limit: int = 50) -> Tuple[List[Dict[str, object]], Optional[str]]:
+    """Retrieve recent AI trading log decisions with parsed screenshot URLs."""
+
+    rows: List[Dict[str, object]] = []
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        logging.warning("Dashboard Supabase client unavailable for ai_trading_log: %s", e)
+        return rows, str(e)
+
+    try:
+        res = (
+            supabase.table("ai_trading_log")
+            .select("ai_decision_id,timestamp,strategy,signal,symbol,account,size,urls,reason")
+            .order("timestamp", desc=True)
+            .limit(limit)
+            .execute()
+        )
+
+        for row in res.data or []:
+            urls = row.get("urls")
+            if isinstance(urls, str):
+                try:
+                    urls = json.loads(urls)
+                except json.JSONDecodeError:
+                    pass
+
+            row["screenshot_url"] = _extract_first_url(urls)
+            row["decision_time"] = _format_ts(row.get("timestamp"))
+            rows.append(row)
+    except Exception as e:
+        logging.error("Failed to fetch ai_trading_log: %s", e)
+        return rows, str(e)
+
+    return rows, None
+
+
 def _fetch_ai_reasons(ids: List[object]) -> Tuple[Dict[object, Dict[str, object]], Optional[str]]:
     """Lookup AI decision details (reason, screenshot) for provided ids."""
 
@@ -112,7 +174,7 @@ def _fetch_ai_reasons(ids: List[object]) -> Tuple[Dict[object, Dict[str, object]
     try:
         res = (
             supabase.table("ai_trading_log")
-            .select("ai_decision_id,reason,screenshot_url,urls")
+            .select("ai_decision_id,reason,urls")
             .in_("ai_decision_id", cleaned_ids)
             .execute()
         )
@@ -125,28 +187,9 @@ def _fetch_ai_reasons(ids: List[object]) -> Tuple[Dict[object, Dict[str, object]
                     # Keep the raw string as a potential direct URL fallback
                     pass
 
-            def _first_url(value: object) -> str:
-                if not value:
-                    return ""
-                if isinstance(value, str):
-                    return value
-                if isinstance(value, dict):
-                    for candidate in value.values():
-                        found = _first_url(candidate)
-                        if found:
-                            return found
-                    return ""
-                if isinstance(value, (list, tuple, set)):
-                    for item in value:
-                        found = _first_url(item)
-                        if found:
-                            return found
-                return ""
-
-            screenshot_url = row.get("screenshot_url") or _first_url(urls)
             reasons[row.get("ai_decision_id")] = {
                 "reason": row.get("reason") or "",
-                "screenshot_url": screenshot_url or "",
+                "screenshot_url": _extract_first_url(urls),
             }
     except Exception as e:
         logging.error("Failed to fetch AI reasons: %s", e)
@@ -157,26 +200,44 @@ def _fetch_ai_reasons(ids: List[object]) -> Tuple[Dict[object, Dict[str, object]
 
 def _dashboard_payload() -> Dict[str, object]:
     trade_rows, trade_error = _fetch_trade_results()
+    ai_decisions, ai_error = _fetch_ai_decisions()
     active_sessions = _collect_active_sessions()
 
-    ai_ids = [row.get("ai_decision_id") for row in trade_rows] + [row.get("ai_decision_id") for row in active_sessions]
-    ai_reasons, reason_error = _fetch_ai_reasons(ai_ids)
+    ai_ids = [row.get("ai_decision_id") for row in trade_rows + active_sessions]
+    decision_lookup = {row.get("ai_decision_id"): row for row in ai_decisions if row.get("ai_decision_id")}
+    missing_ids = [i for i in ai_ids if i not in decision_lookup]
+    ai_reasons, reason_error = _fetch_ai_reasons(missing_ids)
+
+    trade_lookup = {row.get("ai_decision_id"): row for row in trade_rows if row.get("ai_decision_id")}
 
     for row in trade_rows:
+        decision = decision_lookup.get(row.get("ai_decision_id")) or {}
         reason_details = ai_reasons.get(row.get("ai_decision_id"), {})
-        row["reason"] = reason_details.get("reason") or row.get("comment")
-        row["screenshot_url"] = reason_details.get("screenshot_url")
+        row["entry_time"] = _format_ts(row.get("entry_time"))
+        row["exit_time"] = _format_ts(row.get("exit_time"))
+        row["reason"] = decision.get("reason") or reason_details.get("reason") or row.get("comment")
+        row["screenshot_url"] = decision.get("screenshot_url") or reason_details.get("screenshot_url")
 
     for session in active_sessions:
+        decision = decision_lookup.get(session.get("ai_decision_id")) or {}
         reason_details = ai_reasons.get(session.get("ai_decision_id"), {})
-        session["reason"] = reason_details.get("reason")
-        session["screenshot_url"] = reason_details.get("screenshot_url")
+        session["reason"] = decision.get("reason") or reason_details.get("reason")
+        session["screenshot_url"] = decision.get("screenshot_url") or reason_details.get("screenshot_url")
+
+    for decision in ai_decisions:
+        ai_id = decision.get("ai_decision_id")
+        result = trade_lookup.get(ai_id) or {}
+        decision["total_pnl"] = result.get("total_pnl")
+        decision["result_entry_time"] = _format_ts(result.get("entry_time"))
+        decision["result_exit_time"] = _format_ts(result.get("exit_time"))
 
     return {
         "updated_at": datetime.now(CT).isoformat(),
         "active_sessions": active_sessions,
         "trade_results": trade_rows,
+        "ai_decisions": ai_decisions,
         "trade_results_error": trade_error,
+        "ai_decision_error": ai_error,
         "ai_reason_error": reason_error,
     }
 
