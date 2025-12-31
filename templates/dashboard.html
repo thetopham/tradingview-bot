@@ -178,16 +178,16 @@
     <header>
         <div>
             <h1>AI Trading Oversight <span>Live</span></h1>
-            <div class="meta">Monitoring AI decisions, open sessions, and recent results</div>
+            <div class="meta">AI hypotheses, actions, and trade outcomes in one view</div>
         </div>
         <div class="accent-meta"><span class="dot"></span><span>Last updated <span id="updated">—</span></span></div>
     </header>
 
     <section class="stats">
         <div class="stat-card">
-            <div class="stat-label">Active sessions</div>
-            <div class="stat-value" id="active-count">—</div>
-            <div class="stat-subtle">Live SignalR stream</div>
+            <div class="stat-label">AI decisions</div>
+            <div class="stat-value" id="decision-count">—</div>
+            <div class="stat-subtle">Latest hypotheses & screenshots</div>
         </div>
         <div class="stat-card">
             <div class="stat-label">Recent trades</div>
@@ -195,35 +195,35 @@
             <div class="stat-subtle">Latest 25 entries</div>
         </div>
         <div class="stat-card">
-            <div class="stat-label">Refresh cadence</div>
-            <div class="stat-value">15s</div>
-            <div class="stat-subtle">Auto-refresh enabled</div>
+            <div class="stat-label">Active sessions</div>
+            <div class="stat-value" id="active-count">—</div>
+            <div class="stat-subtle">Live SignalR stream</div>
         </div>
     </section>
 
     <div class="grid">
         <section class="card">
-            <h2>Active AI Decisions</h2>
+            <h2>AI Decisions (ai_trading_log)</h2>
+            <div id="decisions-error" class="error" style="display:none"></div>
             <div class="table-wrapper">
-                <table id="sessions">
+                <table id="decisions">
                     <thead>
                         <tr>
-                            <th>Account</th>
-                            <th>Symbol</th>
-                            <th>Signal</th>
+                            <th>Time</th>
                             <th>Strategy</th>
+                            <th>Signal</th>
+                            <th>Symbol</th>
                             <th>Size</th>
-                            <th>Entry</th>
+                            <th>Account</th>
                             <th>AI ID</th>
                             <th>Reason</th>
                             <th>Screenshot</th>
-                            <th>Trace</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
                 </table>
             </div>
-            <div class="meta" id="sessions-empty">Loading…</div>
+            <div class="meta" id="decisions-empty">Loading…</div>
         </section>
 
         <section class="card">
@@ -250,11 +250,37 @@
             </div>
             <div class="meta" id="trades-empty">Loading…</div>
         </section>
+
+        <section class="card">
+            <h2>Active Sessions (live)</h2>
+            <div class="table-wrapper">
+                <table id="sessions">
+                    <thead>
+                        <tr>
+                            <th>Account</th>
+                            <th>Symbol</th>
+                            <th>Signal</th>
+                            <th>Strategy</th>
+                            <th>Size</th>
+                            <th>Entry</th>
+                            <th>AI ID</th>
+                            <th>Reason</th>
+                            <th>Screenshot</th>
+                            <th>Trace</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="meta" id="sessions-empty">Loading…</div>
+        </section>
     </div>
 
     <script>
+        const decisionsBody = document.querySelector('#decisions tbody');
         const sessionsBody = document.querySelector('#sessions tbody');
         const tradesBody = document.querySelector('#trades tbody');
+        const decisionsEmpty = document.getElementById('decisions-empty');
         const sessionsEmpty = document.getElementById('sessions-empty');
         const tradesEmpty = document.getElementById('trades-empty');
         const tradeError = document.getElementById('trade-error');
@@ -262,11 +288,36 @@
         reasonError.className = 'error';
         reasonError.style.display = 'none';
         tradeError.insertAdjacentElement('afterend', reasonError);
+        const decisionError = document.getElementById('decisions-error');
         const updatedEl = document.getElementById('updated');
 
         function pill(label, type) {
             const cls = (type || '').toLowerCase();
             return `<span class="pill ${cls}">${label || ''}</span>`;
+        }
+
+        function renderDecisions(decisions) {
+            decisionsBody.innerHTML = '';
+            if (!decisions || decisions.length === 0) {
+                decisionsEmpty.textContent = 'No AI decisions recorded';
+                return;
+            }
+            decisionsEmpty.textContent = '';
+            decisions.forEach((d) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="muted">${d.timestamp || ''}</td>
+                    <td>${d.strategy ? pill(d.strategy, 'strategy') : ''}</td>
+                    <td>${pill(d.signal, d.signal)}</td>
+                    <td>${d.symbol || ''}</td>
+                    <td>${d.size ?? ''}</td>
+                    <td>${d.account || ''}</td>
+                    <td>${d.ai_decision_id ?? ''}</td>
+                    <td class="muted reason">${d.reason || ''}</td>
+                    <td>${d.screenshot_url ? `<a class="btn-link" href="${d.screenshot_url}" target="_blank" rel="noopener">Open</a>` : ''}</td>
+                `;
+                decisionsBody.appendChild(row);
+            });
         }
 
         function renderSessions(sessions) {
@@ -331,16 +382,25 @@
                 const response = await fetch('/dashboard/data');
                 const data = await response.json();
                 updatedEl.textContent = new Date(data.updated_at).toLocaleString();
+                renderDecisions(data.ai_decisions || []);
                 renderSessions(data.active_sessions || []);
                 renderTrades(data.trade_results || []);
-                document.getElementById('active-count').textContent = data.active_sessions?.length ?? 0;
+                document.getElementById('decision-count').textContent = data.ai_decisions?.length ?? 0;
                 document.getElementById('trade-count').textContent = data.trade_results?.length ?? 0;
+                document.getElementById('active-count').textContent = data.active_sessions?.length ?? 0;
 
                 if (data.trade_results_error) {
                     tradeError.style.display = 'block';
                     tradeError.textContent = `Supabase error: ${data.trade_results_error}`;
                 } else {
                     tradeError.style.display = 'none';
+                }
+
+                if (data.ai_decision_error) {
+                    decisionError.style.display = 'block';
+                    decisionError.textContent = `AI decision lookup error: ${data.ai_decision_error}`;
+                } else {
+                    decisionError.style.display = 'none';
                 }
 
                 if (data.ai_reason_error) {

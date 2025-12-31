@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from flask import Blueprint, jsonify, render_template
 
@@ -95,7 +95,35 @@ def _fetch_trade_results(limit: int = 25) -> Tuple[List[Dict[str, object]], Opti
     return rows, None
 
 
-def _fetch_ai_reasons(ids: List[object]) -> Tuple[Dict[object, Dict[str, object]], Optional[str]]:
+def _first_url(value: object) -> str:
+    if not value:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for candidate in value.values():
+            found = _first_url(candidate)
+            if found:
+                return found
+        return ""
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            found = _first_url(item)
+            if found:
+                return found
+    return ""
+
+
+def _parse_urls(urls: object) -> object:
+    if isinstance(urls, str):
+        try:
+            return json.loads(urls)
+        except json.JSONDecodeError:
+            return urls
+    return urls
+
+
+def _fetch_ai_reasons(ids: Iterable[object]) -> Tuple[Dict[object, Dict[str, object]], Optional[str]]:
     """Lookup AI decision details (reason, screenshot) for provided ids."""
 
     reasons: Dict[object, Dict[str, object]] = {}
@@ -112,41 +140,15 @@ def _fetch_ai_reasons(ids: List[object]) -> Tuple[Dict[object, Dict[str, object]
     try:
         res = (
             supabase.table("ai_trading_log")
-            .select("ai_decision_id,reason,screenshot_url,urls")
+            .select("ai_decision_id,reason,urls")
             .in_("ai_decision_id", cleaned_ids)
             .execute()
         )
         for row in res.data or []:
-            urls = row.get("urls")
-            if isinstance(urls, str):
-                try:
-                    urls = json.loads(urls)
-                except json.JSONDecodeError:
-                    # Keep the raw string as a potential direct URL fallback
-                    pass
-
-            def _first_url(value: object) -> str:
-                if not value:
-                    return ""
-                if isinstance(value, str):
-                    return value
-                if isinstance(value, dict):
-                    for candidate in value.values():
-                        found = _first_url(candidate)
-                        if found:
-                            return found
-                    return ""
-                if isinstance(value, (list, tuple, set)):
-                    for item in value:
-                        found = _first_url(item)
-                        if found:
-                            return found
-                return ""
-
-            screenshot_url = row.get("screenshot_url") or _first_url(urls)
+            urls = _parse_urls(row.get("urls"))
             reasons[row.get("ai_decision_id")] = {
                 "reason": row.get("reason") or "",
-                "screenshot_url": screenshot_url or "",
+                "screenshot_url": _first_url(urls),
             }
     except Exception as e:
         logging.error("Failed to fetch AI reasons: %s", e)
@@ -155,28 +157,70 @@ def _fetch_ai_reasons(ids: List[object]) -> Tuple[Dict[object, Dict[str, object]
     return reasons, None
 
 
+def _fetch_ai_decisions(limit: int = 50) -> Tuple[List[Dict[str, object]], Optional[str]]:
+    rows: List[Dict[str, object]] = []
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        logging.warning("Dashboard Supabase client unavailable for AI decisions: %s", e)
+        return rows, str(e)
+
+    try:
+        res = (
+            supabase.table("ai_trading_log")
+            .select("ai_decision_id,timestamp,strategy,signal,symbol,account,size,urls,reason")
+            .order("timestamp", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        rows = res.data or []
+        for row in rows:
+            row["timestamp"] = _format_ts(row.get("timestamp"))
+            urls = _parse_urls(row.get("urls"))
+            row["screenshot_url"] = _first_url(urls)
+    except Exception as e:
+        logging.error("Failed to fetch AI decisions: %s", e)
+        return rows, str(e)
+
+    return rows, None
+
+
 def _dashboard_payload() -> Dict[str, object]:
+    ai_decisions, ai_error = _fetch_ai_decisions()
     trade_rows, trade_error = _fetch_trade_results()
     active_sessions = _collect_active_sessions()
 
-    ai_ids = [row.get("ai_decision_id") for row in trade_rows] + [row.get("ai_decision_id") for row in active_sessions]
-    ai_reasons, reason_error = _fetch_ai_reasons(ai_ids)
+    ai_map: Dict[object, Dict[str, object]] = {
+        row.get("ai_decision_id"): {"reason": row.get("reason"), "screenshot_url": row.get("screenshot_url")}
+        for row in ai_decisions
+        if row.get("ai_decision_id") not in (None, "")
+    }
+
+    missing_ids = [
+        id_
+        for id_ in [row.get("ai_decision_id") for row in trade_rows + active_sessions]
+        if id_ not in ai_map and id_ not in (None, "")
+    ]
+    ai_reasons, reason_error = _fetch_ai_reasons(missing_ids)
+    ai_map.update(ai_reasons)
 
     for row in trade_rows:
-        reason_details = ai_reasons.get(row.get("ai_decision_id"), {})
+        reason_details = ai_map.get(row.get("ai_decision_id"), {})
         row["reason"] = reason_details.get("reason") or row.get("comment")
         row["screenshot_url"] = reason_details.get("screenshot_url")
 
     for session in active_sessions:
-        reason_details = ai_reasons.get(session.get("ai_decision_id"), {})
+        reason_details = ai_map.get(session.get("ai_decision_id"), {})
         session["reason"] = reason_details.get("reason")
         session["screenshot_url"] = reason_details.get("screenshot_url")
 
     return {
         "updated_at": datetime.now(CT).isoformat(),
+        "ai_decisions": ai_decisions,
         "active_sessions": active_sessions,
         "trade_results": trade_rows,
         "trade_results_error": trade_error,
+        "ai_decision_error": ai_error,
         "ai_reason_error": reason_error,
     }
 
