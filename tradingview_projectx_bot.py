@@ -10,7 +10,7 @@ from flask import Flask, request, jsonify
 from logging_config import setup_logging
 from config import load_config
 from api import (
-    flatten_contract, get_contract, ai_trade_decision, search_pos 
+    flatten_contract, get_contract, ai_trade_decision, search_pos, cancel_all_stops
     )
 from strategies import run_bracket, run_brackmod, run_pivot, run_simple
 from scheduler import start_scheduler
