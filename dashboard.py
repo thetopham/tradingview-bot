@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from flask import Blueprint, jsonify, render_template
+import pytz
 
 from api import get_supabase_client
 from config import load_config
@@ -16,6 +17,7 @@ from signalr_listener import trade_meta
 config = load_config()
 CT = config["CT"]
 ACCOUNT_NAME_BY_ID = {v: k for k, v in config["ACCOUNTS"].items()}
+DISPLAY_TZ = pytz.timezone("America/Denver")
 
 
 def _format_ts(ts: Optional[object]) -> str:
@@ -26,13 +28,20 @@ def _format_ts(ts: Optional[object]) -> str:
 
     try:
         if isinstance(ts, (int, float)):
-            return datetime.fromtimestamp(float(ts), CT).strftime("%Y-%m-%d %H:%M:%S %Z")
+            return datetime.fromtimestamp(float(ts), DISPLAY_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
 
         if isinstance(ts, str):
-            return ts
+            try:
+                parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = pytz.utc.localize(parsed)
+                return parsed.astimezone(DISPLAY_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
+            except Exception:
+                return ts
 
         if hasattr(ts, "astimezone"):
-            return ts.astimezone(CT).strftime("%Y-%m-%d %H:%M:%S %Z")
+            localized = ts if ts.tzinfo else pytz.utc.localize(ts)
+            return localized.astimezone(DISPLAY_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
     except Exception:
         logging.exception("Failed to format timestamp %s", ts)
 
@@ -103,16 +112,20 @@ def _fetch_trade_results(limit: int = 25) -> Tuple[List[Dict[str, object]], Opti
         return rows, str(e)
 
     try:
+        start = (datetime.now(DISPLAY_TZ) - timedelta(days=7)).astimezone(pytz.utc).isoformat()
         res = (
             supabase.table("trade_results")
             .select(
                 "entry_time,exit_time,symbol,signal,ai_decision_id,total_pnl,account,size,comment,strategy"
             )
+            .gte("entry_time", start)
             .order("entry_time", desc=True)
             .limit(limit)
             .execute()
         )
         rows = res.data or []
+        for row in rows:
+            row["symbol"] = "MES"
     except Exception as e:
         logging.error("Failed to fetch trade_results: %s", e)
         return rows, str(e)
@@ -232,7 +245,7 @@ def _dashboard_payload() -> Dict[str, object]:
         decision["result_exit_time"] = _format_ts(result.get("exit_time"))
 
     return {
-        "updated_at": datetime.now(CT).isoformat(),
+        "updated_at": datetime.now(DISPLAY_TZ).isoformat(),
         "active_sessions": active_sessions,
         "trade_results": trade_rows,
         "ai_decisions": ai_decisions,
