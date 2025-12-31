@@ -158,14 +158,37 @@ def get_contract(sym):
         return OVERRIDE_CONTRACT_ID
     return None
 
-def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url):
+def _summarize_positions(positions):
+    summary = []
+    for pos in positions:
+        side_code = pos.get("type")
+        side = "LONG" if side_code == 1 else "SHORT" if side_code == 2 else "UNKNOWN"
+        size = pos.get("size")
+        cid = pos.get("contractId") or pos.get("contractSymbol")
+        avg_price = pos.get("avgPrice") or pos.get("averagePrice") or pos.get("entryPrice")
+        pnl = pos.get("openProfitAndLoss") or pos.get("profitAndLoss")
+        details = {
+            "contract": cid,
+            "side": side,
+            "size": size,
+            "avg_price": avg_price,
+            "pnl": pnl,
+        }
+        summary.append(details)
+    return summary
+
+
+def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=None):
+    position_summary = _summarize_positions(positions or [])
     payload = {
         "account": account,
         "strategy": strat,
         "signal": sig,
         "symbol": sym,
         "size": size,
-        "alert": alert
+        "alert": alert,
+        "positions": positions or [],
+        "position_summary": position_summary,
     }
     try:
         resp = session.post(ai_url, json=payload, timeout=150)

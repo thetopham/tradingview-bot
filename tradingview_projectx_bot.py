@@ -87,8 +87,18 @@ def handle_webhook_logic(data):
 
         # --- AI Overseer Routing ---
         if acct in AI_ENDPOINTS:
+            positions = search_pos(acct_id)
             ai_url = AI_ENDPOINTS[acct]
-            ai_decision = ai_trade_decision(acct, strat, sig, sym, size, alert, ai_url)
+            ai_decision = ai_trade_decision(
+                acct,
+                strat,
+                sig,
+                sym,
+                size,
+                alert,
+                ai_url,
+                positions=positions,
+            )
             if ai_decision.get("signal", "").upper() not in ("BUY", "SELL"):
                 logging.info(f"AI blocked trade: {ai_decision.get('reason', 'No reason')}")
                 return
