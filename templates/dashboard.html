@@ -7,23 +7,27 @@
     <style>
         :root {
             color-scheme: light dark;
-            --bg: #0f172a;
-            --card: #111827;
+            --bg: #0b1220;
+            --panel: #0f172a;
+            --card: #0f162a;
             --text: #e5e7eb;
             --muted: #9ca3af;
             --accent: #22c55e;
             --danger: #ef4444;
             --border: #1f2937;
+            --glow: 0 18px 50px rgba(14, 165, 233, 0.16);
         }
         body {
-            font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+            font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
             margin: 0;
-            background: linear-gradient(135deg, var(--bg), #0b1220 60%);
+            background: radial-gradient(circle at 20% 20%, rgba(79, 70, 229, 0.08), transparent 30%),
+                radial-gradient(circle at 80% 0%, rgba(34, 197, 94, 0.06), transparent 25%),
+                linear-gradient(135deg, var(--bg), #060912 55%);
             color: var(--text);
             min-height: 100vh;
         }
         header {
-            padding: 24px;
+            padding: 28px 24px 12px;
             display: flex;
             flex-wrap: wrap;
             align-items: center;
@@ -32,7 +36,7 @@
         }
         h1 {
             margin: 0;
-            font-size: 24px;
+            font-size: 26px;
             letter-spacing: 0.5px;
         }
         h1 span {
@@ -48,13 +52,14 @@
         .accent-meta {
             display: inline-flex;
             align-items: center;
-            gap: 6px;
-            background: rgba(34, 197, 94, 0.12);
+            gap: 10px;
+            background: linear-gradient(120deg, rgba(34, 197, 94, 0.12), rgba(59, 130, 246, 0.1));
             color: #4ade80;
-            padding: 6px 10px;
+            padding: 8px 14px;
             border-radius: 999px;
             border: 1px solid rgba(34, 197, 94, 0.3);
             font-weight: 600;
+            box-shadow: var(--glow);
         }
         .accent-meta .dot {
             width: 10px;
@@ -63,6 +68,24 @@
             background: #4ade80;
             box-shadow: 0 0 10px rgba(34, 197, 94, 0.7);
         }
+        .legend {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .legend-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
         .stats {
             padding: 0 24px 8px;
             display: grid;
@@ -70,14 +93,14 @@
             gap: 12px;
         }
         .stat-card {
-            background: rgba(255, 255, 255, 0.04);
+            background: linear-gradient(145deg, rgba(255, 255, 255, 0.02), rgba(79, 70, 229, 0.05));
             border: 1px solid var(--border);
             border-radius: 12px;
             padding: 12px 14px;
             display: flex;
             flex-direction: column;
             gap: 4px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+            box-shadow: var(--glow);
         }
         .stat-label {
             color: var(--muted);
@@ -92,6 +115,24 @@
         .stat-subtle {
             color: var(--muted);
             font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .trend {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: rgba(34, 197, 94, 0.12);
+            color: #4ade80;
+            font-weight: 600;
+            font-size: 12px;
+        }
+        .trend.negative {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
         }
         .grid {
             display: grid;
@@ -100,7 +141,7 @@
             padding: 0 24px 24px;
         }
         .card {
-            background: rgba(255, 255, 255, 0.03);
+            background: linear-gradient(160deg, rgba(255, 255, 255, 0.02), rgba(15, 23, 42, 0.92));
             border: 1px solid var(--border);
             border-radius: 12px;
             padding: 16px;
@@ -109,6 +150,17 @@
         .card h2 {
             margin: 0 0 12px;
             font-size: 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .badge {
+            background: rgba(99, 102, 241, 0.14);
+            color: #c7d2fe;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            border: 1px solid rgba(99, 102, 241, 0.3);
         }
         table {
             width: 100%;
@@ -124,6 +176,10 @@
         th {
             color: var(--muted);
             font-weight: 600;
+            position: sticky;
+            top: 0;
+            background: var(--card);
+            z-index: 1;
         }
         tr:last-child td {
             border-bottom: none;
@@ -146,9 +202,16 @@
         .pill.flat { background: rgba(125, 211, 252, 0.15); color: #67e8f9; }
         .pill.strategy { background: rgba(167, 139, 250, 0.16); color: #c4b5fd; }
         .muted { color: var(--muted); }
-        .pnl-positive { color: #22c55e; }
-        .pnl-negative { color: #ef4444; }
-        .error { color: #f87171; font-size: 14px; }
+        .pnl-positive { color: #22c55e; font-weight: 700; }
+        .pnl-negative { color: #ef4444; font-weight: 700; }
+        .error {
+            color: #f87171;
+            font-size: 14px;
+            background: rgba(239, 68, 68, 0.08);
+            border: 1px solid rgba(239, 68, 68, 0.15);
+            padding: 8px 10px;
+            border-radius: 8px;
+        }
         .table-wrapper {
             max-height: 420px;
             overflow: auto;
@@ -165,8 +228,9 @@
             font-weight: 600;
             text-decoration: none;
             border: 1px solid rgba(167, 139, 250, 0.35);
+            transition: transform 120ms ease, filter 150ms ease;
         }
-        .btn-link:hover { filter: brightness(1.15); }
+        .btn-link:hover { filter: brightness(1.15); transform: translateY(-1px); }
         @media (max-width: 640px) {
             header { padding: 16px; }
             .grid { padding: 0 16px 16px; }
@@ -179,6 +243,12 @@
         <div>
             <h1>AI Trading Oversight <span>Live</span></h1>
             <div class="meta">Monitoring AI decisions, open sessions, and recent results</div>
+            <div class="legend">
+                <div class="legend-item"><span class="legend-dot" style="background:#4ade80"></span>Buy</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#f87171"></span>Sell</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#67e8f9"></span>Flat</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#c4b5fd"></span>Strategy</div>
+            </div>
         </div>
         <div class="accent-meta"><span class="dot"></span><span>Last updated <span id="updated">—</span></span></div>
     </header>
@@ -199,11 +269,16 @@
             <div class="stat-value">15s</div>
             <div class="stat-subtle">Auto-refresh enabled</div>
         </div>
+        <div class="stat-card">
+            <div class="stat-label">PnL (latest window)</div>
+            <div class="stat-value" id="pnl-sum">—</div>
+            <div class="stat-subtle" id="pnl-trend">Awaiting data…</div>
+        </div>
     </section>
 
     <div class="grid">
         <section class="card">
-            <h2>AI Decisions & Results</h2>
+            <h2>AI Decisions & Results <span class="badge" id="ai-count">— items</span></h2>
             <div id="ai-error" class="error" style="display:none"></div>
             <div class="table-wrapper">
                 <table id="sessions">
@@ -253,13 +328,37 @@
             </div>
             <div class="meta" id="trades-empty">Loading…</div>
         </section>
+
+        <section class="card">
+            <h2>Active Sessions <span class="badge" id="session-count">— live</span></h2>
+            <div class="table-wrapper">
+                <table id="active-sessions">
+                    <thead>
+                        <tr>
+                            <th>Account</th>
+                            <th>Symbol</th>
+                            <th>Signal</th>
+                            <th>Size</th>
+                            <th>Strategy</th>
+                            <th>Reason</th>
+                            <th>Screenshot</th>
+                            <th>Trace</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="meta" id="active-empty">Awaiting live sessions…</div>
+        </section>
     </div>
 
     <script>
         const sessionsBody = document.querySelector('#sessions tbody');
         const tradesBody = document.querySelector('#trades tbody');
+        const liveBody = document.querySelector('#active-sessions tbody');
         const sessionsEmpty = document.getElementById('sessions-empty');
         const tradesEmpty = document.getElementById('trades-empty');
+        const liveEmpty = document.getElementById('active-empty');
         const tradeError = document.getElementById('trade-error');
         const aiError = document.getElementById('ai-error');
         const reasonError = document.createElement('div');
@@ -298,6 +397,7 @@
                 `;
                 sessionsBody.appendChild(row);
             });
+            document.getElementById('ai-count').textContent = `${decisions.length} items`;
         }
 
         function formatPnL(value) {
@@ -332,6 +432,45 @@
             });
         }
 
+        function renderLiveSessions(sessions) {
+            liveBody.innerHTML = '';
+            if (!sessions || sessions.length === 0) {
+                liveEmpty.textContent = 'Awaiting live sessions…';
+                return;
+            }
+            liveEmpty.textContent = '';
+            sessions.forEach((session) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${session.account || ''}</td>
+                    <td>${session.symbol || ''}</td>
+                    <td>${pill(session.signal, session.signal)}</td>
+                    <td>${session.size ?? ''}</td>
+                    <td>${session.strategy ? pill(session.strategy, 'strategy') : ''}</td>
+                    <td class="muted reason">${session.reason || ''}</td>
+                    <td>${session.screenshot_url ? `<a class="btn-link" href="${session.screenshot_url}" target="_blank" rel="noopener">Open</a>` : ''}</td>
+                    <td class="muted">${session.trace_id || ''}</td>
+                `;
+                liveBody.appendChild(row);
+            });
+            document.getElementById('session-count').textContent = `${sessions.length} live`;
+        }
+
+        function renderStats(trades = [], sessions = []) {
+            const totalPnl = trades.reduce((sum, t) => sum + (Number(t.total_pnl) || 0), 0);
+            const wins = trades.filter((t) => Number(t.total_pnl) > 0).length;
+            const losses = trades.filter((t) => Number(t.total_pnl) < 0).length;
+            const trendEl = document.getElementById('pnl-trend');
+            const trendClass = totalPnl >= 0 ? 'trend' : 'trend negative';
+            document.getElementById('pnl-sum').innerHTML = formatPnL(totalPnl);
+            trendEl.className = trendClass;
+            trendEl.textContent = trades.length
+                ? `${wins} win / ${losses} loss` : 'Awaiting data…';
+
+            document.getElementById('active-count').textContent = sessions.length;
+            document.getElementById('trade-count').textContent = trades.length;
+        }
+
         async function refresh() {
             try {
                 const response = await fetch('/dashboard/data');
@@ -339,8 +478,8 @@
                 updatedEl.textContent = new Date(data.updated_at).toLocaleString();
                 renderSessions(data.ai_decisions || []);
                 renderTrades(data.trade_results || []);
-                document.getElementById('active-count').textContent = data.active_sessions?.length ?? 0;
-                document.getElementById('trade-count').textContent = data.trade_results?.length ?? 0;
+                renderLiveSessions(data.active_sessions || []);
+                renderStats(data.trade_results || [], data.active_sessions || []);
 
                 if (data.trade_results_error) {
                     tradeError.style.display = 'block';
