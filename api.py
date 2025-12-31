@@ -14,6 +14,7 @@ from supabase import create_client
 
 
 config = load_config()
+ACCOUNTS = config['ACCOUNTS']
 OVERRIDE_CONTRACT_ID = config['OVERRIDE_CONTRACT_ID']
 PX_BASE = config['PX_BASE']
 SUPABASE_URL = config['SUPABASE_URL']
