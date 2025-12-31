@@ -239,7 +239,7 @@ def launch_signalr_listener(get_token, get_token_expiry, authenticate, auth_lock
     listener.start()
     return listener
     
-'''
+
 def ensure_stops_match_position(acct_id, contract_id, max_retries=5, retry_delay=0.4):
     from api import search_open, place_stop, cancel, search_pos
 
@@ -274,7 +274,7 @@ def ensure_stops_match_position(acct_id, contract_id, max_retries=5, retry_delay
         for stop in stops:
             logging.info(f"[SL SYNC] No open position, canceling leftover stop {stop['id']}")
             cancel(acct_id, stop["id"])
-'''
+
 
 # Example usage:
 if __name__ == "__main__":
