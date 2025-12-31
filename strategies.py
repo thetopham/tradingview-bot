@@ -65,6 +65,7 @@ def run_simple(acct_id: int, sym: str, sig: str, size: int, alert: str, ai_decis
         ai_decision_id,
     )
 
+'''
 def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
     cid = get_contract(sym)
     side = 0 if sig == "BUY" else 1
@@ -259,5 +260,5 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
         sl_id=sl_id,
         trades=trade_log
     )
-
+'''
     
