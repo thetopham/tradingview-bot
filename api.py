@@ -654,10 +654,19 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         comment_parts = [part for part in [base_comment, f"trace_id={trace_id}" if trace_id else None, ai_decision_note or None] if part]
         comment = " | ".join(comment_parts)
 
+        raw_symbol = str(meta.get("symbol") or "")
+        contract_symbol = str(cid or "")
+        if "MES" in raw_symbol.upper():
+            normalized_symbol = "MES"
+        elif "MES" in contract_symbol.upper():
+            normalized_symbol = "MES"
+        else:
+            normalized_symbol = raw_symbol or contract_symbol
+
         payload = {
             "strategy":      str(meta.get("strategy") or ""),
             "signal":        str(meta.get("signal") or ""),
-            "symbol":        str(meta.get("symbol") or ""),
+            "symbol":        normalized_symbol,
             "account":       str(meta.get("account") or ""),
             "size":          int(meta.get("size") or 0),
             "ai_decision_id": ai_decision_id_out,

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from flask import Blueprint, jsonify, render_template
+from dateutil import parser
+import pytz
 
 from api import get_supabase_client
 from config import load_config
@@ -15,28 +17,36 @@ from signalr_listener import trade_meta
 
 config = load_config()
 CT = config["CT"]
+MT = pytz.timezone("America/Denver")
 ACCOUNT_NAME_BY_ID = {v: k for k, v in config["ACCOUNTS"].items()}
 
 
 def _format_ts(ts: Optional[object]) -> str:
-    """Return a readable timestamp for mixed input types."""
+    """Return a readable timestamp in Mountain Time for mixed input types."""
 
     if ts is None:
         return ""
 
     try:
         if isinstance(ts, (int, float)):
-            return datetime.fromtimestamp(float(ts), CT).strftime("%Y-%m-%d %H:%M:%S %Z")
+            dt = datetime.fromtimestamp(float(ts), pytz.UTC)
+        elif isinstance(ts, str):
+            try:
+                dt = parser.isoparse(ts)
+            except (ValueError, TypeError):
+                return ts
+        elif hasattr(ts, "astimezone"):
+            dt = ts
+        else:
+            return str(ts)
 
-        if isinstance(ts, str):
-            return ts
+        if dt.tzinfo is None:
+            dt = pytz.UTC.localize(dt)
 
-        if hasattr(ts, "astimezone"):
-            return ts.astimezone(CT).strftime("%Y-%m-%d %H:%M:%S %Z")
+        return dt.astimezone(MT).strftime("%Y-%m-%d %H:%M:%S %Z")
     except Exception:
         logging.exception("Failed to format timestamp %s", ts)
-
-    return str(ts)
+        return str(ts)
 
 
 def _collect_active_sessions() -> List[Dict[str, object]]:
@@ -48,10 +58,11 @@ def _collect_active_sessions() -> List[Dict[str, object]]:
 
         account_label = ACCOUNT_NAME_BY_ID.get(acct_id, meta.get("account") or acct_id)
         entry_time = meta.get("entry_time")
+        symbol = _standardize_symbol(meta.get("symbol"), cid)
         sessions.append(
             {
                 "account": account_label,
-                "symbol": meta.get("symbol") or cid,
+                "symbol": symbol,
                 "signal": meta.get("signal", ""),
                 "strategy": meta.get("strategy", ""),
                 "size": meta.get("size", 0),
@@ -94,6 +105,20 @@ def _extract_first_url(value: object) -> str:
     return ""
 
 
+def _standardize_symbol(symbol: Optional[object], cid: Optional[object] = None) -> str:
+    """Normalize contract identifiers to the MES root symbol."""
+
+    text = (symbol or "").upper()
+    contract = str(cid or "").upper()
+
+    if "MES" in text:
+        return "MES"
+    if "MES" in contract:
+        return "MES"
+
+    return text or "MES"
+
+
 def _fetch_trade_results(limit: int = 25) -> Tuple[List[Dict[str, object]], Optional[str]]:
     rows: List[Dict[str, object]] = []
     try:
@@ -102,12 +127,15 @@ def _fetch_trade_results(limit: int = 25) -> Tuple[List[Dict[str, object]], Opti
         logging.warning("Dashboard Supabase client unavailable: %s", e)
         return rows, str(e)
 
+    since = (datetime.now(MT) - timedelta(days=2)).astimezone(pytz.UTC).isoformat()
+
     try:
         res = (
             supabase.table("trade_results")
             .select(
                 "entry_time,exit_time,symbol,signal,ai_decision_id,total_pnl,account,size,comment,strategy"
             )
+            .gte("entry_time", since)
             .order("entry_time", desc=True)
             .limit(limit)
             .execute()
@@ -147,6 +175,7 @@ def _fetch_ai_decisions(limit: int = 50) -> Tuple[List[Dict[str, object]], Optio
                 except json.JSONDecodeError:
                     pass
 
+            row["symbol"] = _standardize_symbol(row.get("symbol"))
             row["screenshot_url"] = _extract_first_url(urls)
             row["decision_time"] = _format_ts(row.get("timestamp"))
             rows.append(row)
@@ -211,6 +240,7 @@ def _dashboard_payload() -> Dict[str, object]:
     trade_lookup = {row.get("ai_decision_id"): row for row in trade_rows if row.get("ai_decision_id")}
 
     for row in trade_rows:
+        row["symbol"] = _standardize_symbol(row.get("symbol"))
         decision = decision_lookup.get(row.get("ai_decision_id")) or {}
         reason_details = ai_reasons.get(row.get("ai_decision_id"), {})
         row["entry_time"] = _format_ts(row.get("entry_time"))
