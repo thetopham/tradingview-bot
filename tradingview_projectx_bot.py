@@ -113,6 +113,8 @@ def handle_webhook_logic(data):
             run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id)
         elif strat == "pivot":
             run_pivot(acct_id, sym, sig, size, alert, ai_decision_id)
+        elif strat == "simple":
+            run_simple(acct_id, sym, sig, size, alert, ai_decision_id)
         else:
             logging.error(f"Unknown strategy '{strat}'")
     except Exception as e:
