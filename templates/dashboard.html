@@ -66,7 +66,7 @@
         .stats {
             padding: 0 24px 8px;
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 12px;
         }
         .stat-card {
@@ -78,6 +78,7 @@
             flex-direction: column;
             gap: 4px;
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+            position: relative;
         }
         .stat-label {
             color: var(--muted);
@@ -93,6 +94,21 @@
             color: var(--muted);
             font-size: 12px;
         }
+        .trend {
+            position: absolute;
+            right: 12px;
+            top: 12px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .trend.positive { color: #4ade80; border-color: rgba(34, 197, 94, 0.4); }
+        .trend.negative { color: #f87171; border-color: rgba(239, 68, 68, 0.35); }
         .grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -103,7 +119,7 @@
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid var(--border);
             border-radius: 12px;
-            padding: 16px;
+            padding: 16px 16px 12px;
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
         }
         .card h2 {
@@ -155,6 +171,7 @@
             border-radius: 10px;
             border: 1px solid var(--border);
             background: rgba(255, 255, 255, 0.01);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
         }
         .table-wrapper table { min-width: 100%; }
         .btn-link {
@@ -167,6 +184,21 @@
             border: 1px solid rgba(167, 139, 250, 0.35);
         }
         .btn-link:hover { filter: brightness(1.15); }
+        .section-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .section-meta .badge {
+            background: rgba(255, 255, 255, 0.08);
+            padding: 6px 10px;
+            border-radius: 8px;
+            color: var(--muted);
+            font-size: 12px;
+            border: 1px solid var(--border);
+        }
         @media (max-width: 640px) {
             header { padding: 16px; }
             .grid { padding: 0 16px 16px; }
@@ -199,11 +231,25 @@
             <div class="stat-value">15s</div>
             <div class="stat-subtle">Auto-refresh enabled</div>
         </div>
+        <div class="stat-card">
+            <div class="trend" id="pnl-trend">—</div>
+            <div class="stat-label">Total pnl (latest)</div>
+            <div class="stat-value" id="pnl-total">—</div>
+            <div class="stat-subtle">Sum of recent trade results</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Win rate</div>
+            <div class="stat-value" id="win-rate">—</div>
+            <div class="stat-subtle">Positive PnL trades</div>
+        </div>
     </section>
 
     <div class="grid">
         <section class="card">
-            <h2>AI Decisions & Results</h2>
+            <div class="section-meta">
+                <h2>AI Decisions & Results</h2>
+                <span class="badge" id="decision-count">0 decisions</span>
+            </div>
             <div id="ai-error" class="error" style="display:none"></div>
             <div class="table-wrapper">
                 <table id="sessions">
@@ -230,7 +276,10 @@
         </section>
 
         <section class="card">
-            <h2>Recent Trade Results</h2>
+            <div class="section-meta">
+                <h2>Recent Trade Results</h2>
+                <span class="badge" id="trade-highlight">—</span>
+            </div>
             <div id="trade-error" class="error" style="display:none"></div>
             <div class="table-wrapper">
                 <table id="trades">
@@ -253,13 +302,40 @@
             </div>
             <div class="meta" id="trades-empty">Loading…</div>
         </section>
+
+        <section class="card">
+            <div class="section-meta">
+                <h2>Active Sessions</h2>
+                <span class="badge" id="active-highlight">—</span>
+            </div>
+            <div class="table-wrapper">
+                <table id="active-sessions">
+                    <thead>
+                        <tr>
+                            <th>Account</th>
+                            <th>Symbol</th>
+                            <th>Signal</th>
+                            <th>Size</th>
+                            <th>Entry</th>
+                            <th>Reason</th>
+                            <th>Screenshot</th>
+                            <th>AI ID</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="meta" id="active-empty">No active trades</div>
+        </section>
     </div>
 
     <script>
         const sessionsBody = document.querySelector('#sessions tbody');
         const tradesBody = document.querySelector('#trades tbody');
+        const activeBody = document.querySelector('#active-sessions tbody');
         const sessionsEmpty = document.getElementById('sessions-empty');
         const tradesEmpty = document.getElementById('trades-empty');
+        const activeEmpty = document.getElementById('active-empty');
         const tradeError = document.getElementById('trade-error');
         const aiError = document.getElementById('ai-error');
         const reasonError = document.createElement('div');
@@ -267,6 +343,12 @@
         reasonError.style.display = 'none';
         tradeError.insertAdjacentElement('afterend', reasonError);
         const updatedEl = document.getElementById('updated');
+        const totalPnlEl = document.getElementById('pnl-total');
+        const pnlTrendEl = document.getElementById('pnl-trend');
+        const winRateEl = document.getElementById('win-rate');
+        const tradeHighlight = document.getElementById('trade-highlight');
+        const decisionCount = document.getElementById('decision-count');
+        const activeHighlight = document.getElementById('active-highlight');
 
         function pill(label, type) {
             const cls = (type || '').toLowerCase();
@@ -307,6 +389,49 @@
             return `<span class="${cls}">${num.toFixed(2)}</span>`;
         }
 
+        function renderActiveSessions(sessions) {
+            activeBody.innerHTML = '';
+            if (!sessions || sessions.length === 0) {
+                activeEmpty.textContent = 'No active trades';
+                return;
+            }
+            activeEmpty.textContent = '';
+            sessions.forEach((s) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${s.account || ''}</td>
+                    <td>${s.symbol || ''}</td>
+                    <td>${pill(s.signal, s.signal)}</td>
+                    <td>${s.size ?? ''}</td>
+                    <td class="muted">${s.entry_time || ''}</td>
+                    <td class="muted reason">${s.reason || ''}</td>
+                    <td>${s.screenshot_url ? `<a class="btn-link" href="${s.screenshot_url}" target="_blank" rel="noopener">Open</a>` : ''}</td>
+                    <td>${s.ai_decision_id ?? ''}</td>
+                `;
+                activeBody.appendChild(row);
+            });
+        }
+
+        function formatPercent(value) {
+            if (!Number.isFinite(value)) return '—';
+            return `${value.toFixed(0)}%`;
+        }
+
+        function computeMetrics(trades) {
+            const numbers = trades.map((t) => Number(t.total_pnl)).filter((n) => !Number.isNaN(n));
+            const total = numbers.reduce((sum, n) => sum + n, 0);
+            const wins = numbers.filter((n) => n >= 0).length;
+            const winRate = numbers.length ? (wins / numbers.length) * 100 : NaN;
+            totalPnlEl.textContent = numbers.length ? total.toFixed(2) : '—';
+            totalPnlEl.className = numbers.length ? (total >= 0 ? 'pnl-positive' : 'pnl-negative') : '';
+            winRateEl.textContent = formatPercent(winRate);
+            tradeHighlight.textContent = numbers.length
+                ? `${wins}/${numbers.length} profitable`
+                : 'No trades yet';
+            pnlTrendEl.textContent = numbers.length ? (total >= 0 ? 'Uptrend' : 'Drawdown') : '—';
+            pnlTrendEl.className = `trend ${total >= 0 ? 'positive' : 'negative'}`;
+        }
+
         function renderTrades(trades) {
             tradesBody.innerHTML = '';
             if (!trades || trades.length === 0) {
@@ -339,8 +464,14 @@
                 updatedEl.textContent = new Date(data.updated_at).toLocaleString();
                 renderSessions(data.ai_decisions || []);
                 renderTrades(data.trade_results || []);
+                renderActiveSessions(data.active_sessions || []);
                 document.getElementById('active-count').textContent = data.active_sessions?.length ?? 0;
                 document.getElementById('trade-count').textContent = data.trade_results?.length ?? 0;
+                decisionCount.textContent = `${data.ai_decisions?.length || 0} decisions`;
+                activeHighlight.textContent = data.active_sessions?.length
+                    ? `${data.active_sessions.length} live`
+                    : 'No active orders';
+                computeMetrics(data.trade_results || []);
 
                 if (data.trade_results_error) {
                     tradeError.style.display = 'block';
