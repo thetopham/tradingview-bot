@@ -108,9 +108,25 @@ def handle_webhook_logic(data):
                 positions=positions,
                 position_context=position_context,
             )
-            if ai_decision.get("signal", "").upper() not in ("BUY", "SELL"):
+
+            ai_signal = ai_decision.get("signal", "").upper()
+            allowed_signals = {"BUY", "SELL", "HOLD", "FLAT"}
+
+            if ai_signal not in allowed_signals:
                 logging.info(f"AI blocked trade: {ai_decision.get('reason', 'No reason')}")
                 return
+
+            if ai_signal == "HOLD":
+                logging.info(f"AI signaled HOLD: {ai_decision.get('reason', 'No reason')}")
+                return
+
+            if ai_signal == "FLAT":
+                ai_sym = ai_decision.get("symbol", sym)
+                ai_cid = get_contract(ai_sym)
+                flatten_contract(acct_id, ai_cid, timeout=10)
+                logging.info(f"AI flatten signal processed for {acct_id} {ai_cid}")
+                return
+
             # Overwrite user values with AI's preferred decision
             strat = ai_decision.get("strategy", strat)
             sig = ai_decision.get("signal", sig)
@@ -118,6 +134,7 @@ def handle_webhook_logic(data):
             size = ai_decision.get("size", size)
             alert = ai_decision.get("alert", alert)
             ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
+            cid = get_contract(sym)
             
               
         # --- Strategy Dispatch ---
