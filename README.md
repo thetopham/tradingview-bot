@@ -435,6 +435,76 @@ To send alerts from TradingView to your bot:
 
 ---
 
+## 🗄️ Creating the merged Supabase feed (`ai_trade_feed`)
+
+The dashboard now expects a single merged dataset that combines AI decisions with executed trade results. The simplest way to supply this feed is with a Supabase **view** named `ai_trade_feed` that unions the `trade_results` and `ai_trading_log` tables.
+
+### Columns required
+
+```
+entry_time    timestamptz   -- entry timestamp from trade_results.entry_time or ai_trading_log.timestamp
+exit_time     timestamptz   -- exit timestamp from trade_results.exit_time (nullable)
+account       text          -- ai_trading_log.account
+symbol        text          -- coalesced symbol (trade_results.symbol preferred, fallback ai_trading_log.symbol)
+signal        text          -- coalesced signal (trade_results.signal preferred, fallback ai_trading_log.signal)
+size          numeric       -- coalesced size (trade_results.size preferred, fallback ai_trading_log.size)
+total_pnl     numeric       -- trade_results.total_pnl (nullable)
+ai_decision_id text         -- shared ID between the two tables
+reason        text          -- coalesced reason/comment text
+urls          jsonb         -- ai_trading_log.urls payload; dashboard extracts the first URL for screenshots
+```
+
+### SQL to create the view
+
+Run this SQL in the Supabase SQL editor (or `psql`) to build the merged view:
+
+```sql
+create or replace view ai_trade_feed as
+    -- Rows that have trade results (preferred when present)
+    select
+        tr.entry_time,
+        tr.exit_time,
+        coalesce(tr.account, atl.account) as account,
+        coalesce(tr.symbol, atl.symbol) as symbol,
+        coalesce(tr.signal, atl.signal) as signal,
+        coalesce(tr.size, atl.size) as size,
+        tr.total_pnl,
+        coalesce(tr.ai_decision_id, atl.ai_decision_id) as ai_decision_id,
+        coalesce(tr.comment, atl.reason) as reason,
+        atl.urls
+    from trade_results tr
+    left join ai_trading_log atl on atl.ai_decision_id = tr.ai_decision_id
+
+    union all
+
+    -- AI decisions that do not yet have a matching trade result
+    select
+        atl.timestamp as entry_time,
+        null::timestamptz as exit_time,
+        atl.account,
+        atl.symbol,
+        atl.signal,
+        atl.size,
+        null::numeric as total_pnl,
+        atl.ai_decision_id,
+        atl.reason,
+        atl.urls
+    from ai_trading_log atl
+    where not exists (
+        select 1
+        from trade_results tr
+        where tr.ai_decision_id = atl.ai_decision_id
+    );
+```
+
+### Additional recommendations
+
+* **Row Level Security (RLS):** ensure the `ai_trade_feed` view is selectable by your dashboard role (e.g., `anon`) via appropriate policies or by exposing it through a service role.
+* **Indexes:** keep existing indexes on `trade_results.ai_decision_id` and `ai_trading_log.ai_decision_id` to make the join efficient.
+* **Backfill:** if historical rows are missing `ai_decision_id`, add them so the view can align entries correctly. The dashboard will still show standalone AI decisions even if no trade result exists.
+
+---
+
 ## 📚 Additional Notes and References
 
 *   **ProjectX API Documentation**: For detailed information on ProjectX API endpoints, authentication, and capabilities, refer to the official ProjectX Gateway API documentation (e.g., `https://gateway.docs.projectx.com/docs/intro` - always check for the most current link from your provider).

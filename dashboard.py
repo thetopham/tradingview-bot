@@ -96,7 +96,24 @@ def _extract_first_url(value: object) -> str:
     return ""
 
 
-def _fetch_trade_results(limit: int = 25) -> Tuple[List[Dict[str, object]], Optional[str]]:
+def _parse_timestamp(ts: object) -> Optional[datetime]:
+    if ts is None:
+        return None
+    if isinstance(ts, (int, float)):
+        return datetime.fromtimestamp(float(ts), pytz.UTC)
+    if isinstance(ts, str):
+        try:
+            return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if isinstance(ts, datetime):
+        return ts if ts.tzinfo else pytz.UTC.localize(ts)
+    return None
+
+
+def _fetch_combined_feed(limit: int = 50) -> Tuple[List[Dict[str, object]], Optional[str]]:
+    """Retrieve merged trade + AI decision rows from the unified Supabase view."""
+
     rows: List[Dict[str, object]] = []
     try:
         supabase = get_supabase_client()
@@ -106,38 +123,22 @@ def _fetch_trade_results(limit: int = 25) -> Tuple[List[Dict[str, object]], Opti
 
     try:
         res = (
-            supabase.table("trade_results")
+            supabase.table("ai_trade_feed")
             .select(
-                "entry_time,exit_time,symbol,signal,ai_decision_id,total_pnl,account,size,comment,strategy"
+                "entry_time,exit_time,account,symbol,signal,size,total_pnl,ai_decision_id,reason,urls"
             )
             .order("entry_time", desc=True)
-            .limit(limit * 4)  # Grab extra rows to filter locally
+            .limit(limit * 2)
             .execute()
         )
-        raw_rows = res.data or []
 
         now_utc = datetime.now(pytz.UTC)
         cutoff = now_utc - timedelta(days=7)
         future_limit = now_utc + timedelta(hours=12)
-        filtered: List[Dict[str, object]] = []
 
-        def _parse_ts(ts: object) -> Optional[datetime]:
-            if ts is None:
-                return None
-            if isinstance(ts, (int, float)):
-                return datetime.fromtimestamp(float(ts), pytz.UTC)
-            if isinstance(ts, str):
-                try:
-                    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                except ValueError:
-                    return None
-            if isinstance(ts, datetime):
-                return ts if ts.tzinfo else pytz.UTC.localize(ts)
-            return None
-
-        for row in raw_rows:
-            entry_dt = _parse_ts(row.get("entry_time"))
-            exit_dt = _parse_ts(row.get("exit_time"))
+        for row in res.data or []:
+            entry_dt = _parse_timestamp(row.get("entry_time"))
+            exit_dt = _parse_timestamp(row.get("exit_time"))
 
             if not entry_dt:
                 continue
@@ -146,139 +147,40 @@ def _fetch_trade_results(limit: int = 25) -> Tuple[List[Dict[str, object]], Opti
             if entry_utc < cutoff or entry_utc > future_limit:
                 continue
 
-            row["symbol"] = "MES"
+            urls = row.get("urls")
+            if isinstance(urls, str):
+                try:
+                    urls = json.loads(urls)
+                except json.JSONDecodeError:
+                    pass
+
             row["entry_time"] = entry_dt.astimezone(DASHBOARD_TZ)
             row["exit_time"] = exit_dt.astimezone(DASHBOARD_TZ) if exit_dt else None
-            filtered.append(row)
-
-        filtered.sort(key=lambda r: r.get("entry_time") or datetime.min, reverse=True)
-        rows = filtered[:limit]
-    except Exception as e:
-        logging.error("Failed to fetch trade_results: %s", e)
-        return rows, str(e)
-
-    return rows, None
-
-
-def _fetch_ai_decisions(limit: int = 50) -> Tuple[List[Dict[str, object]], Optional[str]]:
-    """Retrieve recent AI trading log decisions with parsed screenshot URLs."""
-
-    rows: List[Dict[str, object]] = []
-    try:
-        supabase = get_supabase_client()
-    except Exception as e:
-        logging.warning("Dashboard Supabase client unavailable for ai_trading_log: %s", e)
-        return rows, str(e)
-
-    try:
-        res = (
-            supabase.table("ai_trading_log")
-            .select("ai_decision_id,timestamp,strategy,signal,symbol,account,size,urls,reason")
-            .order("timestamp", desc=True)
-            .limit(limit)
-            .execute()
-        )
-
-        for row in res.data or []:
-            urls = row.get("urls")
-            if isinstance(urls, str):
-                try:
-                    urls = json.loads(urls)
-                except json.JSONDecodeError:
-                    pass
-
             row["screenshot_url"] = _extract_first_url(urls)
-            row["decision_time"] = _format_ts(row.get("timestamp"))
             rows.append(row)
+
+        rows.sort(key=lambda r: r.get("entry_time") or datetime.min, reverse=True)
+        rows = rows[:limit]
     except Exception as e:
-        logging.error("Failed to fetch ai_trading_log: %s", e)
+        logging.error("Failed to fetch ai_trade_feed: %s", e)
         return rows, str(e)
 
     return rows, None
-
-
-def _fetch_ai_reasons(ids: List[object]) -> Tuple[Dict[object, Dict[str, object]], Optional[str]]:
-    """Lookup AI decision details (reason, screenshot) for provided ids."""
-
-    reasons: Dict[object, Dict[str, object]] = {}
-    cleaned_ids = [i for i in ids if i not in (None, "", [])]
-    if not cleaned_ids:
-        return reasons, None
-
-    try:
-        supabase = get_supabase_client()
-    except Exception as e:
-        logging.warning("Dashboard Supabase client unavailable for reasons: %s", e)
-        return reasons, str(e)
-
-    try:
-        res = (
-            supabase.table("ai_trading_log")
-            .select("ai_decision_id,reason,urls")
-            .in_("ai_decision_id", cleaned_ids)
-            .execute()
-        )
-        for row in res.data or []:
-            urls = row.get("urls")
-            if isinstance(urls, str):
-                try:
-                    urls = json.loads(urls)
-                except json.JSONDecodeError:
-                    # Keep the raw string as a potential direct URL fallback
-                    pass
-
-            reasons[row.get("ai_decision_id")] = {
-                "reason": row.get("reason") or "",
-                "screenshot_url": _extract_first_url(urls),
-            }
-    except Exception as e:
-        logging.error("Failed to fetch AI reasons: %s", e)
-        return reasons, str(e)
-
-    return reasons, None
 
 
 def _dashboard_payload() -> Dict[str, object]:
-    trade_rows, trade_error = _fetch_trade_results()
-    ai_decisions, ai_error = _fetch_ai_decisions()
+    feed_rows, feed_error = _fetch_combined_feed()
     active_sessions = _collect_active_sessions()
 
-    ai_ids = [row.get("ai_decision_id") for row in trade_rows + active_sessions]
-    decision_lookup = {row.get("ai_decision_id"): row for row in ai_decisions if row.get("ai_decision_id")}
-    missing_ids = [i for i in ai_ids if i not in decision_lookup]
-    ai_reasons, reason_error = _fetch_ai_reasons(missing_ids)
-
-    trade_lookup = {row.get("ai_decision_id"): row for row in trade_rows if row.get("ai_decision_id")}
-
-    for row in trade_rows:
-        decision = decision_lookup.get(row.get("ai_decision_id")) or {}
-        reason_details = ai_reasons.get(row.get("ai_decision_id"), {})
+    for row in feed_rows:
         row["entry_time"] = _format_ts(row.get("entry_time"))
         row["exit_time"] = _format_ts(row.get("exit_time"))
-        row["reason"] = decision.get("reason") or reason_details.get("reason") or row.get("comment")
-        row["screenshot_url"] = decision.get("screenshot_url") or reason_details.get("screenshot_url")
-
-    for session in active_sessions:
-        decision = decision_lookup.get(session.get("ai_decision_id")) or {}
-        reason_details = ai_reasons.get(session.get("ai_decision_id"), {})
-        session["reason"] = decision.get("reason") or reason_details.get("reason")
-        session["screenshot_url"] = decision.get("screenshot_url") or reason_details.get("screenshot_url")
-
-    for decision in ai_decisions:
-        ai_id = decision.get("ai_decision_id")
-        result = trade_lookup.get(ai_id) or {}
-        decision["total_pnl"] = result.get("total_pnl")
-        decision["result_entry_time"] = _format_ts(result.get("entry_time"))
-        decision["result_exit_time"] = _format_ts(result.get("exit_time"))
 
     return {
         "updated_at": datetime.now(CT).isoformat(),
         "active_sessions": active_sessions,
-        "trade_results": trade_rows,
-        "ai_decisions": ai_decisions,
-        "trade_results_error": trade_error,
-        "ai_decision_error": ai_error,
-        "ai_reason_error": reason_error,
+        "combined_feed": feed_rows,
+        "combined_feed_error": feed_error,
     }
 
 
