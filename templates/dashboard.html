@@ -203,21 +203,24 @@
 
     <div class="grid">
         <section class="card">
-            <h2>Active AI Decisions</h2>
+            <h2>AI Decisions & Results</h2>
+            <div id="ai-error" class="error" style="display:none"></div>
             <div class="table-wrapper">
                 <table id="sessions">
                     <thead>
                         <tr>
-                            <th>Account</th>
-                            <th>Symbol</th>
-                            <th>Signal</th>
+                            <th>Decision Time</th>
                             <th>Strategy</th>
+                            <th>Signal</th>
+                            <th>Symbol</th>
                             <th>Size</th>
+                            <th>PnL</th>
                             <th>Entry</th>
-                            <th>AI ID</th>
+                            <th>Exit</th>
                             <th>Reason</th>
                             <th>Screenshot</th>
-                            <th>Trace</th>
+                            <th>Account</th>
+                            <th>AI ID</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -258,6 +261,7 @@
         const sessionsEmpty = document.getElementById('sessions-empty');
         const tradesEmpty = document.getElementById('trades-empty');
         const tradeError = document.getElementById('trade-error');
+        const aiError = document.getElementById('ai-error');
         const reasonError = document.createElement('div');
         reasonError.className = 'error';
         reasonError.style.display = 'none';
@@ -269,26 +273,28 @@
             return `<span class="pill ${cls}">${label || ''}</span>`;
         }
 
-        function renderSessions(sessions) {
+        function renderSessions(decisions) {
             sessionsBody.innerHTML = '';
-            if (!sessions || sessions.length === 0) {
-                sessionsEmpty.textContent = 'No active sessions';
+            if (!decisions || decisions.length === 0) {
+                sessionsEmpty.textContent = 'No AI decisions found';
                 return;
             }
             sessionsEmpty.textContent = '';
-            sessions.forEach((s) => {
+            decisions.forEach((d) => {
                 const row = document.createElement('tr');
                 row.innerHTML = `
-                    <td>${s.account || ''}</td>
-                    <td>${s.symbol || ''}</td>
-                    <td>${pill(s.signal, s.signal)}</td>
-                    <td>${s.strategy ? pill(s.strategy, 'strategy') : ''}</td>
-                    <td>${s.size ?? ''}</td>
-                    <td class="muted">${s.entry_time || ''}</td>
-                    <td>${s.ai_decision_id ?? ''}</td>
-                    <td class="muted reason">${s.reason || ''}</td>
-                    <td>${s.screenshot_url ? `<a class="btn-link" href="${s.screenshot_url}" target="_blank" rel="noopener">Open</a>` : ''}</td>
-                    <td class="muted">${s.trace_id || ''}</td>
+                    <td class="muted">${d.decision_time || ''}</td>
+                    <td>${d.strategy ? pill(d.strategy, 'strategy') : ''}</td>
+                    <td>${pill(d.signal, d.signal)}</td>
+                    <td>${d.symbol || ''}</td>
+                    <td>${d.size ?? ''}</td>
+                    <td>${formatPnL(d.total_pnl)}</td>
+                    <td class="muted">${d.result_entry_time || ''}</td>
+                    <td class="muted">${d.result_exit_time || ''}</td>
+                    <td class="muted reason">${d.reason || ''}</td>
+                    <td>${d.screenshot_url ? `<a class="btn-link" href="${d.screenshot_url}" target="_blank" rel="noopener">Open</a>` : ''}</td>
+                    <td>${d.account || ''}</td>
+                    <td>${d.ai_decision_id ?? ''}</td>
                 `;
                 sessionsBody.appendChild(row);
             });
@@ -331,7 +337,7 @@
                 const response = await fetch('/dashboard/data');
                 const data = await response.json();
                 updatedEl.textContent = new Date(data.updated_at).toLocaleString();
-                renderSessions(data.active_sessions || []);
+                renderSessions(data.ai_decisions || []);
                 renderTrades(data.trade_results || []);
                 document.getElementById('active-count').textContent = data.active_sessions?.length ?? 0;
                 document.getElementById('trade-count').textContent = data.trade_results?.length ?? 0;
@@ -341,6 +347,13 @@
                     tradeError.textContent = `Supabase error: ${data.trade_results_error}`;
                 } else {
                     tradeError.style.display = 'none';
+                }
+
+                if (data.ai_decision_error) {
+                    aiError.style.display = 'block';
+                    aiError.textContent = `Supabase error: ${data.ai_decision_error}`;
+                } else {
+                    aiError.style.display = 'none';
                 }
 
                 if (data.ai_reason_error) {
