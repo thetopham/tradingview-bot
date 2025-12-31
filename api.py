@@ -537,10 +537,37 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         })
         trades = resp.get("trades", [])
 
-        relevant_trades = [
-            t for t in trades
-            if t.get("contractId") == cid and not t.get("voided", False) and t.get("size", 0) > 0
-        ]
+        order_ids_raw = meta.get("order_id")
+        order_ids = set()
+        if isinstance(order_ids_raw, (list, tuple, set)):
+            for oid in order_ids_raw:
+                if oid is not None:
+                    order_ids.add(str(oid))
+        elif order_ids_raw is not None:
+            order_ids.add(str(order_ids_raw))
+
+        if order_ids:
+            relevant_trades = [
+                t
+                for t in trades
+                if not t.get("voided", False)
+                and t.get("size", 0) > 0
+                and str(t.get("orderId")) in order_ids
+            ]
+
+            if not relevant_trades:
+                logging.warning(
+                    "[log_trade_results_to_supabase] No trades matched order_ids %s; falling back to contractId filter",
+                    sorted(order_ids),
+                )
+        else:
+            relevant_trades = []
+
+        if not relevant_trades:
+            relevant_trades = [
+                t for t in trades
+                if t.get("contractId") == cid and not t.get("voided", False) and t.get("size", 0) > 0
+            ]
 
         if not relevant_trades:
             logging.warning("[log_trade_results_to_supabase] No relevant trades found, skipping Supabase log.")
@@ -563,6 +590,12 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         duration_sec = int((exit_time - entry_time).total_seconds())
         ai_decision_id_out = str(ai_decision_id) if ai_decision_id is not None else None
 
+        base_comment = str(meta.get("comment") or "")
+        trace_id = meta.get("trace_id")
+        comment = base_comment
+        if trace_id:
+            comment = f"{base_comment} | trace_id={trace_id}" if base_comment else f"trace_id={trace_id}"
+
         payload = {
             "strategy":      str(meta.get("strategy") or ""),
             "signal":        str(meta.get("signal") or ""),
@@ -577,7 +610,7 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
             "total_pnl":     float(total_pnl) if total_pnl is not None else 0.0,
             "raw_trades":    relevant_trades if relevant_trades else [],
             "order_id":      str(meta.get("order_id") or ""),
-            "comment":       str(meta.get("comment") or ""),
+            "comment":       comment,
             "trade_ids":     trade_ids if trade_ids else [],
         }
 
@@ -591,7 +624,14 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         try:
             r = session.post(url, json=payload, headers=headers, timeout=(3.05, 10))
             if r.status_code == 201:
-                logging.info(f"[log_trade_results_to_supabase] Uploaded trade result for acct={acct_id}, cid={cid}, PnL={total_pnl}, ai_decision_id={ai_decision_id_out}")
+                logging.info(
+                    "[log_trade_results_to_supabase] Uploaded trade result for acct=%s, cid=%s, PnL=%s, ai_decision_id=%s, trace_id=%s",
+                    acct_id,
+                    cid,
+                    total_pnl,
+                    ai_decision_id_out,
+                    trace_id,
+                )
             else:
                 logging.warning(f"[log_trade_results_to_supabase] Supabase returned non-201: status={r.status_code}, text={r.text}")
             r.raise_for_status()
