@@ -169,7 +169,7 @@ def _summarize_positions(positions, timeframe: str = "1m"):
         avg_price = pos.get("avgPrice") or pos.get("averagePrice") or pos.get("entryPrice")
 
         symbol = pos.get("contractSymbol") or pos.get("symbol") or cid
-        current_price = _fetch_latest_price_from_supabase(symbol, timeframe) if symbol else None
+        current_price = _fetch_latest_price_from_supabase(MES, timeframe) if symbol else None
 
         if current_price is None or avg_price is None:
             pnl = None
@@ -203,7 +203,7 @@ def _fetch_latest_price_from_supabase(symbol: str, timeframe: str = "1m") -> Opt
 
     url = f"{SUPABASE_URL}/rest/v1/tv_datafeed"
     params = {
-        "symbol": f"eq.{symbol}",
+        "symbol": f"eq.MES",
         "timeframe": f"eq.{timeframe}",
         "select": "c,ts",
         "order": "ts.desc",
@@ -221,7 +221,7 @@ def _fetch_latest_price_from_supabase(symbol: str, timeframe: str = "1m") -> Opt
         resp.raise_for_status()
         rows = resp.json()
         if not rows:
-            logging.debug("Supabase tv_datafeed returned no rows for %s", symbol)
+            logging.debug("Supabase tv_datafeed returned no rows for %s", MES)
             return None
 
         latest = rows[0]
@@ -262,7 +262,7 @@ def _compute_simple_position_context(
     position_type = positions[0].get("type") if positions else None
     side = "LONG" if position_type == 1 else "SHORT" if position_type == 2 else None
 
-    current_price = _fetch_latest_price_from_supabase(symbol, timeframe)
+    current_price = _fetch_latest_price_from_supabase(MES, timeframe)
 
     if current_price is None or avg_price is None:
         unrealized_pnl = 0.0
