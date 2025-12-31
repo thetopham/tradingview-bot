@@ -146,12 +146,12 @@ def flatten_contract(acct_id, cid, timeout=10):
     logging.error("Flatten timeout: %s still has %d orders, %d positions", cid, len(rem_orders), len(rem_pos))
     return False
     
-'''
+
 def cancel_all_stops(acct_id, cid):
     for o in search_open(acct_id):
         if o["contractId"] == cid and o["type"] == 4:
             cancel(acct_id, o["id"])
-'''
+
 
 def get_contract(sym):
     if OVERRIDE_CONTRACT_ID:
