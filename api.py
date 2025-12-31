@@ -200,7 +200,8 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url):
             "reason": f"AI error: {str(e)}",
             "error": True
         }
-
+        
+'''
 def check_for_phantom_orders(acct_id, cid):
 
     # 1. Check for open position(s)
@@ -223,7 +224,7 @@ def check_for_phantom_orders(acct_id, cid):
                     cancel(acct_id, o["id"])
                 except Exception as e:
                     logging.error(f"Error cancelling phantom order {o['id']}: {e}")
-
+'''
 
 
 
