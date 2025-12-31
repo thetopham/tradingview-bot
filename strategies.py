@@ -52,6 +52,7 @@ def run_simple(acct_id: int, sym: str, sig: str, size: int, alert: str, ai_decis
             logging.error("run_simple: unable to flatten opposing position; aborting entry")
             return
 
+    entry_time = datetime.now(CT)
     entry = place_market(acct_id, cid, side, size)
     fill_price = _compute_entry_fill(acct_id, entry.get("orderId")) or entry.get("fillPrice")
 
@@ -63,6 +64,24 @@ def run_simple(acct_id: int, sym: str, sig: str, size: int, alert: str, ai_decis
         fill_price,
         alert,
         ai_decision_id,
+    )
+
+    track_trade(
+        acct_id=acct_id,
+        cid=cid,
+        entry_time=entry_time.timestamp(),
+        ai_decision_id=ai_decision_id,
+        strategy="simple",
+        sig=sig,
+        size=size,
+        order_id=entry.get("orderId"),
+        alert=alert,
+        account=acct_id,
+        symbol=sym,
+        sl_id=None,
+        tp_ids=None,
+        trades=[entry],
+        regime=None,
     )
 
 '''
