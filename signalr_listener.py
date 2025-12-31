@@ -18,6 +18,22 @@ positions_state = {}
 trade_meta = {}
 
 
+def _build_trace_id(entry_time, ai_decision_id, order_id=None, session_id=None):
+    try:
+        if isinstance(entry_time, (int, float)):
+            ts = int(entry_time)
+        elif isinstance(entry_time, str):
+            ts = int(parser.isoparse(entry_time).timestamp())
+        else:
+            ts = int(getattr(entry_time, "timestamp", lambda: time.time())())
+    except Exception:
+        ts = int(time.time())
+
+    base = ai_decision_id if ai_decision_id is not None else "no_ai_id"
+    suffix = str(order_id or session_id or "unknown")
+    return f"{base}-{suffix}-{ts}"
+
+
 def track_trade(
     acct_id,
     cid,
@@ -56,11 +72,12 @@ def track_trade(
         "symbol": symbol,
         "trades": trades,
         "regime": regime,
+        "trace_id": _build_trace_id(entry_time, ai_decision_id, order_id=order_id, session_id=session_id),
     }
 
     logging.info(
         f"[track_trade] New session {session_id} - AI decision {ai_decision_id}, "
-        f"order {order_id}, {sig} {size} {symbol}"
+        f"order {order_id}, {sig} {size} {symbol}, trace_id={meta['trace_id']}"
     )
 
     trade_meta[(acct_id, cid)] = meta
@@ -69,6 +86,7 @@ def track_trade(
 def reconstruct_trade_metadata_on_startup():
     """Reconstruct trade metadata for open positions after restart"""
     from api import ACCOUNTS
+    import uuid
 
     logging.info("Reconstructing trade metadata for open positions...")
     reconstructed_count = 0
@@ -93,6 +111,14 @@ def reconstruct_trade_metadata_on_startup():
                     else:
                         signal = "UNKNOWN"
 
+                    session_id = str(uuid.uuid4())[:8]
+                    trace_id = _build_trace_id(
+                        creation_time,
+                        f"RESTART_{int(time.time())}",
+                        order_id=None,
+                        session_id=session_id,
+                    )
+
                     meta = {
                         "entry_time": creation_time,
                         "ai_decision_id": f"RESTART_{int(time.time())}",
@@ -108,6 +134,8 @@ def reconstruct_trade_metadata_on_startup():
                         "trades": None,
                         "regime": "unknown",
                         "comment": f"Metadata reconstructed on {datetime.now(CT).strftime('%Y-%m-%d %H:%M:%S')}",
+                        "session_id": session_id,
+                        "trace_id": trace_id,
                     }
 
                     trade_meta[(acct_id, cid)] = meta
@@ -379,6 +407,14 @@ def on_position_update(args):
         meta = trade_meta.get((account_id, contract_id))
 
         if meta is not None:
+            if not meta.get("trace_id"):
+                meta["trace_id"] = _build_trace_id(
+                    meta.get("entry_time", entry_time),
+                    meta.get("ai_decision_id"),
+                    order_id=meta.get("order_id"),
+                    session_id=meta.get("session_id"),
+                )
+
             meta_entry_time = meta.get("entry_time")
 
             try:
@@ -404,6 +440,8 @@ def on_position_update(args):
             logging.warning(
                 f"[on_position_update] No meta for open position acct={account_id}, cid={contract_id}. Creating basic metadata."
             )
+            import uuid
+
             position_type = position_data.get("type")
             signal = "BUY" if position_type == 1 else "SELL" if position_type == 2 else "UNKNOWN"
 
@@ -412,6 +450,8 @@ def on_position_update(args):
                 if id == account_id:
                     account_name = name
                     break
+
+            session_id = str(uuid.uuid4())[:8]
 
             trade_meta[(account_id, contract_id)] = {
                 "entry_time": entry_time or time.time(),
@@ -428,6 +468,8 @@ def on_position_update(args):
                 "trades": None,
                 "regime": "unknown",
                 "comment": f"Metadata created on position update at {datetime.now(CT).strftime('%Y-%m-%d %H:%M:%S')}",
+                "session_id": session_id,
+                "trace_id": _build_trace_id(entry_time, None, session_id=session_id),
             }
     
 
@@ -451,6 +493,11 @@ def on_position_update(args):
 
             last_position = positions_state.get(account_id, {}).get(contract_id, {})
 
+            import uuid
+
+            session_id = str(uuid.uuid4())[:8]
+            trace_id = _build_trace_id(entry_time, None, session_id=session_id)
+
             account_name = "unknown"
             for name, id in ACCOUNTS.items():
                 if id == account_id:
@@ -465,6 +512,8 @@ def on_position_update(args):
                 "size": last_position.get("size", 0),
                 "alert": "Position closed without metadata",
                 "comment": "Trade result logged without original metadata",
+                "session_id": session_id,
+                "trace_id": trace_id,
             }
 
             entry_time = last_position.get("creationTimestamp", datetime.now(CT) - timedelta(hours=1))
