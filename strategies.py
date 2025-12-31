@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from api import (
     get_contract, search_pos, flatten_contract, place_market,
     place_limit, place_stop, search_open, cancel, search_trades,
-    check_for_phantom_orders, log_trade_results_to_supabase
+    log_trade_results_to_supabase
 )
 from signalr_listener import track_trade
 from config import load_config
