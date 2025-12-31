@@ -589,74 +589,70 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         trade_ids = [t.get("id") for t in relevant_trades]
         duration_sec = int((exit_time - entry_time).total_seconds())
 
-        def _recover_ai_id_from_entry(entry_dt):
-            try:
-                supabase = get_supabase_client()
-            except Exception as e:
-                logging.warning(
-                    "[log_trade_results_to_supabase] Unable to init Supabase client for recovery: %s",
-                    e,
-                )
-                return None
-
-            try:
-                start = (entry_dt - timedelta(minutes=5)).isoformat()
-                end = (entry_dt + timedelta(minutes=5)).isoformat()
-                res = (
-                    supabase.table("trade_results")
-                    .select("ai_decision_id,entry_time")
-                    .gte("entry_time", start)
-                    .lte("entry_time", end)
-                    .order("entry_time")
-                    .limit(1)
-                    .execute()
-                )
-
-                for row in res.data or []:
-                    candidate = row.get("ai_decision_id")
-                    if candidate is None:
-                        continue
-                    try:
-                        recovered = int(candidate)
-                        logging.info(
-                            "[log_trade_results_to_supabase] Recovered ai_decision_id=%s from entry_time window",
-                            recovered,
-                        )
-                        return recovered
-                    except (ValueError, TypeError):
-                        continue
-            except Exception as e:
-                logging.error(
-                    "[log_trade_results_to_supabase] Failed to recover ai_decision_id from entry_time: %s",
-                    e,
-                )
-
+    def _recover_ai_id_from_entry(entry_dt):
+        try:
+            supabase = get_supabase_client()
+        except Exception as e:
+            logging.warning(
+                "[log_trade_results_to_supabase] Unable to init Supabase client for recovery: %s",
+                e,
+            )
             return None
 
-        ai_decision_id_out = None
-        ai_decision_note = ""
-        if ai_decision_id is not None:
-            try:
-                ai_decision_id_out = int(ai_decision_id)
-            except (ValueError, TypeError):
-                ai_decision_note = f"ai_decision={ai_decision_id}"
+        try:
+            start = (entry_dt - timedelta(minutes=5)).isoformat()
+            end = (entry_dt + timedelta(minutes=5)).isoformat()
+            res = (
+                supabase.table("trade_results")
+                .select("ai_decision_id,entry_time")
+                .gte("entry_time", start)
+                .lte("entry_time", end)
+                .order("entry_time")
+                .limit(1)
+                .execute()
+            )
 
-        if ai_decision_id_out is None and entry_time:
-            recovered_ai_id = _recover_ai_id_from_entry(entry_time)
-            if recovered_ai_id is not None:
-                ai_decision_id_out = recovered_ai_id
+            for row in res.data or []:
+                candidate = row.get("ai_decision_id")
+                if candidate is None:
+                    continue
+                try:
+                    recovered = int(candidate)
+                    logging.info(
+                        "[log_trade_results_to_supabase] Recovered ai_decision_id=%s from entry_time window",
+                        recovered,
+                    )
+                    return recovered
+                except (ValueError, TypeError):
+                    continue
+        except Exception as e:
+            logging.error(
+                "[log_trade_results_to_supabase] Failed to recover ai_decision_id from entry_time: %s",
+                e,
+            )
 
-        if ai_decision_id_out is None and ai_decision_note:
-            ai_decision_note = f"{ai_decision_note}|recovery_failed"
+        return None
+
+    ai_decision_id_out = None
+    ai_decision_note = ""
+    if ai_decision_id is not None:
+        try:
+            ai_decision_id_out = int(ai_decision_id)
+        except (ValueError, TypeError):
+            ai_decision_note = f"ai_decision={ai_decision_id}"
+
+    if ai_decision_id_out is None and entry_time:
+        recovered_ai_id = _recover_ai_id_from_entry(entry_time)
+        if recovered_ai_id is not None:
+            ai_decision_id_out = recovered_ai_id
+
+    if ai_decision_id_out is None and ai_decision_note:
+        ai_decision_note = f"{ai_decision_note}|recovery_failed"
 
         base_comment = str(meta.get("comment") or "")
         trace_id = meta.get("trace_id")
-        comment_parts = [
-            base_comment,
-            f"trace_id={trace_id}" if trace_id else None,
-            ai_decision_note if ai_decision_note else None,
-        ]
-        comment = " | ".join([part for part in comment_parts if part])
+        comment_parts = [part for part in [base_comment, f"trace_id={trace_id}" if trace_id else None, ai_decision_note or None] if part]
+        comment = " | ".join(comment_parts)
 
         payload = {
             "strategy":      str(meta.get("strategy") or ""),
