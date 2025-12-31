@@ -2,18 +2,47 @@ import os
 import time
 import threading
 import logging
-from api import search_pos, log_trade_results_to_supabase
-from datetime import datetime
+from datetime import datetime, timedelta
+
+import pytz
+from dateutil import parser
 from signalrcore.hub_connection_builder import HubConnectionBuilder
 
+from api import ACCOUNTS, search_pos, log_trade_results_to_supabase
+
+CT = pytz.timezone("America/Chicago")
 USER_HUB_URL_BASE = "wss://rtc.topstepx.com/hubs/user?access_token={}"
 
 orders_state = {}
 positions_state = {}
 trade_meta = {}
 
-def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, order_id, alert, account, symbol, sl_id=None, tp_ids=None, trades=None):
+
+def track_trade(
+    acct_id,
+    cid,
+    entry_time,
+    ai_decision_id,
+    strategy,
+    sig,
+    size,
+    order_id,
+    alert,
+    account,
+    symbol,
+    sl_id=None,
+    tp_ids=None,
+    trades=None,
+    regime=None,
+):
+    """Enhanced trade tracking with session ID to prevent mixing trades"""
+
+    import uuid
+
+    session_id = str(uuid.uuid4())[:8]
+
     meta = {
+        "session_id": session_id,
         "entry_time": entry_time,
         "ai_decision_id": ai_decision_id,
         "strategy": strategy,
@@ -26,9 +55,81 @@ def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, o
         "account": account,
         "symbol": symbol,
         "trades": trades,
+        "regime": regime,
     }
-    logging.info(f"[track_trade] Called with ai_decision_id={ai_decision_id}, meta={meta}")
+
+    logging.info(
+        f"[track_trade] New session {session_id} - AI decision {ai_decision_id}, "
+        f"order {order_id}, {sig} {size} {symbol}"
+    )
+
     trade_meta[(acct_id, cid)] = meta
+
+
+def reconstruct_trade_metadata_on_startup():
+    """Reconstruct trade metadata for open positions after restart"""
+    from api import ACCOUNTS
+
+    logging.info("Reconstructing trade metadata for open positions...")
+    reconstructed_count = 0
+
+    for account_name, acct_id in ACCOUNTS.items():
+        try:
+            positions = search_pos(acct_id)
+
+            for pos in positions:
+                if pos.get("size", 0) > 0:
+                    cid = pos["contractId"]
+                    creation_time = pos.get("creationTimestamp")
+
+                    if (acct_id, cid) in trade_meta:
+                        continue
+
+                    position_type = pos.get("type")
+                    if position_type == 1:
+                        signal = "BUY"
+                    elif position_type == 2:
+                        signal = "SELL"
+                    else:
+                        signal = "UNKNOWN"
+
+                    meta = {
+                        "entry_time": creation_time,
+                        "ai_decision_id": f"RESTART_{int(time.time())}",
+                        "strategy": "unknown_restart",
+                        "signal": signal,
+                        "size": pos["size"],
+                        "order_id": None,
+                        "sl_id": None,
+                        "tp_ids": None,
+                        "alert": f"Position reconstructed after restart",
+                        "account": account_name,
+                        "symbol": cid,
+                        "trades": None,
+                        "regime": "unknown",
+                        "comment": f"Metadata reconstructed on {datetime.now(CT).strftime('%Y-%m-%d %H:%M:%S')}",
+                    }
+
+                    trade_meta[(acct_id, cid)] = meta
+                    reconstructed_count += 1
+
+                    logging.warning(
+                        "Reconstructed metadata for %s: %s contracts %s @ $%.2f",
+                        account_name,
+                        pos["size"],
+                        signal,
+                        pos.get("averagePrice", 0),
+                    )
+
+        except Exception as e:
+            logging.error("Failed to reconstruct metadata for %s: %s", account_name, e)
+
+    if reconstructed_count > 0:
+        logging.info("Successfully reconstructed metadata for %s open positions", reconstructed_count)
+    else:
+        logging.info("No open positions found that need metadata reconstruction")
+
+    return reconstructed_count
 
 class SignalRTradingListener(threading.Thread):
     def __init__(self, accounts, authenticate_func, token_getter, token_expiry_getter, auth_lock, event_handlers=None):
@@ -41,29 +142,44 @@ class SignalRTradingListener(threading.Thread):
         self.event_handlers = event_handlers or {}
         self.hub = None
         self.stop_event = threading.Event()
+        self.reconnect_event = threading.Event()
         self.last_token = None
-        self.needs_reconnect = False
+        self.last_event_time = time.time()
 
     def run(self):
+        consecutive_failures = 0
+
         while not self.stop_event.is_set():
             try:
                 self.ensure_token_valid()
                 token = self.token_getter()
-                token_changed = token != self.last_token
 
-                if token_changed:
-                    logging.info("JWT token changed; restarting SignalR connection with the new token.")
-
-                if self.hub is None or self.needs_reconnect or token_changed:
-                    self.connect_signalr(token)
-                    self.needs_reconnect = False
+                if token != self.last_token:
                     self.last_token = token
+                    logging.info("Token changed, establishing new connection")
 
-                # Poll frequently so we can refresh tokens and reconnect without waiting an hour
-                self.stop_event.wait(30)
+                self.connect_signalr(token)
+                consecutive_failures = 0
+
+                while not self.stop_event.is_set():
+                    if self.reconnect_event.wait(timeout=1):
+                        self.reconnect_event.clear()
+                        logging.info("Reconnect event triggered")
+                        break
+
+                    if int(time.time()) % 5 == 0:
+                        if self.hub and hasattr(self.hub, "transport"):
+                            state = getattr(self.hub.transport, "state", None)
+                            if state and state.value != 1:
+                                logging.warning(f"Connection unhealthy (state={state}), reconnecting...")
+                                break
+
             except Exception as e:
-                logging.error(f"SignalRListener error: {e}", exc_info=True)
-                time.sleep(10)
+                consecutive_failures += 1
+                wait_time = min(60 * consecutive_failures, 300)
+                logging.error(f"SignalRListener error (attempt {consecutive_failures}): {e}", exc_info=True)
+                logging.info(f"Waiting {wait_time}s before retry...")
+                time.sleep(wait_time)
 
     def ensure_token_valid(self):
         with self.auth_lock:
@@ -77,38 +193,73 @@ class SignalRTradingListener(threading.Thread):
             return
         logging.info(f"Using token for SignalR (first 8): {token[:8]}...")
 
-        url = USER_HUB_URL_BASE.format(token)
         if self.hub:
-            self.hub.stop()
+            try:
+                self.hub.stop()
+                time.sleep(2)
+            except Exception as e:
+                logging.debug(f"Error stopping old hub: {e}")
+            self.hub = None
+
+        url = USER_HUB_URL_BASE.format(token)
         self.hub = (
             HubConnectionBuilder()
-            .with_url(url, options={
-                "access_token_factory": lambda: token,
-                "headers": {"Authorization": f"Bearer {token}"},
-            })
+            .with_url(
+                url,
+                options={
+                    "access_token_factory": lambda: token,
+                    "headers": {"Authorization": f"Bearer {token}", "User-Agent": "TradingBot/1.0"},
+                },
+            )
             .configure_logging(logging.INFO)
-            .with_automatic_reconnect({
-                "type": "raw",
-                "keep_alive_interval": 10,
-                "reconnect_interval": 5
-            })
+            .with_automatic_reconnect(
+                {"type": "interval", "intervals": [0, 1, 2, 5, 10, 30], "keep_alive_interval": 15, "reconnect_interval": 5}
+            )
             .build()
         )
 
-        # Register event handlers
-        self.hub.on("GatewayUserAccount", self.event_handlers.get("on_account_update", self.default_handler))
-        self.hub.on("GatewayUserOrder", self.event_handlers.get("on_order_update", self.default_handler))
-        self.hub.on("GatewayUserPosition", self.event_handlers.get("on_position_update", self.default_handler))
-        self.hub.on("GatewayUserTrade", self.event_handlers.get("on_trade_update", self.default_handler))
+        def wrap_handler(handler):
+            def wrapped(*args, **kwargs):
+                self.last_event_time = time.time()
+                return handler(*args, **kwargs)
+
+            return wrapped
+
+        self.hub.on("GatewayUserAccount", wrap_handler(self.event_handlers.get("on_account_update", self.default_handler)))
+        self.hub.on("GatewayUserOrder", wrap_handler(self.event_handlers.get("on_order_update", self.default_handler)))
+        self.hub.on("GatewayUserPosition", wrap_handler(self.event_handlers.get("on_position_update", self.default_handler)))
+        self.hub.on("GatewayUserTrade", wrap_handler(self.event_handlers.get("on_trade_update", self.default_handler)))
 
         self.hub.on_open(lambda: self.on_open())
-        self.hub.on_close(self.on_close)
+        self.hub.on_close(lambda: self.handle_close())
         self.hub.on_reconnect(self.on_reconnected)
-        self.hub.on_error(lambda err: logging.error(f"SignalR connection error: {err}"))
-        self.hub.start()
+        self.hub.on_error(lambda err: self.handle_error(err))
+
+        max_start_attempts = 3
+        for attempt in range(max_start_attempts):
+            try:
+                self.hub.start()
+                time.sleep(3)
+
+                if hasattr(self.hub, "transport") and hasattr(self.hub.transport, "state"):
+                    if self.hub.transport.state.value == 1:
+                        logging.info("SignalR hub started successfully")
+                        self.last_event_time = time.time()
+                        return
+                    logging.warning(f"Hub state after start: {self.hub.transport.state}")
+
+            except Exception as e:
+                logging.error(f"SignalR start attempt {attempt + 1}/{max_start_attempts} failed: {e}")
+                if attempt < max_start_attempts - 1:
+                    wait_time = (attempt + 1) * 5
+                    logging.info(f"Waiting {wait_time}s before retry...")
+                    time.sleep(wait_time)
+                else:
+                    raise
 
     def on_open(self):
         logging.info("SignalR connection established. Subscribing to all events.")
+        self.last_event_time = time.time()
         self.subscribe_all()
 
     def subscribe_all(self):
@@ -122,20 +273,54 @@ class SignalRTradingListener(threading.Thread):
 
     def on_reconnected(self):
         logging.info("SignalR reconnected! Resubscribing to all events...")
+        self.last_event_time = time.time()
         self.subscribe_all()
-
-    def on_close(self):
-        logging.info("SignalR connection closed. Flagging for reconnect.")
-        self.needs_reconnect = True
+        self.sweep_and_cleanup_positions_and_stops()
 
     def default_handler(self, args):
+        self.last_event_time = time.time()
         logging.info(f"SignalR event: {args}")
+
+    def handle_close(self):
+        close_time = datetime.now(CT)
+        logging.warning(f"SignalR connection closed at {close_time}")
+
+        if close_time.minute >= 25 and close_time.minute <= 30:
+            logging.info("Disconnect near hour boundary - waiting 90s for server reset")
+            time.sleep(90)
+        else:
+            time.sleep(10)
+
+        self.reconnect_event.set()
+        if self.hub:
+            try:
+                self.hub.stop()
+            except Exception:
+                pass
 
     def stop(self):
         self.stop_event.set()
         if self.hub:
             self.hub.stop()
 
+    def handle_error(self, err):
+        logging.error(f"SignalR connection error: {err}")
+        error_msg = str(err).lower()
+
+        if "401" in error_msg or "unauthorized" in error_msg:
+            logging.error("Authentication error - forcing token refresh")
+            with self.auth_lock:
+                self.authenticate_func()
+
+        time.sleep(30)
+        self.reconnect_event.set()
+        if self.hub:
+            try:
+                self.hub.stop()
+            except Exception:
+                pass
+
+    
 # --- Event Handlers ---
 
 def on_account_update(args):
@@ -158,7 +343,6 @@ def on_order_update(args):
     
 
     if status == 2:
-        # Only add missing fields to meta, never overwrite!
         meta = trade_meta.setdefault((account_id, contract_id), {})
         if "entry_time" not in meta or not meta["entry_time"]:
             meta["entry_time"] = order_data.get("creationTimestamp") or time.time()
@@ -182,37 +366,146 @@ def on_position_update(args):
 
     positions_state.setdefault(account_id, {})[contract_id] = position_data
 
-    # Use the broker's timestamp for entry
     entry_time = position_data.get("creationTimestamp")
     if size > 0:
-        # Only update the entry_time field in meta if meta exists
         meta = trade_meta.get((account_id, contract_id))
-        if meta is not None:
-            meta["entry_time"] = entry_time
-        else:
-            # Optionally: log if meta is missing at entry time (should rarely happen)
-            logging.warning(f"[on_position_update] No meta at entry for acct={account_id}, cid={contract_id}. Not updating entry_time.")
 
-   
+        if meta is not None:
+            meta_entry_time = meta.get("entry_time")
+
+            try:
+                if isinstance(meta_entry_time, str):
+                    meta_time = parser.isoparse(meta_entry_time)
+                else:
+                    meta_time = datetime.fromtimestamp(meta_entry_time, CT)
+
+                current_time = parser.isoparse(entry_time) if entry_time else datetime.now(CT)
+
+                time_diff = abs((current_time - meta_time).total_seconds())
+
+                if time_diff > 60:
+                    logging.warning(f"Metadata appears to be from old position (age: {time_diff:.0f}s), clearing")
+                    meta = None
+                    trade_meta.pop((account_id, contract_id), None)
+                else:
+                    meta["entry_time"] = entry_time
+            except Exception as e:
+                logging.error(f"Error comparing timestamps: {e}")
+
+        if meta is None:
+            logging.warning(
+                f"[on_position_update] No meta for open position acct={account_id}, cid={contract_id}. Creating basic metadata."
+            )
+            position_type = position_data.get("type")
+            signal = "BUY" if position_type == 1 else "SELL" if position_type == 2 else "UNKNOWN"
+
+            account_name = "unknown"
+            for name, id in ACCOUNTS.items():
+                if id == account_id:
+                    account_name = name
+                    break
+
+            trade_meta[(account_id, contract_id)] = {
+                "entry_time": entry_time or time.time(),
+                "ai_decision_id": None,
+                "strategy": "manual",
+                "signal": signal,
+                "size": size,
+                "order_id": None,
+                "sl_id": None,
+                "tp_ids": None,
+                "alert": "Position tracked by SignalR",
+                "account": account_name,
+                "symbol": contract_id,
+                "trades": None,
+                "regime": "unknown",
+                "comment": f"Metadata created on position update at {datetime.now(CT).strftime('%Y-%m-%d %H:%M:%S')}",
+            }
+    
+
     if size == 0:
         meta = trade_meta.pop((account_id, contract_id), None)
         logging.info(f"[on_position_update] Position closed for acct={account_id}, cid={contract_id}")
         logging.info(f"[on_position_update] meta at close: {meta}")
+
         if meta:
             ai_decision_id = meta.get("ai_decision_id")
             logging.info(f"[on_position_update] Calling log_trade_results_to_supabase with ai_decision_id={ai_decision_id}")
             log_trade_results_to_supabase(
                 acct_id=account_id,
                 cid=contract_id,
-                entry_time=meta.get("entry_time"),  # ISO8601 string
+                entry_time=meta.get("entry_time"),
                 ai_decision_id=ai_decision_id,
-                meta=meta
+                meta=meta,
             )
         else:
-            logging.warning(f"[on_position_update] No meta found for acct={account_id} cid={contract_id} on flatten!")
+            logging.warning(f"[on_position_update] No meta found for closed position, creating minimal log entry")
+
+            last_position = positions_state.get(account_id, {}).get(contract_id, {})
+
+            account_name = "unknown"
+            for name, id in ACCOUNTS.items():
+                if id == account_id:
+                    account_name = name
+                    break
+
+            minimal_meta = {
+                "strategy": "unknown",
+                "signal": "UNKNOWN",
+                "symbol": contract_id,
+                "account": account_name,
+                "size": last_position.get("size", 0),
+                "alert": "Position closed without metadata",
+                "comment": "Trade result logged without original metadata",
+            }
+
+            entry_time = last_position.get("creationTimestamp", datetime.now(CT) - timedelta(hours=1))
+
+            log_trade_results_to_supabase(
+                acct_id=account_id,
+                cid=contract_id,
+                entry_time=entry_time,
+                ai_decision_id=None,
+                meta=minimal_meta,
+            )
+
+        
         
 def on_trade_update(args):
     logging.info(f"[Trade Update] {args}")
+
+
+def cleanup_stale_metadata(max_age_hours=24):
+    """Remove old metadata entries that might be orphaned"""
+    current_time = time.time()
+    stale_keys = []
+
+    for key, meta in trade_meta.items():
+        entry_time = meta.get("entry_time")
+        if entry_time:
+            try:
+                if isinstance(entry_time, (int, float)):
+                    age_hours = (current_time - entry_time) / 3600
+                elif isinstance(entry_time, str):
+                    entry_dt = parser.isoparse(entry_time)
+                    age_hours = (datetime.now(entry_dt.tzinfo) - entry_dt).total_seconds() / 3600
+                else:
+                    continue
+
+                if age_hours > max_age_hours:
+                    stale_keys.append(key)
+                    logging.warning(
+                        f"Found stale metadata: session {meta.get('session_id')}, age {age_hours:.1f} hours"
+                    )
+            except Exception as e:
+                logging.error(f"Error checking metadata age: {e}")
+
+    for key in stale_keys:
+        meta = trade_meta.pop(key, None)
+        if meta:
+            logging.info(f"Removed stale metadata for session {meta.get('session_id')}")
+
+    return len(stale_keys)
 
 def parse_account_ids_from_env():
     """
@@ -231,6 +524,9 @@ def parse_account_ids_from_env():
 def launch_signalr_listener(get_token, get_token_expiry, authenticate, auth_lock):
     accounts = parse_account_ids_from_env()
     logging.info(f"Parsed accounts from env: {accounts}")
+
+    reconstruct_trade_metadata_on_startup()
+
     event_handlers = {
         "on_account_update": on_account_update,
         "on_order_update": on_order_update,
@@ -247,6 +543,8 @@ def launch_signalr_listener(get_token, get_token_expiry, authenticate, auth_lock
     )
     listener.start()
     return listener
+
+
 
 
 # Example usage:
