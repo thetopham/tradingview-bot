@@ -435,6 +435,62 @@ To send alerts from TradingView to your bot:
 
 ---
 
+## 🗂️ Single Supabase table for the dashboard
+
+The dashboard now expects a single merged table that combines `trade_results` and `ai_trading_log` data. Create (or refresh) the table in Supabase with the SQL below:
+
+1. **Create the merged table**
+
+    ```sql
+    create table if not exists public.ai_trade_log_merged (
+        id bigserial primary key,
+        entry_time timestamptz,
+        exit_time timestamptz,
+        account text,
+        symbol text,
+        signal text,
+        size numeric,
+        total_pnl numeric,
+        ai_decision_id text,
+        reason text,
+        screenshot_url text,
+        created_at timestamptz default now()
+    );
+    ```
+
+2. **Backfill from existing tables**
+
+    ```sql
+    insert into public.ai_trade_log_merged (
+        entry_time, exit_time, account, symbol, signal, size, total_pnl, ai_decision_id, reason, screenshot_url
+    )
+    select
+        tr.entry_time,
+        tr.exit_time,
+        coalesce(al.account, tr.account) as account,
+        coalesce(tr.symbol, al.symbol) as symbol,
+        coalesce(tr.signal, al.signal) as signal,
+        coalesce(tr.size, al.size) as size,
+        tr.total_pnl,
+        tr.ai_decision_id,
+        coalesce(al.reason, tr.comment) as reason,
+        coalesce(al.urls #>> '{0}', al.urls->>0, al.urls->>'screenshot', al.urls::text) as screenshot_url
+    from public.trade_results tr
+    left join public.ai_trading_log al on al.ai_decision_id = tr.ai_decision_id
+    order by tr.entry_time desc
+    on conflict do nothing;
+    ```
+
+3. **Keep the table updated**
+
+   - Repeat the backfill statement on a schedule (or turn it into a SQL function triggered by inserts into `trade_results`).
+   - Make sure `ai_decision_id` is populated in both source tables so joins stay accurate.
+   - Store the first screenshot URL directly in `screenshot_url` for quick display.
+
+Once `public.ai_trade_log_merged` is populated, the dashboard will display this single table instead of separate `trade_results` and `ai_trading_log` views.
+
+---
+
 ## 📚 Additional Notes and References
 
 *   **ProjectX API Documentation**: For detailed information on ProjectX API endpoints, authentication, and capabilities, refer to the official ProjectX Gateway API documentation (e.g., `https://gateway.docs.projectx.com/docs/intro` - always check for the most current link from your provider).

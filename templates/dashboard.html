@@ -120,7 +120,7 @@
         }
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            grid-template-columns: minmax(320px, 1fr);
             gap: 16px;
             padding: 0 24px 24px;
         }
@@ -282,41 +282,15 @@
 
     <div class="grid">
         <section class="card">
-            <h2>AI Decisions & Results</h2>
-            <div id="ai-error" class="error" style="display:none"></div>
+            <h2>Merged AI Trades</h2>
+            <div id="merged-error" class="error" style="display:none"></div>
             <div class="table-wrapper">
-                <table id="sessions">
+                <table id="merged">
                     <thead>
                         <tr>
-                            <th>Decision Time</th>
-                            <th>Strategy</th>
-                            <th>Signal</th>
-                            <th>Symbol</th>
-                            <th>Size</th>
-                            <th>PnL</th>
                             <th>Entry</th>
                             <th>Exit</th>
-                            <th>Reason</th>
-                            <th>Screenshot</th>
                             <th>Account</th>
-                            <th>AI ID</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
-            </div>
-            <div class="meta" id="sessions-empty">Loading…</div>
-        </section>
-
-        <section class="card">
-            <h2>Recent Trade Results</h2>
-            <div id="trade-error" class="error" style="display:none"></div>
-            <div class="table-wrapper">
-                <table id="trades">
-                    <thead>
-                        <tr>
-                            <th>Entry</th>
-                            <th>Exit</th>
                             <th>Symbol</th>
                             <th>Signal</th>
                             <th>Size</th>
@@ -324,27 +298,19 @@
                             <th>AI ID</th>
                             <th>Reason</th>
                             <th>Screenshot</th>
-                            <th>Account</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
                 </table>
             </div>
-            <div class="meta" id="trades-empty">Loading…</div>
+            <div class="meta" id="merged-empty">Loading…</div>
         </section>
     </div>
 
     <script>
-        const sessionsBody = document.querySelector('#sessions tbody');
-        const tradesBody = document.querySelector('#trades tbody');
-        const sessionsEmpty = document.getElementById('sessions-empty');
-        const tradesEmpty = document.getElementById('trades-empty');
-        const tradeError = document.getElementById('trade-error');
-        const aiError = document.getElementById('ai-error');
-        const reasonError = document.createElement('div');
-        reasonError.className = 'error';
-        reasonError.style.display = 'none';
-        tradeError.insertAdjacentElement('afterend', reasonError);
+        const mergedBody = document.querySelector('#merged tbody');
+        const mergedEmpty = document.getElementById('merged-empty');
+        const mergedError = document.getElementById('merged-error');
         const updatedEl = document.getElementById('updated');
         const refreshTimerEl = document.getElementById('refresh-timer');
         const totalPnlEl = document.getElementById('total-pnl');
@@ -436,30 +402,28 @@
             }
         }
 
-        function renderSessions(decisions) {
-            sessionsBody.innerHTML = '';
-            if (!decisions || decisions.length === 0) {
-                sessionsEmpty.textContent = 'No AI decisions found';
+        function renderMerged(trades) {
+            mergedBody.innerHTML = '';
+            if (!trades || trades.length === 0) {
+                mergedEmpty.textContent = 'No merged trade rows available';
                 return;
             }
-            sessionsEmpty.textContent = '';
-            decisions.forEach((d) => {
+            mergedEmpty.textContent = '';
+            trades.forEach((t) => {
                 const row = document.createElement('tr');
                 row.innerHTML = `
-                    <td class="muted">${d.decision_time || ''}</td>
-                    <td>${d.strategy ? pill(d.strategy, 'strategy') : ''}</td>
-                    <td>${pill(d.signal, d.signal)}</td>
-                    <td>${d.symbol || ''}</td>
-                    <td>${d.size ?? ''}</td>
-                    <td>${formatPnL(d.total_pnl)}</td>
-                    <td class="muted">${d.result_entry_time || ''}</td>
-                    <td class="muted">${d.result_exit_time || ''}</td>
-                    <td class="muted reason">${d.reason || ''}</td>
-                    <td>${d.screenshot_url ? `<a class="btn-link" href="${d.screenshot_url}" target="_blank" rel="noopener">Open</a>` : ''}</td>
-                    <td>${d.account || ''}</td>
-                    <td>${d.ai_decision_id ?? ''}</td>
+                    <td class="muted">${t.entry_time || ''}</td>
+                    <td class="muted">${t.exit_time || ''}</td>
+                    <td>${t.account || ''}</td>
+                    <td>${t.symbol || ''}</td>
+                    <td>${pill(t.signal, t.signal)}</td>
+                    <td>${t.size ?? ''}</td>
+                    <td>${formatPnL(t.total_pnl)}</td>
+                    <td>${t.ai_decision_id ?? ''}</td>
+                    <td class="muted reason">${t.reason || ''}</td>
+                    <td>${t.screenshot_url ? `<a class="btn-link" href="${t.screenshot_url}" target="_blank" rel="noopener">Open</a>` : ''}</td>
                 `;
-                sessionsBody.appendChild(row);
+                mergedBody.appendChild(row);
             });
         }
 
@@ -471,65 +435,25 @@
             return returnRawHtml ? formatted : formatted;
         }
 
-        function renderTrades(trades) {
-            tradesBody.innerHTML = '';
-            if (!trades || trades.length === 0) {
-                tradesEmpty.textContent = 'No trade results available';
-                return;
-            }
-            tradesEmpty.textContent = '';
-            trades.forEach((t) => {
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td class="muted">${t.entry_time || ''}</td>
-                    <td class="muted">${t.exit_time || ''}</td>
-                    <td>${t.symbol || ''}</td>
-                    <td>${pill(t.signal, t.signal)}</td>
-                    <td>${t.size ?? ''}</td>
-                    <td>${formatPnL(t.total_pnl)}</td>
-                    <td>${t.ai_decision_id ?? ''}</td>
-                    <td class="muted reason">${t.reason || ''}</td>
-                    <td>${t.screenshot_url ? `<a class="btn-link" href="${t.screenshot_url}" target="_blank" rel="noopener">Open</a>` : ''}</td>
-                    <td>${t.account || ''}</td>
-                `;
-                tradesBody.appendChild(row);
-            });
-        }
-
         async function refresh() {
             try {
                 const response = await fetch('/dashboard/data');
                 const data = await response.json();
                 updatedEl.textContent = new Date(data.updated_at).toLocaleString();
-                renderSessions(data.ai_decisions || []);
-                renderTrades(data.trade_results || []);
-                renderSummary(data.trade_results || [], data.active_sessions || []);
+                renderMerged(data.merged_trades || []);
+                renderSummary(data.merged_trades || [], data.active_sessions || []);
                 lastRefresh = Date.now();
                 updateRefreshTimer();
 
-                if (data.trade_results_error) {
-                    tradeError.style.display = 'block';
-                    tradeError.textContent = `Supabase error: ${data.trade_results_error}`;
+                if (data.merged_trades_error) {
+                    mergedError.style.display = 'block';
+                    mergedError.textContent = `Supabase error: ${data.merged_trades_error}`;
                 } else {
-                    tradeError.style.display = 'none';
-                }
-
-                if (data.ai_decision_error) {
-                    aiError.style.display = 'block';
-                    aiError.textContent = `Supabase error: ${data.ai_decision_error}`;
-                } else {
-                    aiError.style.display = 'none';
-                }
-
-                if (data.ai_reason_error) {
-                    reasonError.style.display = 'block';
-                    reasonError.textContent = `AI reason lookup error: ${data.ai_reason_error}`;
-                } else {
-                    reasonError.style.display = 'none';
+                    mergedError.style.display = 'none';
                 }
             } catch (err) {
-                tradeError.style.display = 'block';
-                tradeError.textContent = 'Failed to refresh dashboard: ' + err;
+                mergedError.style.display = 'block';
+                mergedError.textContent = 'Failed to refresh dashboard: ' + err;
             }
         }
 
