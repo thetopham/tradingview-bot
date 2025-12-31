@@ -2,7 +2,7 @@ import os
 import time
 import threading
 import logging
-from api import search_pos, log_trade_results_to_supabase, check_for_phantom_orders
+from api import search_pos, log_trade_results_to_supabase
 from datetime import datetime
 from signalrcore.hub_connection_builder import HubConnectionBuilder
 
@@ -143,8 +143,7 @@ def on_order_update(args):
     orders_state.setdefault(account_id, {})[order_data.get("id")] = order_data
 
     if order_data.get("type") == 1 and status == 2:  # TP filled
-        ensure_stops_match_position(account_id, contract_id)
-
+        
     if status == 2:
         # Only add missing fields to meta, never overwrite!
         meta = trade_meta.setdefault((account_id, contract_id), {})
@@ -181,7 +180,7 @@ def on_position_update(args):
             # Optionally: log if meta is missing at entry time (should rarely happen)
             logging.warning(f"[on_position_update] No meta at entry for acct={account_id}, cid={contract_id}. Not updating entry_time.")
 
-    ensure_stops_match_position(account_id, contract_id)
+    
 
     if size == 0:
         meta = trade_meta.pop((account_id, contract_id), None)
@@ -199,7 +198,7 @@ def on_position_update(args):
             )
         else:
             logging.warning(f"[on_position_update] No meta found for acct={account_id} cid={contract_id} on flatten!")
-        check_for_phantom_orders(account_id, contract_id)
+        
 
 def on_trade_update(args):
     logging.info(f"[Trade Update] {args}")
@@ -237,7 +236,8 @@ def launch_signalr_listener(get_token, get_token_expiry, authenticate, auth_lock
     )
     listener.start()
     return listener
-
+    
+'''
 def ensure_stops_match_position(acct_id, contract_id, max_retries=5, retry_delay=0.4):
     from api import search_open, place_stop, cancel, search_pos
 
@@ -272,6 +272,7 @@ def ensure_stops_match_position(acct_id, contract_id, max_retries=5, retry_delay
         for stop in stops:
             logging.info(f"[SL SYNC] No open position, canceling leftover stop {stop['id']}")
             cancel(acct_id, stop["id"])
+'''
 
 # Example usage:
 if __name__ == "__main__":
