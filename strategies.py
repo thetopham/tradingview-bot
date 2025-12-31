@@ -1,12 +1,14 @@
 # strategies.py
 
+import logging
 import time
 from datetime import datetime, timedelta
 
 from api import (
     get_contract, search_pos, flatten_contract, place_market,
     place_limit, place_stop, search_open, cancel, search_trades,
-    log_trade_results_to_supabase
+    log_trade_results_to_supabase, check_for_phantom_orders,
+    place_market_bracket
 )
 from signalr_listener import track_trade
 from config import load_config
@@ -14,7 +16,12 @@ from config import load_config
 config = load_config()
 STOP_LOSS_POINTS = config.get('STOP_LOSS_POINTS', 10.0)
 TP_POINTS = config.get('TP_POINTS', [2.5, 5.0, 10.0])
+TICKS_PER_POINT = config.get('TICKS_PER_POINT', 4)
 CT = config['CT']
+
+
+def points_to_ticks(points: float) -> int:
+    return int(round(points * TICKS_PER_POINT))
 
 def run_simple(acct_id: int, sym: str, sig: str, size: int, alert: str, ai_decision_id=None):
     """Execute a simple market order; server-side brackets handled by broker."""
@@ -118,7 +125,6 @@ def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
 def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
     cid = get_contract(sym)
     side = 0 if sig == "BUY" else 1
-    exit_side = 1 - side
     pos = [p for p in search_pos(acct_id) if p["contractId"] == cid]
     if any((side == 0 and p["type"] == 1) or (side == 1 and p["type"] == 2) for p in pos):
         return  # skip same
@@ -126,36 +132,29 @@ def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
         success = flatten_contract(acct_id, cid, timeout=10)
         if not success:
             return  # Could not flatten contract
-
-    ent = place_market(acct_id, cid, side, size)
-    oid = ent["orderId"]
     entry_time = datetime.now(CT)
-    price = None
-    for _ in range(12):
-        trades = [t for t in search_trades(acct_id, datetime.now(CT) - timedelta(minutes=5)) if t["orderId"] == oid]
-        tot = sum(t["size"] for t in trades)
-        if tot:
-            price = sum(t["price"] * t["size"] for t in trades) / tot
-            break
-        price = ent.get("fillPrice")
-        if price is not None:
-            break
-        time.sleep(1)
-    if price is None:
-        return  # No fill price
+    stop_loss_ticks = points_to_ticks(STOP_LOSS_POINTS)
+    tp_points = TP_POINTS or [2.5, 5.0]
+    tp_ticks = [points_to_ticks(p) for p in tp_points]
 
-    STOP_LOSS_POINTS = 5.75
-    slp = price - STOP_LOSS_POINTS if side == 0 else price + STOP_LOSS_POINTS
-    sl = place_stop(acct_id, cid, exit_side, size, slp)
-    sl_id = sl["orderId"]
-    TP_POINTS = [2.5, 5.0]
-    slices = [2, 1]
-    tp_ids = []
-    for pts, amt in zip(TP_POINTS, slices):
-        px = price + pts if side == 0 else price - pts
-        r = place_limit(acct_id, cid, exit_side, amt, px)
-        tp_ids.append(r["orderId"])
+    leg_sizes = [min(size, 2), max(size - 2, 0)]
+    orders = []
 
+    for leg_size, tp_tick in zip(leg_sizes, tp_ticks):
+        if leg_size <= 0:
+            continue
+        orders.append(
+            place_market_bracket(
+                acct_id,
+                cid,
+                side,
+                leg_size,
+                stop_loss_ticks=stop_loss_ticks,
+                take_profit_ticks=tp_tick,
+            )
+        )
+
+    order_ids = [o.get("orderId") for o in orders if o.get("orderId") is not None]
     track_trade(
         acct_id=acct_id,
         cid=cid,
@@ -164,12 +163,12 @@ def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
         strategy="brackmod",
         sig=sig,
         size=size,
-        order_id=oid,
+        order_id=order_ids,
         alert=alert,
         account=acct_id,
         symbol=sym,
-        sl_id=sl_id,
-        tp_ids=tp_ids,
+        sl_id=None,
+        tp_ids=None,
         trades=None
     )
 
