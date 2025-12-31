@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from flask import Blueprint, jsonify, render_template
+import pytz
 
 from api import get_supabase_client
 from config import load_config
@@ -16,6 +17,7 @@ from signalr_listener import trade_meta
 config = load_config()
 CT = config["CT"]
 ACCOUNT_NAME_BY_ID = {v: k for k, v in config["ACCOUNTS"].items()}
+DASHBOARD_TZ = pytz.timezone("America/Denver")
 
 
 def _format_ts(ts: Optional[object]) -> str:
@@ -26,13 +28,13 @@ def _format_ts(ts: Optional[object]) -> str:
 
     try:
         if isinstance(ts, (int, float)):
-            return datetime.fromtimestamp(float(ts), CT).strftime("%Y-%m-%d %H:%M:%S %Z")
+            return datetime.fromtimestamp(float(ts), DASHBOARD_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
 
         if isinstance(ts, str):
             return ts
 
         if hasattr(ts, "astimezone"):
-            return ts.astimezone(CT).strftime("%Y-%m-%d %H:%M:%S %Z")
+            return ts.astimezone(DASHBOARD_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
     except Exception:
         logging.exception("Failed to format timestamp %s", ts)
 
@@ -109,10 +111,48 @@ def _fetch_trade_results(limit: int = 25) -> Tuple[List[Dict[str, object]], Opti
                 "entry_time,exit_time,symbol,signal,ai_decision_id,total_pnl,account,size,comment,strategy"
             )
             .order("entry_time", desc=True)
-            .limit(limit)
+            .limit(limit * 4)  # Grab extra rows to filter locally
             .execute()
         )
-        rows = res.data or []
+        raw_rows = res.data or []
+
+        now_utc = datetime.now(pytz.UTC)
+        cutoff = now_utc - timedelta(days=7)
+        future_limit = now_utc + timedelta(hours=12)
+        filtered: List[Dict[str, object]] = []
+
+        def _parse_ts(ts: object) -> Optional[datetime]:
+            if ts is None:
+                return None
+            if isinstance(ts, (int, float)):
+                return datetime.fromtimestamp(float(ts), pytz.UTC)
+            if isinstance(ts, str):
+                try:
+                    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                except ValueError:
+                    return None
+            if isinstance(ts, datetime):
+                return ts if ts.tzinfo else pytz.UTC.localize(ts)
+            return None
+
+        for row in raw_rows:
+            entry_dt = _parse_ts(row.get("entry_time"))
+            exit_dt = _parse_ts(row.get("exit_time"))
+
+            if not entry_dt:
+                continue
+
+            entry_utc = entry_dt.astimezone(pytz.UTC)
+            if entry_utc < cutoff or entry_utc > future_limit:
+                continue
+
+            row["symbol"] = "MES"
+            row["entry_time"] = entry_dt.astimezone(DASHBOARD_TZ)
+            row["exit_time"] = exit_dt.astimezone(DASHBOARD_TZ) if exit_dt else None
+            filtered.append(row)
+
+        filtered.sort(key=lambda r: r.get("entry_time") or datetime.min, reverse=True)
+        rows = filtered[:limit]
     except Exception as e:
         logging.error("Failed to fetch trade_results: %s", e)
         return rows, str(e)
