@@ -325,6 +325,16 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
                 except Exception:
                     pass
 
+        # Fallback to a lightweight REST query if the supabase client path fails
+        fallback_price = _fetch_latest_price_from_supabase(symbol, timeframe="1m")
+        if fallback_price is None:
+            fallback_price = _fetch_latest_price_from_supabase(symbol, timeframe="5m")
+
+        if fallback_price is not None:
+            logging.info("Using fallback REST price for %s: $%s", symbol, fallback_price)
+            _PRICE_CACHE.update({"symbol": symbol, "ts": now_ts, "value": (fallback_price, "rest_fallback")})
+            return fallback_price, "rest_fallback"
+
         logging.warning("Could not determine current market price from any source")
         return None, None
     except Exception as e:
