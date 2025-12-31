@@ -654,22 +654,57 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         comment_parts = [part for part in [base_comment, f"trace_id={trace_id}" if trace_id else None, ai_decision_note or None] if part]
         comment = " | ".join(comment_parts)
 
-        payload = {
-            "strategy":      str(meta.get("strategy") or ""),
-            "signal":        str(meta.get("signal") or ""),
-            "symbol":        str(meta.get("symbol") or ""),
-            "account":       str(meta.get("account") or ""),
-            "size":          int(meta.get("size") or 0),
-            "ai_decision_id": ai_decision_id_out,
-            "entry_time":    entry_time.isoformat() if hasattr(entry_time, "isoformat") else str(entry_time),
-            "exit_time":     exit_time.isoformat() if hasattr(exit_time, "isoformat") else str(exit_time),
-            "duration_sec":  str(duration_sec) if duration_sec is not None else "0",
-            "alert":         str(meta.get("alert") or ""),
-            "total_pnl":     float(total_pnl) if total_pnl is not None else 0.0,
-            "raw_trades":    relevant_trades if relevant_trades else [],
-            "order_id":      str(meta.get("order_id") or ""),
-            "comment":       comment,
-            "trade_ids":     trade_ids if trade_ids else [],
+    def _get_ai_reason(decision_id):
+        """Return AI reasoning text for a given decision id, if available."""
+
+        if decision_id in (None, "", []):
+            return ""
+
+        try:
+            supabase = get_supabase_client()
+        except Exception as e:
+            logging.warning(
+                "[log_trade_results_to_supabase] Unable to init Supabase client for AI reason: %s",
+                e,
+            )
+            return ""
+
+        try:
+            res = (
+                supabase.table("ai_trading_log")
+                .select("reason")
+                .eq("ai_decision_id", decision_id)
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                return str(res.data[0].get("reason") or "")
+        except Exception as e:
+            logging.error("[log_trade_results_to_supabase] Failed to fetch AI reason: %s", e)
+
+        return ""
+
+    reason = str(meta.get("reason") or "")
+    if not reason:
+        reason = _get_ai_reason(ai_decision_id_out)
+
+    payload = {
+        "strategy":      str(meta.get("strategy") or ""),
+        "signal":        str(meta.get("signal") or ""),
+        "symbol":        str(meta.get("symbol") or ""),
+        "account":       str(meta.get("account") or ""),
+        "size":          int(meta.get("size") or 0),
+        "ai_decision_id": ai_decision_id_out,
+        "entry_time":    entry_time.isoformat() if hasattr(entry_time, "isoformat") else str(entry_time),
+        "exit_time":     exit_time.isoformat() if hasattr(exit_time, "isoformat") else str(exit_time),
+        "duration_sec":  str(duration_sec) if duration_sec is not None else "0",
+        "alert":         str(meta.get("alert") or ""),
+        "reason":        reason,
+        "total_pnl":     float(total_pnl) if total_pnl is not None else 0.0,
+        "raw_trades":    relevant_trades if relevant_trades else [],
+        "order_id":      str(meta.get("order_id") or ""),
+        "comment":       comment,
+        "trade_ids":     trade_ids if trade_ids else [],
         }
 
         url = f"{SUPABASE_URL}/rest/v1/trade_results"

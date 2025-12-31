@@ -80,7 +80,7 @@ def _fetch_trade_results(limit: int = 25) -> Tuple[List[Dict[str, object]], Opti
         res = (
             supabase.table("trade_results")
             .select(
-                "entry_time,exit_time,symbol,signal,ai_decision_id,total_pnl,account,size,comment,strategy"
+                "entry_time,exit_time,symbol,signal,ai_decision_id,total_pnl,account,size,comment,strategy,reason"
             )
             .order("entry_time", desc=True)
             .limit(limit)
@@ -94,13 +94,56 @@ def _fetch_trade_results(limit: int = 25) -> Tuple[List[Dict[str, object]], Opti
     return rows, None
 
 
+def _fetch_ai_reasons(ids: List[object]) -> Tuple[Dict[object, str], Optional[str]]:
+    """Lookup AI decision reasoning for the provided ids from Supabase."""
+
+    reasons: Dict[object, str] = {}
+    cleaned_ids = [i for i in ids if i not in (None, "", [])]
+    if not cleaned_ids:
+        return reasons, None
+
+    try:
+        supabase = get_supabase_client()
+    except Exception as e:
+        logging.warning("Dashboard Supabase client unavailable for reasons: %s", e)
+        return reasons, str(e)
+
+    try:
+        res = (
+            supabase.table("ai_trading_log")
+            .select("ai_decision_id,reason")
+            .in_("ai_decision_id", cleaned_ids)
+            .execute()
+        )
+        for row in res.data or []:
+            reasons[row.get("ai_decision_id")] = row.get("reason") or ""
+    except Exception as e:
+        logging.error("Failed to fetch AI reasons: %s", e)
+        return reasons, str(e)
+
+    return reasons, None
+
+
 def _dashboard_payload() -> Dict[str, object]:
     trade_rows, trade_error = _fetch_trade_results()
+    active_sessions = _collect_active_sessions()
+
+    ai_ids = [row.get("ai_decision_id") for row in trade_rows] + [row.get("ai_decision_id") for row in active_sessions]
+    ai_reasons, reason_error = _fetch_ai_reasons(ai_ids)
+
+    for row in trade_rows:
+        stored_reason = row.get("reason") or row.get("comment")
+        row["reason"] = ai_reasons.get(row.get("ai_decision_id")) or stored_reason
+
+    for session in active_sessions:
+        session["reason"] = ai_reasons.get(session.get("ai_decision_id"))
+
     return {
         "updated_at": datetime.now(CT).isoformat(),
-        "active_sessions": _collect_active_sessions(),
+        "active_sessions": active_sessions,
         "trade_results": trade_rows,
         "trade_results_error": trade_error,
+        "ai_reason_error": reason_error,
     }
 
 

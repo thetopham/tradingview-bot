@@ -74,6 +74,10 @@
         tr:last-child td {
             border-bottom: none;
         }
+        .reason {
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
         .pill {
             display: inline-block;
             padding: 4px 8px;
@@ -124,6 +128,7 @@
                             <th>Size</th>
                             <th>Entry</th>
                             <th>AI ID</th>
+                            <th>Reason</th>
                             <th>Trace</th>
                         </tr>
                     </thead>
@@ -147,6 +152,7 @@
                             <th>Size</th>
                             <th>PnL</th>
                             <th>AI ID</th>
+                            <th>Reason</th>
                             <th>Account</th>
                         </tr>
                     </thead>
@@ -163,6 +169,10 @@
         const sessionsEmpty = document.getElementById('sessions-empty');
         const tradesEmpty = document.getElementById('trades-empty');
         const tradeError = document.getElementById('trade-error');
+        const reasonError = document.createElement('div');
+        reasonError.className = 'error';
+        reasonError.style.display = 'none';
+        tradeError.insertAdjacentElement('afterend', reasonError);
         const updatedEl = document.getElementById('updated');
 
         function pill(label, type) {
@@ -187,6 +197,7 @@
                     <td>${s.size ?? ''}</td>
                     <td class="muted">${s.entry_time || ''}</td>
                     <td>${s.ai_decision_id ?? ''}</td>
+                    <td class="muted reason">${s.reason || ''}</td>
                     <td class="muted">${s.trace_id || ''}</td>
                 `;
                 sessionsBody.appendChild(row);
@@ -217,6 +228,7 @@
                     <td>${t.size ?? ''}</td>
                     <td>${formatPnL(t.total_pnl)}</td>
                     <td>${t.ai_decision_id ?? ''}</td>
+                    <td class="muted reason">${t.reason || ''}</td>
                     <td>${t.account || ''}</td>
                 `;
                 tradesBody.appendChild(row);
@@ -236,6 +248,13 @@
                     tradeError.textContent = `Supabase error: ${data.trade_results_error}`;
                 } else {
                     tradeError.style.display = 'none';
+                }
+
+                if (data.ai_reason_error) {
+                    reasonError.style.display = 'block';
+                    reasonError.textContent = `AI reason lookup error: ${data.ai_reason_error}`;
+                } else {
+                    reasonError.style.display = 'none';
                 }
             } catch (err) {
                 tradeError.style.display = 'block';
