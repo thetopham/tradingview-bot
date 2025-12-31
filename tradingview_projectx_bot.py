@@ -12,6 +12,7 @@ from config import load_config
 from api import (
     flatten_contract, get_contract, ai_trade_decision, search_pos
     )
+from position_manager import PositionManager
 from strategies import run_simple
 from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token
@@ -39,6 +40,7 @@ AI_ENDPOINTS = {
 }
 
 AUTH_LOCK = threading.Lock()
+POSITION_MANAGER = PositionManager(ACCOUNTS)
 
 app = Flask(__name__)
 
@@ -89,6 +91,12 @@ def handle_webhook_logic(data):
         if acct in AI_ENDPOINTS:
             positions = search_pos(acct_id)
             ai_url = AI_ENDPOINTS[acct]
+
+            try:
+                position_context = POSITION_MANAGER.get_position_context_for_ai(acct_id, cid)
+            except Exception:
+                position_context = None
+
             ai_decision = ai_trade_decision(
                 acct,
                 strat,
@@ -98,6 +106,7 @@ def handle_webhook_logic(data):
                 alert,
                 ai_url,
                 positions=positions,
+                position_context=position_context,
             )
             if ai_decision.get("signal", "").upper() not in ("BUY", "SELL"):
                 logging.info(f"AI blocked trade: {ai_decision.get('reason', 'No reason')}")
