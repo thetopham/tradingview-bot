@@ -38,10 +38,10 @@ def _timeframe_filters(max_minutes: int = 1) -> List[str]:
         window = 1
 
     if window <= 1:
-        return ["1m"]
+        return ["1m", "1"]
     if window <= 5:
-        return ["1m", "5m"]
-    return ["1m", "5m", "15m"]
+        return ["1m", "1", "5m", "5"]
+    return ["1m", "1", "5m", "5", "15m", "15"]
 
 
 def get_supabase_client():
@@ -248,12 +248,17 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
 
         if supabase:
             try:
+                timeframe_filters = _timeframe_filters(1)
+                timeframe_or_clause = ",".join(
+                    f"timeframe.eq.\"{tf}\"" for tf in timeframe_filters
+                )
+
                 result = (
                     supabase
                     .table('tv_datafeed')
                     .select('c, ts')
                     .eq('symbol', symbol)
-                    .in_('timeframe', _timeframe_filters(1))
+                    .or_(timeframe_or_clause)
                     .order('ts', desc=True)
                     .limit(1)
                     .execute()
@@ -307,12 +312,17 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
             )
             if is_market_closed:
                 try:
+                    timeframe_filters = _timeframe_filters(1)
+                    timeframe_or_clause = ",".join(
+                        f"timeframe.eq.\"{tf}\"" for tf in timeframe_filters
+                    )
+
                     result = (
                         supabase
                         .table('tv_datafeed')
                         .select('c, ts')
                         .eq('symbol', symbol)
-                        .in_('timeframe', _timeframe_filters(1))
+                        .or_(timeframe_or_clause)
                         .order('ts', desc=True)
                         .limit(1)
                         .execute()
@@ -353,9 +363,20 @@ def _fetch_latest_price_from_supabase(symbol: str, timeframe: str = "1m") -> Opt
         return None
 
     url = f"{SUPABASE_URL}/rest/v1/tv_datafeed"
+
+    timeframe_variants = {str(timeframe)}
+    if str(timeframe).endswith("m"):
+        timeframe_variants.add(str(timeframe)[:-1])
+    else:
+        timeframe_variants.add(f"{timeframe}m")
+
+    encoded_timeframes = ",".join(
+        f"\"{tf}\"" for tf in sorted(timeframe_variants)
+    )
+
     params = {
         "symbol": f"eq.{symbol}",
-        "timeframe": f"eq.{timeframe}",
+        "timeframe": f"in.({encoded_timeframes})",
         "select": "c,ts",
         "order": "ts.desc",
         "limit": 1,
