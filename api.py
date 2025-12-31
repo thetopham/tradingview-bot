@@ -6,11 +6,11 @@ import time
 import pytz
 
 from datetime import datetime, timezone
-from auth import ensure_token, get_token
+from auth import ensure_token, get_token, session
 from config import load_config
 from dateutil import parser
 
-session = requests.Session()
+
 config = load_config()
 OVERRIDE_CONTRACT_ID = config['OVERRIDE_CONTRACT_ID']
 PX_BASE = config['PX_BASE']
