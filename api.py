@@ -18,6 +18,7 @@ PX_BASE = config['PX_BASE']
 SUPABASE_URL = config['SUPABASE_URL']
 SUPABASE_KEY = config['SUPABASE_KEY']
 CT = pytz.timezone("America/Chicago")
+MES = "MES"
 
 
 
