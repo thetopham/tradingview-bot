@@ -4,12 +4,13 @@ import logging
 import json
 import time
 import pytz
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from datetime import datetime, timezone
 from auth import ensure_token, get_token, session
 from config import load_config
 from dateutil import parser
+from supabase import create_client
 
 
 config = load_config()
@@ -19,6 +20,37 @@ SUPABASE_URL = config['SUPABASE_URL']
 SUPABASE_KEY = config['SUPABASE_KEY']
 CT = pytz.timezone("America/Chicago")
 MES = "MES"
+
+_PRICE_CACHE: Dict[str, Optional[Tuple[float, str]]] = {
+    "symbol": None,
+    "ts": 0,
+    "value": None,
+}
+_SUPABASE_CLIENT = None
+
+
+def _timeframe_filters(max_minutes: int = 1) -> List[str]:
+    """Return timeframes up to the requested minute window (defaults to 1m)."""
+
+    try:
+        window = int(max_minutes)
+    except Exception:
+        window = 1
+
+    if window <= 1:
+        return ["1m"]
+    if window <= 5:
+        return ["1m", "5m"]
+    return ["1m", "5m", "15m"]
+
+
+def get_supabase_client():
+    global _SUPABASE_CLIENT
+    if _SUPABASE_CLIENT is None:
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            raise RuntimeError("Supabase credentials are not configured")
+        _SUPABASE_CLIENT = create_client(SUPABASE_URL, SUPABASE_KEY)
+    return _SUPABASE_CLIENT
 
 
 
@@ -192,9 +224,12 @@ def _summarize_positions(positions, timeframe: str = "1m"):
     return summary
 
 def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) -> Tuple[Optional[float], Optional[str]]:
+    """Get the current market price from Supabase sources.
+
+    Falls back gracefully between 1m tv_datafeed bars and latest_chart_analysis,
+    and caches the last value for a few seconds to avoid repeated lookups.
     """
-    Get the current market price from the best available source.
-    """
+
     try:
         now_ts = time.time()
         if (
@@ -205,74 +240,91 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
             price, source = _PRICE_CACHE.get("value")
             return price, source
 
-        supabase = get_supabase_client()
         try:
-            result = supabase.table('tv_datafeed') \
-                .select('c, ts') \
-                .eq('symbol', 'MES') \
-                .in_('timeframe', _timeframe_filters(1)) \
-                .order('ts', desc=True) \
-                .limit(1) \
-                .execute()
-            if result.data and len(result.data) > 0:
-                record = result.data[0]
-                price = float(record.get('c'))
-                bar_time = parser.parse(record.get('ts'))
-                current_time = datetime.now(timezone.utc)
-                age_seconds = (current_time - bar_time).total_seconds()
-                if age_seconds <= max_age_seconds:
-                    logging.debug(f"Current price from 1m feed: ${price} (age: {age_seconds:.0f}s)")
-                    _PRICE_CACHE.update({"symbol": symbol, "ts": now_ts, "value": (price, f"1m_feed_{int(age_seconds)}s_old")})
-                    return price, f"1m_feed_{int(age_seconds)}s_old"
-                else:
-                    logging.debug(f"1m data too old: {age_seconds:.0f}s > {max_age_seconds}s")
-        except Exception as e:
-            logging.error(f"Error querying tv_datafeed: {e}")
-        try:
-            result = supabase.table('latest_chart_analysis') \
-                .select('snapshot, timestamp') \
-                .eq('symbol', 'MES') \
-                .eq('timeframe', '5m') \
-                .order('timestamp', desc=True) \
-                .limit(1) \
-                .execute()
-            if result.data and len(result.data) > 0:
-                record = result.data[0]
-                timestamp = parser.parse(record.get('timestamp'))
-                age_seconds = (datetime.now(timezone.utc) - timestamp).total_seconds()
-                if age_seconds <= 360:
-                    snapshot = record.get('snapshot')
-                    if isinstance(snapshot, str):
-                        snapshot = json.loads(snapshot)
-                    price = snapshot.get('current_price')
-                    if price:
-                        logging.debug(f"Current price from 5m chart: ${price} (age: {age_seconds:.0f}s)")
-                        _PRICE_CACHE.update({"symbol": symbol, "ts": now_ts, "value": (float(price), f"5m_chart_{int(age_seconds)}s_old")})
-                        return float(price), f"5m_chart_{int(age_seconds)}s_old"
-        except Exception as e:
-            logging.debug(f"Could not get chart price: {e}")
-        now = datetime.now(CT)
-        is_market_closed = (
-            now.weekday() == 5 or
-            (now.weekday() == 6 and now.hour < 17) or
-            (now.weekday() == 4 and now.hour >= 16)
-        )
-        if is_market_closed:
+            supabase = get_supabase_client()
+        except Exception as exc:
+            logging.error("Supabase client unavailable for price lookup: %s", exc)
+            supabase = None
+
+        if supabase:
             try:
-                result = supabase.table('tv_datafeed') \
-                    .select('c, ts') \
-                    .eq('symbol', 'MES') \
-                    .in_('timeframe', _timeframe_filters(1)) \
-                    .order('ts', desc=True) \
-                    .limit(1) \
+                result = (
+                    supabase
+                    .table('tv_datafeed')
+                    .select('c, ts')
+                    .eq('symbol', symbol)
+                    .in_('timeframe', _timeframe_filters(1))
+                    .order('ts', desc=True)
+                    .limit(1)
                     .execute()
+                )
                 if result.data:
                     record = result.data[0]
                     price = float(record.get('c'))
-                    _PRICE_CACHE.update({"symbol": symbol, "ts": now_ts, "value": (price, "market_closed_last_known")})
-                    return price, "market_closed_last_known"
-            except:
-                pass
+                    bar_time = parser.parse(record.get('ts'))
+                    current_time = datetime.now(timezone.utc)
+                    age_seconds = (current_time - bar_time).total_seconds()
+                    if age_seconds <= max_age_seconds:
+                        logging.debug("Current price from 1m feed: $%s (age: %.0fs)", price, age_seconds)
+                        _PRICE_CACHE.update({"symbol": symbol, "ts": now_ts, "value": (price, f"1m_feed_{int(age_seconds)}s_old")})
+                        return price, f"1m_feed_{int(age_seconds)}s_old"
+                    logging.debug("1m data too old: %.0fs > %ss", age_seconds, max_age_seconds)
+            except Exception as e:
+                logging.error("Error querying tv_datafeed: %s", e)
+
+            try:
+                result = (
+                    supabase
+                    .table('latest_chart_analysis')
+                    .select('snapshot, timestamp')
+                    .eq('symbol', symbol)
+                    .eq('timeframe', '5m')
+                    .order('timestamp', desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if result.data:
+                    record = result.data[0]
+                    timestamp = parser.parse(record.get('timestamp'))
+                    age_seconds = (datetime.now(timezone.utc) - timestamp).total_seconds()
+                    if age_seconds <= 360:
+                        snapshot = record.get('snapshot')
+                        if isinstance(snapshot, str):
+                            snapshot = json.loads(snapshot)
+                        price = snapshot.get('current_price')
+                        if price:
+                            logging.debug("Current price from 5m chart: $%s (age: %.0fs)", price, age_seconds)
+                            _PRICE_CACHE.update({"symbol": symbol, "ts": now_ts, "value": (float(price), f"5m_chart_{int(age_seconds)}s_old")})
+                            return float(price), f"5m_chart_{int(age_seconds)}s_old"
+            except Exception as e:
+                logging.debug("Could not get chart price: %s", e)
+
+            now = datetime.now(CT)
+            is_market_closed = (
+                now.weekday() == 5 or
+                (now.weekday() == 6 and now.hour < 17) or
+                (now.weekday() == 4 and now.hour >= 16)
+            )
+            if is_market_closed:
+                try:
+                    result = (
+                        supabase
+                        .table('tv_datafeed')
+                        .select('c, ts')
+                        .eq('symbol', symbol)
+                        .in_('timeframe', _timeframe_filters(1))
+                        .order('ts', desc=True)
+                        .limit(1)
+                        .execute()
+                    )
+                    if result.data:
+                        record = result.data[0]
+                        price = float(record.get('c'))
+                        _PRICE_CACHE.update({"symbol": symbol, "ts": now_ts, "value": (price, "market_closed_last_known")})
+                        return price, "market_closed_last_known"
+                except Exception:
+                    pass
+
         logging.warning("Could not determine current market price from any source")
         return None, None
     except Exception as e:
@@ -292,7 +344,7 @@ def _fetch_latest_price_from_supabase(symbol: str, timeframe: str = "1m") -> Opt
 
     url = f"{SUPABASE_URL}/rest/v1/tv_datafeed"
     params = {
-        "symbol": f"eq.MES",
+        "symbol": f"eq.{symbol}",
         "timeframe": f"eq.{timeframe}",
         "select": "c,ts",
         "order": "ts.desc",
@@ -310,7 +362,7 @@ def _fetch_latest_price_from_supabase(symbol: str, timeframe: str = "1m") -> Opt
         resp.raise_for_status()
         rows = resp.json()
         if not rows:
-            logging.debug("Supabase tv_datafeed returned no rows for %s", MES)
+            logging.debug("Supabase tv_datafeed returned no rows for %s", symbol)
             return None
 
         latest = rows[0]
@@ -351,7 +403,7 @@ def _compute_simple_position_context(
     position_type = positions[0].get("type") if positions else None
     side = "LONG" if position_type == 1 else "SHORT" if position_type == 2 else None
 
-    current_price = _fetch_latest_price_from_supabase(MES, timeframe)
+    current_price = _fetch_latest_price_from_supabase(symbol or MES, timeframe)
 
     if current_price is None or avg_price is None:
         unrealized_pnl = 0.0
@@ -372,9 +424,9 @@ def _compute_simple_position_context(
     }
 
 
-def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=None):
+def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=None, position_context=None):
     position_summary = _summarize_positions(positions or [])
-    simple_position_context = _compute_simple_position_context(positions or [], sym)
+    simple_position_context = position_context or _compute_simple_position_context(positions or [], sym)
     payload = {
         "account": account,
         "strategy": strat,
