@@ -191,10 +191,10 @@ def _fetch_latest_price_from_supabase(symbol: str, timeframe: str = "1m") -> Opt
 
     url = f"{SUPABASE_URL}/rest/v1/tv_datafeed"
     params = {
-        "symbol": f"eq.MES",
+        "symbol": f"eq.{symbol}",
         "timeframe": f"eq.{timeframe}",
-        "select": "c,time,close",
-        "order": "time.desc",
+        "select": "c,ts",
+        "order": "ts.desc",
         "limit": 1,
     }
     headers = {
