@@ -116,6 +116,14 @@ def handle_webhook_logic(data):
                 logging.info(f"AI blocked trade: {ai_decision.get('reason', 'No reason')}")
                 return
 
+            if ai_signal == "BUY":
+                logging.info(f"AI signaled BUY: {ai_decision.get('reason', 'No reason')}")
+                return
+
+            if ai_signal == "SELL":
+                logging.info(f"AI signaled SELL: {ai_decision.get('reason', 'No reason')}")
+                return
+
             if ai_signal == "HOLD":
                 logging.info(f"AI signaled HOLD: {ai_decision.get('reason', 'No reason')}")
                 return
