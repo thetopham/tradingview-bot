@@ -94,10 +94,10 @@ def _fetch_trade_results(limit: int = 25) -> Tuple[List[Dict[str, object]], Opti
     return rows, None
 
 
-def _fetch_ai_reasons(ids: List[object]) -> Tuple[Dict[object, str], Optional[str]]:
-    """Lookup AI decision reasoning for the provided ids from Supabase."""
+def _fetch_ai_reasons(ids: List[object]) -> Tuple[Dict[object, Dict[str, object]], Optional[str]]:
+    """Lookup AI decision details (reason, screenshot) for provided ids."""
 
-    reasons: Dict[object, str] = {}
+    reasons: Dict[object, Dict[str, object]] = {}
     cleaned_ids = [i for i in ids if i not in (None, "", [])]
     if not cleaned_ids:
         return reasons, None
@@ -111,12 +111,15 @@ def _fetch_ai_reasons(ids: List[object]) -> Tuple[Dict[object, str], Optional[st
     try:
         res = (
             supabase.table("ai_trading_log")
-            .select("ai_decision_id,reason")
+            .select("ai_decision_id,reason,screenshot_url")
             .in_("ai_decision_id", cleaned_ids)
             .execute()
         )
         for row in res.data or []:
-            reasons[row.get("ai_decision_id")] = row.get("reason") or ""
+            reasons[row.get("ai_decision_id")] = {
+                "reason": row.get("reason") or "",
+                "screenshot_url": row.get("screenshot_url") or "",
+            }
     except Exception as e:
         logging.error("Failed to fetch AI reasons: %s", e)
         return reasons, str(e)
@@ -132,10 +135,14 @@ def _dashboard_payload() -> Dict[str, object]:
     ai_reasons, reason_error = _fetch_ai_reasons(ai_ids)
 
     for row in trade_rows:
-        row["reason"] = ai_reasons.get(row.get("ai_decision_id")) or row.get("comment")
+        reason_details = ai_reasons.get(row.get("ai_decision_id"), {})
+        row["reason"] = reason_details.get("reason") or row.get("comment")
+        row["screenshot_url"] = reason_details.get("screenshot_url")
 
     for session in active_sessions:
-        session["reason"] = ai_reasons.get(session.get("ai_decision_id"))
+        reason_details = ai_reasons.get(session.get("ai_decision_id"), {})
+        session["reason"] = reason_details.get("reason")
+        session["screenshot_url"] = reason_details.get("screenshot_url")
 
     return {
         "updated_at": datetime.now(CT).isoformat(),
