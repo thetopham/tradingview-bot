@@ -466,3 +466,61 @@ The developers and contributors of this software assume no liability for any fin
 
 
 
+
+---
+
+## 🖥️ Dashboard feed in Supabase
+
+The dashboard expects a unified Supabase view named `dashboard_feed` that merges `trade_results` and `ai_trading_log` into a single dataset. The view should expose these columns: `decision_time`, `entry_time`, `exit_time`, `account`, `symbol`, `signal`, `size`, `total_pnl`, `ai_decision_id`, `reason`, `screenshot_url`, and `urls`.
+
+You can create or refresh the view directly in the Supabase SQL editor:
+
+```sql
+create or replace view dashboard_feed as
+with joined as (
+    select
+        tr.entry_time,
+        tr.exit_time,
+        coalesce(tr.account, log.account) as account,
+        coalesce(tr.symbol, log.symbol) as symbol,
+        coalesce(tr.signal, log.signal) as signal,
+        coalesce(tr.size, log.size) as size,
+        tr.total_pnl,
+        tr.ai_decision_id,
+        coalesce(tr.comment, log.reason) as reason,
+        coalesce(log.urls ->> 'screenshot', log.urls ->> 0, log.urls::text) as screenshot_url,
+        log.timestamp as decision_time,
+        log.urls
+    from trade_results tr
+    left join ai_trading_log log on log.ai_decision_id = tr.ai_decision_id
+),
+missing_ai as (
+    select
+        null as entry_time,
+        null as exit_time,
+        log.account,
+        log.symbol,
+        log.signal,
+        log.size,
+        null as total_pnl,
+        log.ai_decision_id,
+        log.reason,
+        coalesce(log.urls ->> 'screenshot', log.urls ->> 0, log.urls::text) as screenshot_url,
+        log.timestamp as decision_time,
+        log.urls
+    from ai_trading_log log
+    where not exists (
+        select 1 from trade_results tr where tr.ai_decision_id = log.ai_decision_id
+    )
+)
+select * from joined
+union all
+select * from missing_ai
+order by decision_time desc;
+```
+
+**After creating the view:**
+
+1. Verify the output in the table editor by selecting from `dashboard_feed` and confirming the combined columns.
+2. Ensure the `urls` column remains `jsonb`; the dashboard will extract the first URL and use it as the screenshot link.
+3. Restart the dashboard or wait for the next refresh cycle—the frontend now reads exclusively from `dashboard_feed` and shows the merged rows in a single table.
