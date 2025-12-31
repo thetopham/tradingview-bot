@@ -277,6 +277,14 @@ class SignalRTradingListener(threading.Thread):
         self.subscribe_all()
         self.sweep_and_cleanup_positions_and_stops()
 
+    def sweep_and_cleanup_positions_and_stops(self):
+        """Clean up any stale metadata after a reconnect."""
+        try:
+            removed = cleanup_stale_metadata()
+            logging.info("Stale metadata cleanup complete; removed %s entries", removed)
+        except Exception as exc:
+            logging.error("Error during stale metadata cleanup: %s", exc)
+
     def default_handler(self, args):
         self.last_event_time = time.time()
         logging.info(f"SignalR event: {args}")
