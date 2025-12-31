@@ -537,10 +537,37 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         })
         trades = resp.get("trades", [])
 
-        relevant_trades = [
-            t for t in trades
-            if t.get("contractId") == cid and not t.get("voided", False) and t.get("size", 0) > 0
-        ]
+        order_ids_raw = meta.get("order_id")
+        order_ids = set()
+        if isinstance(order_ids_raw, (list, tuple, set)):
+            for oid in order_ids_raw:
+                if oid is not None:
+                    order_ids.add(str(oid))
+        elif order_ids_raw is not None:
+            order_ids.add(str(order_ids_raw))
+
+        if order_ids:
+            relevant_trades = [
+                t
+                for t in trades
+                if not t.get("voided", False)
+                and t.get("size", 0) > 0
+                and str(t.get("orderId")) in order_ids
+            ]
+
+            if not relevant_trades:
+                logging.warning(
+                    "[log_trade_results_to_supabase] No trades matched order_ids %s; falling back to contractId filter",
+                    sorted(order_ids),
+                )
+        else:
+            relevant_trades = []
+
+        if not relevant_trades:
+            relevant_trades = [
+                t for t in trades
+                if t.get("contractId") == cid and not t.get("voided", False) and t.get("size", 0) > 0
+            ]
 
         if not relevant_trades:
             logging.warning("[log_trade_results_to_supabase] No relevant trades found, skipping Supabase log.")

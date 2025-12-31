@@ -16,6 +16,23 @@ USER_HUB_URL_BASE = "wss://rtc.topstepx.com/hubs/user?access_token={}"
 orders_state = {}
 positions_state = {}
 trade_meta = {}
+recent_closures = {}
+
+
+def _build_trace_id(entry_time, ai_decision_id, order_id=None, session_id=None):
+    try:
+        if isinstance(entry_time, (int, float)):
+            ts = int(entry_time)
+        elif isinstance(entry_time, str):
+            ts = int(parser.isoparse(entry_time).timestamp())
+        else:
+            ts = int(getattr(entry_time, "timestamp", lambda: time.time())())
+    except Exception:
+        ts = int(time.time())
+
+    base = ai_decision_id if ai_decision_id is not None else "no_ai_id"
+    suffix = str(order_id or session_id or "unknown")
+    return f"{base}-{suffix}-{ts}"
 
 
 def _build_trace_id(entry_time, ai_decision_id, order_id=None, session_id=None):
@@ -474,6 +491,16 @@ def on_position_update(args):
     
 
     if size == 0:
+        last_close = recent_closures.get((account_id, contract_id))
+        if last_close and time.time() - last_close < 5:
+            logging.warning(
+                "[on_position_update] Duplicate close detected within 5s for acct=%s cid=%s; skipping log",
+                account_id,
+                contract_id,
+            )
+            return
+
+        recent_closures[(account_id, contract_id)] = time.time()
         meta = trade_meta.pop((account_id, contract_id), None)
         logging.info(f"[on_position_update] Position closed for acct={account_id}, cid={contract_id}")
         logging.info(f"[on_position_update] meta at close: {meta}")
