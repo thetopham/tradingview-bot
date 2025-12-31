@@ -7,8 +7,7 @@ from datetime import datetime, timedelta
 from api import (
     get_contract, search_pos, flatten_contract, place_market,
     place_limit, place_stop, search_open, cancel, search_trades,
-    log_trade_results_to_supabase, check_for_phantom_orders,
-    place_market_bracket
+    log_trade_results_to_supabase, place_market_bracket
 )
 from signalr_listener import track_trade
 from config import load_config
@@ -22,6 +21,18 @@ CT = config['CT']
 
 def points_to_ticks(points: float) -> int:
     return int(round(points * TICKS_PER_POINT))
+
+def _compute_entry_fill(acct_id: int, oid: int) -> float | None:
+    """Find a recent fill price for order id `oid` with a short wait/poll."""
+    price = None
+    for _ in range(12):
+        trades = [t for t in search_trades(acct_id, datetime.now(CT) - timedelta(minutes=5)) if t.get("orderId") == oid]
+        tot = sum(t.get("size", 0) for t in trades)
+        if tot:
+            price = sum(t["price"] * t["size"] for t in trades) / tot
+            break
+        time.sleep(0.25)
+    return price
 
 def run_simple(acct_id: int, sym: str, sig: str, size: int, alert: str, ai_decision_id=None):
     """Execute a simple market order; server-side brackets handled by broker."""
@@ -119,9 +130,6 @@ def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
         trades=None
     )
 
-    check_for_phantom_orders(acct_id, cid)
-    # No HTTP return; just end
-
 def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
     cid = get_contract(sym)
     side = 0 if sig == "BUY" else 1
@@ -172,9 +180,7 @@ def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
         trades=None
     )
 
-    check_for_phantom_orders(acct_id, cid)
-    # No HTTP return; just end
-
+    
 def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
     cid = get_contract(sym)
     side = 0 if sig == "BUY" else 1
@@ -252,5 +258,4 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
         trades=trade_log
     )
 
-    check_for_phantom_orders(acct_id, cid)
-    # No HTTP return; just end
+    
