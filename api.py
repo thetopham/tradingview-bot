@@ -191,6 +191,94 @@ def _summarize_positions(positions, timeframe: str = "1m"):
         summary.append(details)
     return summary
 
+def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) -> Tuple[Optional[float], Optional[str]]:
+    """
+    Get the current market price from the best available source.
+    """
+    try:
+        now_ts = time.time()
+        if (
+            _PRICE_CACHE.get("symbol") == symbol
+            and now_ts - _PRICE_CACHE.get("ts", 0) <= 10
+            and _PRICE_CACHE.get("value")
+        ):
+            price, source = _PRICE_CACHE.get("value")
+            return price, source
+
+        supabase = get_supabase_client()
+        try:
+            result = supabase.table('tv_datafeed') \
+                .select('c, ts') \
+                .eq('symbol', 'MES') \
+                .in_('timeframe', _timeframe_filters(1)) \
+                .order('ts', desc=True) \
+                .limit(1) \
+                .execute()
+            if result.data and len(result.data) > 0:
+                record = result.data[0]
+                price = float(record.get('c'))
+                bar_time = parser.parse(record.get('ts'))
+                current_time = datetime.now(timezone.utc)
+                age_seconds = (current_time - bar_time).total_seconds()
+                if age_seconds <= max_age_seconds:
+                    logging.debug(f"Current price from 1m feed: ${price} (age: {age_seconds:.0f}s)")
+                    _PRICE_CACHE.update({"symbol": symbol, "ts": now_ts, "value": (price, f"1m_feed_{int(age_seconds)}s_old")})
+                    return price, f"1m_feed_{int(age_seconds)}s_old"
+                else:
+                    logging.debug(f"1m data too old: {age_seconds:.0f}s > {max_age_seconds}s")
+        except Exception as e:
+            logging.error(f"Error querying tv_datafeed: {e}")
+        try:
+            result = supabase.table('latest_chart_analysis') \
+                .select('snapshot, timestamp') \
+                .eq('symbol', 'MES') \
+                .eq('timeframe', '5m') \
+                .order('timestamp', desc=True) \
+                .limit(1) \
+                .execute()
+            if result.data and len(result.data) > 0:
+                record = result.data[0]
+                timestamp = parser.parse(record.get('timestamp'))
+                age_seconds = (datetime.now(timezone.utc) - timestamp).total_seconds()
+                if age_seconds <= 360:
+                    snapshot = record.get('snapshot')
+                    if isinstance(snapshot, str):
+                        snapshot = json.loads(snapshot)
+                    price = snapshot.get('current_price')
+                    if price:
+                        logging.debug(f"Current price from 5m chart: ${price} (age: {age_seconds:.0f}s)")
+                        _PRICE_CACHE.update({"symbol": symbol, "ts": now_ts, "value": (float(price), f"5m_chart_{int(age_seconds)}s_old")})
+                        return float(price), f"5m_chart_{int(age_seconds)}s_old"
+        except Exception as e:
+            logging.debug(f"Could not get chart price: {e}")
+        now = datetime.now(CT)
+        is_market_closed = (
+            now.weekday() == 5 or
+            (now.weekday() == 6 and now.hour < 17) or
+            (now.weekday() == 4 and now.hour >= 16)
+        )
+        if is_market_closed:
+            try:
+                result = supabase.table('tv_datafeed') \
+                    .select('c, ts') \
+                    .eq('symbol', 'MES') \
+                    .in_('timeframe', _timeframe_filters(1)) \
+                    .order('ts', desc=True) \
+                    .limit(1) \
+                    .execute()
+                if result.data:
+                    record = result.data[0]
+                    price = float(record.get('c'))
+                    _PRICE_CACHE.update({"symbol": symbol, "ts": now_ts, "value": (price, "market_closed_last_known")})
+                    return price, "market_closed_last_known"
+            except:
+                pass
+        logging.warning("Could not determine current market price from any source")
+        return None, None
+    except Exception as e:
+        logging.error(f"Error getting current market price: {e}")
+        return None, None
+
 
 def _fetch_latest_price_from_supabase(symbol: str, timeframe: str = "1m") -> Optional[float]:
     """Return the most recent close from the tv_datafeed Supabase table.
