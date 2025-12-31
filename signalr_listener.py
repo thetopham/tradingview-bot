@@ -46,69 +46,6 @@ def track_trade(acct_id, cid, entry_time, ai_decision_id, strategy, sig, size, o
     
     trade_meta[(acct_id, cid)] = meta
 
-def reconstruct_trade_metadata_on_startup():
-    """Reconstruct trade metadata for open positions after restart"""
-    from api import search_pos, ACCOUNTS
-    import time
-    
-    logging.info("Reconstructing trade metadata for open positions...")
-    reconstructed_count = 0
-    
-    for account_name, acct_id in ACCOUNTS.items():
-        try:
-            positions = search_pos(acct_id)
-            
-            for pos in positions:
-                if pos.get('size', 0) > 0:
-                    cid = pos['contractId']
-                    creation_time = pos.get('creationTimestamp')
-                    
-                    # Skip if we already have metadata (shouldn't happen but just in case)
-                    if (acct_id, cid) in trade_meta:
-                        continue
-                    
-                    # Determine position side
-                    position_type = pos.get('type')
-                    if position_type == 1:
-                        signal = 'BUY'
-                    elif position_type == 2:
-                        signal = 'SELL'
-                    else:
-                        signal = 'UNKNOWN'
-                    
-                    # Create reconstructed metadata
-                    meta = {
-                        'entry_time': creation_time,
-                        'ai_decision_id': f'RESTART_{int(time.time())}',
-                        'strategy': 'unknown_restart',
-                        'signal': signal,
-                        'size': pos['size'],
-                        'order_id': None,
-                        'sl_id': None,
-                        'tp_ids': None,
-                        'alert': f'Position reconstructed after restart',
-                        'account': account_name,
-                        'symbol': cid,
-                        'trades': None,
-                        'regime': 'unknown',
-                        'comment': f'Metadata reconstructed on {datetime.now(CT).strftime("%Y-%m-%d %H:%M:%S")}'
-                    }
-                    
-                    trade_meta[(acct_id, cid)] = meta
-                    reconstructed_count += 1
-                    
-                    logging.warning(f"Reconstructed metadata for {account_name}: "
-                                  f"{pos['size']} contracts {signal} @ ${pos.get('averagePrice', 0):.2f}")
-                    
-        except Exception as e:
-            logging.error(f"Failed to reconstruct metadata for {account_name}: {e}")
-    
-    if reconstructed_count > 0:
-        logging.info(f"Successfully reconstructed metadata for {reconstructed_count} open positions")
-    else:
-        logging.info("No open positions found that need metadata reconstruction")
-    
-    return reconstructed_count
 
 class SignalRTradingListener(threading.Thread):
     def __init__(self, accounts, authenticate_func, token_getter, token_expiry_getter, auth_lock, event_handlers=None):
