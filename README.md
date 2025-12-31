@@ -435,6 +435,66 @@ To send alerts from TradingView to your bot:
 
 ---
 
+## 🗂️ Merged Supabase dashboard table
+
+The dashboard now expects a single merged dataset that combines the `trade_results` (entry/exit/PnL) and `ai_trading_log` (account/signal context and screenshots) tables. Use the steps below to build and maintain a merged table or materialized view directly in Supabase.
+
+1. **Create a destination table (or materialized view) that matches the dashboard columns.**
+   ```sql
+   create table if not exists ai_trade_feed (
+     ai_decision_id text primary key,
+     decision_time timestamptz,
+     entry_time timestamptz,
+     exit_time timestamptz,
+     account text,
+     symbol text,
+     signal text,
+     size numeric,
+     total_pnl numeric,
+     reason text,
+     screenshot_url text,
+     strategy text
+   );
+   ```
+
+2. **Populate the table by joining the two source tables.** This query prefers trade data for timestamps and PnL, while filling descriptive fields from `ai_trading_log`. Adjust the `urls` JSON path to match your schema (e.g., `urls->>'chart'`).
+   ```sql
+   insert into ai_trade_feed (ai_decision_id, decision_time, entry_time, exit_time, account, symbol, signal, size, total_pnl, reason, screenshot_url, strategy)
+   select
+     coalesce(tr.ai_decision_id, ai.ai_decision_id) as ai_decision_id,
+     ai.timestamp as decision_time,
+     tr.entry_time,
+     tr.exit_time,
+     coalesce(tr.account, ai.account) as account,
+     coalesce(tr.symbol, ai.symbol) as symbol,
+     coalesce(tr.signal, ai.signal) as signal,
+     coalesce(tr.size, ai.size) as size,
+     tr.total_pnl,
+     coalesce(ai.reason, tr.comment) as reason,
+     coalesce(ai.urls->>'screenshot', ai.urls->>0) as screenshot_url,
+     coalesce(ai.strategy, tr.strategy) as strategy
+   from ai_trading_log ai
+   left join trade_results tr on tr.ai_decision_id = ai.ai_decision_id
+   on conflict (ai_decision_id) do update set
+     decision_time = excluded.decision_time,
+     entry_time = excluded.entry_time,
+     exit_time = excluded.exit_time,
+     account = excluded.account,
+     symbol = excluded.symbol,
+     signal = excluded.signal,
+     size = excluded.size,
+     total_pnl = excluded.total_pnl,
+     reason = excluded.reason,
+     screenshot_url = excluded.screenshot_url,
+     strategy = excluded.strategy;
+   ```
+
+3. **Automate refreshes.** If you prefer a view over a physical table, convert the statement above into a **materialized view** and schedule a Supabase cron job (or `pg_cron`) to `refresh materialized view ai_trade_feed;` every few minutes. For a table, add `after insert or update` triggers on both source tables that upsert into `ai_trade_feed` using the same merge logic, so the dashboard stays in sync without manual jobs.
+
+4. **Expose to the dashboard.** The Flask app reads from the `ai_trade_feed` columns listed above; no additional API changes are required once the merged table is in place.
+
+---
+
 ## 📚 Additional Notes and References
 
 *   **ProjectX API Documentation**: For detailed information on ProjectX API endpoints, authentication, and capabilities, refer to the official ProjectX Gateway API documentation (e.g., `https://gateway.docs.projectx.com/docs/intro` - always check for the most current link from your provider).
