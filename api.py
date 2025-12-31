@@ -159,15 +159,27 @@ def get_contract(sym):
         return OVERRIDE_CONTRACT_ID
     return None
 
-def _summarize_positions(positions):
+def _summarize_positions(positions, timeframe: str = "1m"):
     summary = []
     for pos in positions:
         side_code = pos.get("type")
         side = "LONG" if side_code == 1 else "SHORT" if side_code == 2 else "UNKNOWN"
-        size = pos.get("size")
+        size = pos.get("size") or 0
         cid = pos.get("contractId") or pos.get("contractSymbol")
         avg_price = pos.get("avgPrice") or pos.get("averagePrice") or pos.get("entryPrice")
-        pnl = pos.get("openProfitAndLoss") or pos.get("profitAndLoss")
+
+        symbol = pos.get("contractSymbol") or pos.get("symbol") or cid
+        current_price = _fetch_latest_price_from_supabase(symbol, timeframe) if symbol else None
+
+        if current_price is None or avg_price is None:
+            pnl = None
+        elif side == "LONG":
+            pnl = (current_price - avg_price) * size
+        elif side == "SHORT":
+            pnl = (avg_price - current_price) * size
+        else:
+            pnl = None
+
         details = {
             "contract": cid,
             "side": side,
