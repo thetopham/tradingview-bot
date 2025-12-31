@@ -70,14 +70,23 @@
             gap: 12px;
         }
         .stat-card {
-            background: rgba(255, 255, 255, 0.04);
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
             border: 1px solid var(--border);
             border-radius: 12px;
             padding: 12px 14px;
             display: flex;
             flex-direction: column;
-            gap: 4px;
+            gap: 6px;
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+            position: relative;
+            overflow: hidden;
+        }
+        .stat-card::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at 20% 20%, rgba(167, 139, 250, 0.08), transparent 40%);
+            pointer-events: none;
         }
         .stat-label {
             color: var(--muted);
@@ -92,6 +101,22 @@
         .stat-subtle {
             color: var(--muted);
             font-size: 12px;
+        }
+        .stat-trend {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: #4ade80;
+            font-weight: 600;
+            font-size: 12px;
+        }
+        .stat-trend.negative { color: #f87171; }
+        .stat-trend .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            box-shadow: 0 0 8px currentColor;
         }
         .grid {
             display: grid;
@@ -116,7 +141,7 @@
             color: var(--text);
         }
         th, td {
-            padding: 8px 10px;
+            padding: 10px 10px;
             border-bottom: 1px solid var(--border);
             text-align: left;
             font-size: 14px;
@@ -124,6 +149,10 @@
         th {
             color: var(--muted);
             font-weight: 600;
+            position: sticky;
+            top: 0;
+            background: var(--card);
+            z-index: 1;
         }
         tr:last-child td {
             border-bottom: none;
@@ -157,6 +186,11 @@
             background: rgba(255, 255, 255, 0.01);
         }
         .table-wrapper table { min-width: 100%; }
+        .table-wrapper::-webkit-scrollbar { height: 8px; width: 8px; }
+        .table-wrapper::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+        }
         .btn-link {
             background: rgba(167, 139, 250, 0.16);
             color: #c4b5fd;
@@ -167,6 +201,33 @@
             border: 1px solid rgba(167, 139, 250, 0.35);
         }
         .btn-link:hover { filter: brightness(1.15); }
+        .refresh-meta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--muted);
+            font-size: 13px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(125, 211, 252, 0.14);
+            color: #a5f3fc;
+            padding: 6px 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(125, 211, 252, 0.35);
+            font-weight: 600;
+        }
+        .badge .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            box-shadow: 0 0 10px currentColor;
+        }
         @media (max-width: 640px) {
             header { padding: 16px; }
             .grid { padding: 0 16px 16px; }
@@ -180,7 +241,10 @@
             <h1>AI Trading Oversight <span>Live</span></h1>
             <div class="meta">Monitoring AI decisions, open sessions, and recent results</div>
         </div>
-        <div class="accent-meta"><span class="dot"></span><span>Last updated <span id="updated">—</span></span></div>
+        <div class="refresh-meta">
+            <div class="badge"><span class="dot"></span><span>Last updated <span id="updated">—</span></span></div>
+            <div class="meta">Next refresh in <strong id="refresh-timer">—</strong></div>
+        </div>
     </header>
 
     <section class="stats">
@@ -198,6 +262,21 @@
             <div class="stat-label">Refresh cadence</div>
             <div class="stat-value">15s</div>
             <div class="stat-subtle">Auto-refresh enabled</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Total PnL</div>
+            <div class="stat-value" id="total-pnl">—</div>
+            <div class="stat-trend" id="pnl-trend" style="display:none"><span class="dot"></span><span id="pnl-trend-label"></span></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Win rate</div>
+            <div class="stat-value" id="win-rate">—</div>
+            <div class="stat-subtle" id="win-rate-meta">Based on recent trades</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Top trade</div>
+            <div class="stat-value" id="best-trade">—</div>
+            <div class="stat-subtle" id="best-trade-meta">Highest recent PnL</div>
         </div>
     </section>
 
@@ -267,10 +346,94 @@
         reasonError.style.display = 'none';
         tradeError.insertAdjacentElement('afterend', reasonError);
         const updatedEl = document.getElementById('updated');
+        const refreshTimerEl = document.getElementById('refresh-timer');
+        const totalPnlEl = document.getElementById('total-pnl');
+        const pnlTrendEl = document.getElementById('pnl-trend');
+        const pnlTrendLabelEl = document.getElementById('pnl-trend-label');
+        const winRateEl = document.getElementById('win-rate');
+        const winRateMetaEl = document.getElementById('win-rate-meta');
+        const bestTradeEl = document.getElementById('best-trade');
+        const bestTradeMetaEl = document.getElementById('best-trade-meta');
+        const REFRESH_MS = 15000;
+        let lastRefresh = Date.now();
 
         function pill(label, type) {
             const cls = (type || '').toLowerCase();
             return `<span class="pill ${cls}">${label || ''}</span>`;
+        }
+
+        function updateRefreshTimer() {
+            const msUntilNext = Math.max(REFRESH_MS - (Date.now() - lastRefresh), 0);
+            const seconds = Math.ceil(msUntilNext / 1000);
+            refreshTimerEl.textContent = `${seconds}s`;
+        }
+
+        function summarizeTrades(trades = []) {
+            const summary = {
+                total: 0,
+                winRate: null,
+                bestTrade: null,
+                bestMeta: '',
+                wins: 0,
+            };
+
+            if (!trades.length) return summary;
+
+            const numericPnls = trades.map((t) => Number(t.total_pnl)).filter((v) => !Number.isNaN(v));
+            summary.total = numericPnls.reduce((acc, cur) => acc + cur, 0);
+            summary.wins = numericPnls.filter((v) => v >= 0).length;
+            summary.winRate = trades.length ? (summary.wins / trades.length) * 100 : null;
+
+            let best = null;
+            trades.forEach((trade) => {
+                const pnl = Number(trade.total_pnl);
+                if (Number.isNaN(pnl)) return;
+                if (!best || pnl > best.pnl) {
+                    best = { pnl, trade };
+                }
+            });
+
+            if (best) {
+                const { trade, pnl } = best;
+                summary.bestTrade = `${trade.symbol || '—'} (${pnl.toFixed(2)})`;
+                summary.bestMeta = trade.exit_time || trade.entry_time || 'Recent high performer';
+            }
+
+            return summary;
+        }
+
+        function renderSummary(trades, activeSessions) {
+            const summary = summarizeTrades(trades);
+            const totalCount = trades?.length ?? 0;
+            const activeCount = activeSessions?.length ?? 0;
+            document.getElementById('active-count').textContent = activeCount;
+            document.getElementById('trade-count').textContent = totalCount;
+
+            if (summary.total !== null) {
+                totalPnlEl.innerHTML = formatPnL(summary.total, true);
+                pnlTrendEl.style.display = 'inline-flex';
+                pnlTrendEl.classList.toggle('negative', summary.total < 0);
+                pnlTrendLabelEl.textContent = summary.total >= 0 ? 'Momentum up' : 'Momentum down';
+            } else {
+                totalPnlEl.textContent = '—';
+                pnlTrendEl.style.display = 'none';
+            }
+
+            if (summary.winRate !== null) {
+                winRateEl.textContent = `${summary.winRate.toFixed(1)}%`;
+                winRateMetaEl.textContent = `${summary.wins}/${totalCount} positive trades`;
+            } else {
+                winRateEl.textContent = '—';
+                winRateMetaEl.textContent = 'No trade history yet';
+            }
+
+            if (summary.bestTrade) {
+                bestTradeEl.textContent = summary.bestTrade;
+                bestTradeMetaEl.textContent = summary.bestMeta;
+            } else {
+                bestTradeEl.textContent = '—';
+                bestTradeMetaEl.textContent = 'No trades to highlight';
+            }
         }
 
         function renderSessions(decisions) {
@@ -300,11 +463,12 @@
             });
         }
 
-        function formatPnL(value) {
+        function formatPnL(value, returnRawHtml = false) {
             const num = Number(value);
             if (Number.isNaN(num)) return value || '';
             const cls = num >= 0 ? 'pnl-positive' : 'pnl-negative';
-            return `<span class="${cls}">${num.toFixed(2)}</span>`;
+            const formatted = `<span class="${cls}">${num.toFixed(2)}</span>`;
+            return returnRawHtml ? formatted : formatted;
         }
 
         function renderTrades(trades) {
@@ -339,8 +503,9 @@
                 updatedEl.textContent = new Date(data.updated_at).toLocaleString();
                 renderSessions(data.ai_decisions || []);
                 renderTrades(data.trade_results || []);
-                document.getElementById('active-count').textContent = data.active_sessions?.length ?? 0;
-                document.getElementById('trade-count').textContent = data.trade_results?.length ?? 0;
+                renderSummary(data.trade_results || [], data.active_sessions || []);
+                lastRefresh = Date.now();
+                updateRefreshTimer();
 
                 if (data.trade_results_error) {
                     tradeError.style.display = 'block';
@@ -369,7 +534,8 @@
         }
 
         refresh();
-        setInterval(refresh, 15000);
+        setInterval(refresh, REFRESH_MS);
+        setInterval(updateRefreshTimer, 1000);
     </script>
 </body>
 </html>
