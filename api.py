@@ -4,6 +4,7 @@ import logging
 import json
 import time
 import pytz
+from typing import Dict, List, Optional
 
 from datetime import datetime, timezone
 from auth import ensure_token, get_token, session
@@ -178,8 +179,101 @@ def _summarize_positions(positions):
     return summary
 
 
+def _fetch_latest_price_from_supabase(symbol: str, timeframe: str = "1m") -> Optional[float]:
+    """Return the most recent close from the tv_datafeed Supabase table.
+
+    This intentionally uses a minimal query to avoid pulling large payloads.
+    """
+
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        logging.debug("Supabase credentials missing; cannot fetch latest price")
+        return None
+
+    url = f"{SUPABASE_URL}/rest/v1/tv_datafeed"
+    params = {
+        "symbol": f"eq.{symbol}",
+        "timeframe": f"eq.{timeframe}",
+        "select": "c,time,close",
+        "order": "time.desc",
+        "limit": 1,
+    }
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    try:
+        resp = session.get(url, params=params, headers=headers, timeout=(3.05, 10))
+        resp.raise_for_status()
+        rows = resp.json()
+        if not rows:
+            logging.debug("Supabase tv_datafeed returned no rows for %s", symbol)
+            return None
+
+        latest = rows[0]
+        price = latest.get("c") or latest.get("close")
+        return float(price) if price is not None else None
+    except Exception as exc:
+        logging.warning("Failed to fetch latest price from Supabase: %s", exc)
+        return None
+
+
+def _compute_simple_position_context(
+    positions: List[Dict], symbol: str, timeframe: str = "1m"
+) -> Dict[str, Optional[float]]:
+    """Compute a lightweight position context with a simple PnL calculation.
+
+    This intentionally avoids complex risk logic; it only calculates size, average
+    price, side, current price (from Supabase if available), and unrealized PnL.
+    """
+
+    if not positions:
+        return {
+            "has_position": False,
+            "size": 0,
+            "side": None,
+            "average_price": None,
+            "current_price": None,
+            "unrealized_pnl": 0.0,
+        }
+
+    total_size = sum(p.get("size", 0) for p in positions)
+    avg_price = (
+        sum((p.get("averagePrice") or p.get("avgPrice") or 0) * p.get("size", 0) for p in positions)
+        / total_size
+        if total_size
+        else 0
+    )
+
+    position_type = positions[0].get("type") if positions else None
+    side = "LONG" if position_type == 1 else "SHORT" if position_type == 2 else None
+
+    current_price = _fetch_latest_price_from_supabase(symbol, timeframe)
+
+    if current_price is None or avg_price is None:
+        unrealized_pnl = 0.0
+    elif side == "LONG":
+        unrealized_pnl = (current_price - avg_price) * total_size
+    elif side == "SHORT":
+        unrealized_pnl = (avg_price - current_price) * total_size
+    else:
+        unrealized_pnl = 0.0
+
+    return {
+        "has_position": True,
+        "size": total_size,
+        "side": side,
+        "average_price": avg_price,
+        "current_price": current_price,
+        "unrealized_pnl": unrealized_pnl,
+    }
+
+
 def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=None):
     position_summary = _summarize_positions(positions or [])
+    simple_position_context = _compute_simple_position_context(positions or [], sym)
     payload = {
         "account": account,
         "strategy": strat,
@@ -189,6 +283,7 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=N
         "alert": alert,
         "positions": positions or [],
         "position_summary": position_summary,
+        "position_context": simple_position_context,
     }
     try:
         resp = session.post(ai_url, json=payload, timeout=150)
