@@ -337,9 +337,7 @@ def on_order_update(args):
         return
 
     orders_state.setdefault(account_id, {})[order_data.get("id")] = order_data
-
-    if order_data.get("type") == 1 and status == 2:  # TP filled
-        
+         
 
     if status == 2:
         meta = trade_meta.setdefault((account_id, contract_id), {})
