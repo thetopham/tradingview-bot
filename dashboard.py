@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
@@ -111,14 +112,41 @@ def _fetch_ai_reasons(ids: List[object]) -> Tuple[Dict[object, Dict[str, object]
     try:
         res = (
             supabase.table("ai_trading_log")
-            .select("ai_decision_id,reason,screenshot_url")
+            .select("ai_decision_id,reason,screenshot_url,urls")
             .in_("ai_decision_id", cleaned_ids)
             .execute()
         )
         for row in res.data or []:
+            urls = row.get("urls")
+            if isinstance(urls, str):
+                try:
+                    urls = json.loads(urls)
+                except json.JSONDecodeError:
+                    # Keep the raw string as a potential direct URL fallback
+                    pass
+
+            def _first_url(value: object) -> str:
+                if not value:
+                    return ""
+                if isinstance(value, str):
+                    return value
+                if isinstance(value, dict):
+                    for candidate in value.values():
+                        found = _first_url(candidate)
+                        if found:
+                            return found
+                    return ""
+                if isinstance(value, (list, tuple, set)):
+                    for item in value:
+                        found = _first_url(item)
+                        if found:
+                            return found
+                return ""
+
+            screenshot_url = row.get("screenshot_url") or _first_url(urls)
             reasons[row.get("ai_decision_id")] = {
                 "reason": row.get("reason") or "",
-                "screenshot_url": row.get("screenshot_url") or "",
+                "screenshot_url": screenshot_url or "",
             }
     except Exception as e:
         logging.error("Failed to fetch AI reasons: %s", e)
