@@ -12,7 +12,7 @@ from config import load_config
 from api import (
     flatten_contract, get_contract, ai_trade_decision, cancel_all_stops, search_pos 
     )
-from strategies import run_bracket, run_brackmod, run_pivot
+from strategies import run_bracket, run_brackmod, run_pivot, run_simple
 from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token
 from signalr_listener import launch_signalr_listener
