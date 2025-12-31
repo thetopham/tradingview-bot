@@ -470,9 +470,7 @@ def launch_signalr_listener(get_token, get_token_expiry, authenticate, auth_lock
     accounts = parse_account_ids_from_env()
     logging.info(f"Parsed accounts from env: {accounts}")
     
-    # Reconstruct metadata for any open positions BEFORE starting listener
-    reconstruct_trade_metadata_on_startup()
-    
+   
     event_handlers = {
         "on_account_update": on_account_update,
         "on_order_update": on_order_update,
