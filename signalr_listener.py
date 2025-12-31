@@ -158,7 +158,6 @@ def on_order_update(args):
 
 
 def on_position_update(args):
-    # Always unwrap if data is present
     position = args[0] if isinstance(args, list) and args else args
     position_data = position.get("data") if isinstance(position, dict) and "data" in position else position
 
@@ -171,36 +170,164 @@ def on_position_update(args):
 
     positions_state.setdefault(account_id, {})[contract_id] = position_data
 
-    # Use the broker's timestamp for entry
     entry_time = position_data.get("creationTimestamp")
     if size > 0:
-        # Only update the entry_time field in meta if meta exists
         meta = trade_meta.get((account_id, contract_id))
+        
+        # IMPORTANT: Check if this is a NEW position by comparing timestamps
         if meta is not None:
-            meta["entry_time"] = entry_time
-        else:
-            # Optionally: log if meta is missing at entry time (should rarely happen)
-            logging.warning(f"[on_position_update] No meta at entry for acct={account_id}, cid={contract_id}. Not updating entry_time.")
+            # If we have metadata, check if it's for THIS position or an old one
+            meta_entry_time = meta.get("entry_time")
+            
+            # Convert times for comparison
+            try:
+                if isinstance(meta_entry_time, str):
+                    meta_time = parser.isoparse(meta_entry_time)
+                else:
+                    meta_time = datetime.fromtimestamp(meta_entry_time, CT)
+                    
+                current_time = parser.isoparse(entry_time) if entry_time else datetime.now(CT)
+                
+                # If the metadata is older than 60 seconds, it's probably from a previous position
+                time_diff = abs((current_time - meta_time).total_seconds())
+                
+                if time_diff > 60:
+                    logging.warning(f"Metadata appears to be from old position (age: {time_diff:.0f}s), clearing")
+                    meta = None
+                    trade_meta.pop((account_id, contract_id), None)
+                else:
+                    # Update entry time if needed
+                    meta["entry_time"] = entry_time
+            except Exception as e:
+                logging.error(f"Error comparing timestamps: {e}")
+        
+        if meta is None:
+            # CREATE METADATA FOR POSITIONS WITHOUT IT
+            logging.warning(f"[on_position_update] No meta for open position acct={account_id}, cid={contract_id}. Creating basic metadata.")
+            # Determine position type
+            position_type = position_data.get('type')
+            signal = 'BUY' if position_type == 1 else 'SELL' if position_type == 2 else 'UNKNOWN'
+            
+            # Find account name
+            account_name = 'unknown'
+            for name, id in ACCOUNTS.items():
+                if id == account_id:
+                    account_name = name
+                    break
+            
+            trade_meta[(account_id, contract_id)] = {
+                'entry_time': entry_time or time.time(),
+                'ai_decision_id': None,  # No AI decision for manual trades
+                'strategy': 'manual',
+                'signal': signal,
+                'size': size,
+                'order_id': None,
+                'sl_id': None,
+                'tp_ids': None,
+                'alert': 'Position tracked by SignalR',
+                'account': account_name,
+                'symbol': contract_id,
+                'trades': None,
+                'regime': 'unknown',
+                'comment': f'Metadata created on position update at {datetime.now(CT).strftime("%Y-%m-%d %H:%M:%S")}'
+            }
 
+    # DELAY the ensure_stops_match_position call to allow orders to settle
+    # This is key to preventing premature stop cancellation
+    def delayed_stop_check():
+        time.sleep(2)  # Wait 2 seconds for orders to register
+        ensure_stops_match_position(account_id, contract_id)
     
+    # Run in separate thread to not block
+    threading.Thread(target=delayed_stop_check, daemon=True).start()
 
     if size == 0:
         meta = trade_meta.pop((account_id, contract_id), None)
         logging.info(f"[on_position_update] Position closed for acct={account_id}, cid={contract_id}")
         logging.info(f"[on_position_update] meta at close: {meta}")
+        
         if meta:
             ai_decision_id = meta.get("ai_decision_id")
             logging.info(f"[on_position_update] Calling log_trade_results_to_supabase with ai_decision_id={ai_decision_id}")
             log_trade_results_to_supabase(
                 acct_id=account_id,
                 cid=contract_id,
-                entry_time=meta.get("entry_time"),  # ISO8601 string
+                entry_time=meta.get("entry_time"),
                 ai_decision_id=ai_decision_id,
                 meta=meta
             )
         else:
-            logging.warning(f"[on_position_update] No meta found for acct={account_id} cid={contract_id} on flatten!")
-        
+            # STILL LOG TRADE RESULTS EVEN WITHOUT METADATA
+            logging.warning(f"[on_position_update] No meta found for closed position, creating minimal log entry")
+            
+            # Try to get position info from the last known state
+            last_position = positions_state.get(account_id, {}).get(contract_id, {})
+            
+            # Find account name
+            account_name = 'unknown'
+            for name, id in ACCOUNTS.items():
+                if id == account_id:
+                    account_name = name
+                    break
+            
+            # Create minimal metadata for logging
+            minimal_meta = {
+                'strategy': 'unknown',
+                'signal': 'UNKNOWN',
+                'symbol': contract_id,
+                'account': account_name,
+                'size': last_position.get('size', 0),
+                'alert': 'Position closed without metadata',
+                'comment': 'Trade result logged without original metadata'
+            }
+            
+            # Use position creation time if available
+            entry_time = last_position.get('creationTimestamp', datetime.now(CT) - timedelta(hours=1))
+            
+            log_trade_results_to_supabase(
+                acct_id=account_id,
+                cid=contract_id,
+                entry_time=entry_time,
+                ai_decision_id=None,
+                meta=minimal_meta
+            )
+            
+        check_for_phantom_orders(account_id, contract_id)
+
+
+# Also add a helper function to clean up stale metadata
+
+def cleanup_stale_metadata(max_age_hours=24):
+    """Remove old metadata entries that might be orphaned"""
+    current_time = time.time()
+    stale_keys = []
+    
+    for key, meta in trade_meta.items():
+        entry_time = meta.get("entry_time")
+        if entry_time:
+            try:
+                if isinstance(entry_time, (int, float)):
+                    age_hours = (current_time - entry_time) / 3600
+                elif isinstance(entry_time, str):
+                    entry_dt = parser.isoparse(entry_time)
+                    age_hours = (datetime.now(entry_dt.tzinfo) - entry_dt).total_seconds() / 3600
+                else:
+                    continue
+                    
+                if age_hours > max_age_hours:
+                    stale_keys.append(key)
+                    logging.warning(f"Found stale metadata: session {meta.get('session_id')}, "
+                                  f"age {age_hours:.1f} hours")
+            except Exception as e:
+                logging.error(f"Error checking metadata age: {e}")
+    
+    # Remove stale entries
+    for key in stale_keys:
+        meta = trade_meta.pop(key, None)
+        if meta:
+            logging.info(f"Removed stale metadata for session {meta.get('session_id')}")
+    
+    return len(stale_keys)
 
 def on_trade_update(args):
     logging.info(f"[Trade Update] {args}")
@@ -242,11 +369,14 @@ def launch_signalr_listener(get_token, get_token_expiry, authenticate, auth_lock
 
 def ensure_stops_match_position(acct_id, contract_id, max_retries=5, retry_delay=0.4):
     from api import search_open, place_stop, cancel, search_pos
-
+    
     if acct_id is None or contract_id is None:
         logging.error(f"ensure_stops_match_position called with acct_id={acct_id}, contract_id={contract_id} (BUG IN CALLER)")
         return
-
+    
+    # Wait longer initially to let things settle
+    time.sleep(3)  # Add initial delay
+    
     for attempt in range(max_retries):
         position = positions_state.get(acct_id, {}).get(contract_id)
         if position is None:
@@ -254,25 +384,53 @@ def ensure_stops_match_position(acct_id, contract_id, max_retries=5, retry_delay
             position = next((p for p in fresh_positions if p["contractId"] == contract_id), None)
             if position:
                 positions_state.setdefault(acct_id, {})[contract_id] = position
+        
         current_size = position.get("size", 0) if position else 0
-
         if current_size > 0 or attempt == max_retries - 1:
             break
         time.sleep(retry_delay)
-
+    
     open_orders = search_open(acct_id)
     stops = [o for o in open_orders if o["contractId"] == contract_id and o["type"] == 4 and o["status"] == 1]
-
-    for stop in stops:
-        if stop["size"] != current_size and current_size > 0:
-            logging.info(f"[SL SYNC] Canceling old stop of size {stop['size']} to match position {current_size}")
-            cancel(acct_id, stop["id"])
-            stop_side = stop["side"]
-            stop_price = stop.get("stopPrice")
-            place_stop(acct_id, contract_id, stop_side, current_size, stop_price)
-    if current_size == 0:
+    
+    # Get position type to determine stop side
+    position_type = position.get("type") if position else None
+    
+    # Only sync stops if we have a position
+    if current_size > 0:
         for stop in stops:
-            logging.info(f"[SL SYNC] No open position, canceling leftover stop {stop['id']}")
+            if stop["size"] != current_size:
+                logging.info(f"[SL SYNC] Adjusting stop from size {stop['size']} to match position {current_size}")
+                cancel(acct_id, stop["id"])
+                
+                # Only replace if we know the stop price
+                stop_price = stop.get("stopPrice")
+                if stop_price and position_type:
+                    stop_side = 1 if position_type == 1 else 0
+                    time.sleep(0.5)
+                    place_stop(acct_id, contract_id, stop_side, current_size, stop_price)
+    
+    # Only cancel stops if we're REALLY sure there's no position
+    elif current_size == 0:
+        # Check if stop is very new (might be for a position we haven't seen yet)
+        for stop in stops:
+            # Check stop age if possible
+            stop_time = stop.get("creationTimestamp")
+            if stop_time:
+                try:
+                    from dateutil import parser
+                    from datetime import datetime, timezone
+                    stop_dt = parser.parse(stop_time)
+                    age_seconds = (datetime.now(timezone.utc) - stop_dt).total_seconds()
+                    
+                    # Don't cancel stops less than 10 seconds old
+                    if age_seconds < 10:
+                        logging.info(f"[SL SYNC] Keeping new stop {stop['id']} (age: {age_seconds:.1f}s)")
+                        continue
+                except:
+                    pass
+            
+            logging.info(f"[SL SYNC] No position found, canceling old stop {stop['id']}")
             cancel(acct_id, stop["id"])
 
 
