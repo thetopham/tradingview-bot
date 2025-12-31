@@ -4,17 +4,21 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from flask import Blueprint, jsonify, render_template
+
+import pytz
 
 from api import get_supabase_client
 from config import load_config
 from signalr_listener import trade_meta
 
 config = load_config()
-CT = config["CT"]
+DISPLAY_TZ = pytz.timezone("America/Denver")
+# Restrict dashboard results to recent history to avoid stale Supabase rows.
+RECENT_TRADE_WINDOW_DAYS = 7
 ACCOUNT_NAME_BY_ID = {v: k for k, v in config["ACCOUNTS"].items()}
 
 
@@ -26,17 +30,29 @@ def _format_ts(ts: Optional[object]) -> str:
 
     try:
         if isinstance(ts, (int, float)):
-            return datetime.fromtimestamp(float(ts), CT).strftime("%Y-%m-%d %H:%M:%S %Z")
+            return datetime.fromtimestamp(float(ts), DISPLAY_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
 
         if isinstance(ts, str):
+            try:
+                parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                if parsed.tzinfo:
+                    return parsed.astimezone(DISPLAY_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
+            except ValueError:
+                pass
             return ts
 
         if hasattr(ts, "astimezone"):
-            return ts.astimezone(CT).strftime("%Y-%m-%d %H:%M:%S %Z")
+            return ts.astimezone(DISPLAY_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
     except Exception:
         logging.exception("Failed to format timestamp %s", ts)
 
     return str(ts)
+
+
+def _normalize_symbol(_: object) -> str:
+    """Force MES display per trading scope."""
+
+    return "MES"
 
 
 def _collect_active_sessions() -> List[Dict[str, object]]:
@@ -51,7 +67,7 @@ def _collect_active_sessions() -> List[Dict[str, object]]:
         sessions.append(
             {
                 "account": account_label,
-                "symbol": meta.get("symbol") or cid,
+                "symbol": _normalize_symbol(meta.get("symbol") or cid),
                 "signal": meta.get("signal", ""),
                 "strategy": meta.get("strategy", ""),
                 "size": meta.get("size", 0),
@@ -103,16 +119,20 @@ def _fetch_trade_results(limit: int = 25) -> Tuple[List[Dict[str, object]], Opti
         return rows, str(e)
 
     try:
+        cutoff = datetime.now(DISPLAY_TZ) - timedelta(days=RECENT_TRADE_WINDOW_DAYS)
         res = (
             supabase.table("trade_results")
             .select(
                 "entry_time,exit_time,symbol,signal,ai_decision_id,total_pnl,account,size,comment,strategy"
             )
+            .gte("entry_time", cutoff.isoformat())
             .order("entry_time", desc=True)
             .limit(limit)
             .execute()
         )
         rows = res.data or []
+        for row in rows:
+            row["symbol"] = _normalize_symbol(row.get("symbol"))
     except Exception as e:
         logging.error("Failed to fetch trade_results: %s", e)
         return rows, str(e)
@@ -149,6 +169,7 @@ def _fetch_ai_decisions(limit: int = 50) -> Tuple[List[Dict[str, object]], Optio
 
             row["screenshot_url"] = _extract_first_url(urls)
             row["decision_time"] = _format_ts(row.get("timestamp"))
+            row["symbol"] = _normalize_symbol(row.get("symbol"))
             rows.append(row)
     except Exception as e:
         logging.error("Failed to fetch ai_trading_log: %s", e)
@@ -232,7 +253,7 @@ def _dashboard_payload() -> Dict[str, object]:
         decision["result_exit_time"] = _format_ts(result.get("exit_time"))
 
     return {
-        "updated_at": datetime.now(CT).isoformat(),
+        "updated_at": datetime.now(DISPLAY_TZ).isoformat(),
         "active_sessions": active_sessions,
         "trade_results": trade_rows,
         "ai_decisions": ai_decisions,
