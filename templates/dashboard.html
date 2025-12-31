@@ -129,6 +129,7 @@
                             <th>Entry</th>
                             <th>AI ID</th>
                             <th>Reason</th>
+                            <th>Screenshot</th>
                             <th>Trace</th>
                         </tr>
                     </thead>
@@ -153,6 +154,7 @@
                             <th>PnL</th>
                             <th>AI ID</th>
                             <th>Reason</th>
+                            <th>Screenshot</th>
                             <th>Account</th>
                         </tr>
                     </thead>
@@ -198,6 +200,7 @@
                     <td class="muted">${s.entry_time || ''}</td>
                     <td>${s.ai_decision_id ?? ''}</td>
                     <td class="muted reason">${s.reason || ''}</td>
+                    <td>${s.screenshot_url ? `<a href="${s.screenshot_url}" target="_blank" rel="noopener">View</a>` : ''}</td>
                     <td class="muted">${s.trace_id || ''}</td>
                 `;
                 sessionsBody.appendChild(row);
@@ -229,6 +232,7 @@
                     <td>${formatPnL(t.total_pnl)}</td>
                     <td>${t.ai_decision_id ?? ''}</td>
                     <td class="muted reason">${t.reason || ''}</td>
+                    <td>${t.screenshot_url ? `<a href="${t.screenshot_url}" target="_blank" rel="noopener">View</a>` : ''}</td>
                     <td>${t.account || ''}</td>
                 `;
                 tradesBody.appendChild(row);
