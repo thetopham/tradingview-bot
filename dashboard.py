@@ -81,8 +81,7 @@ def _fetch_trade_results(limit: int = 25) -> Tuple[List[Dict[str, object]], Opti
         res = (
             supabase.table("trade_results")
             .select(
-                "entry_time,exit_time,duration_sec_text,duration_sec,total_pnl,raw_trades,order_id,trade_ids,"
-                "symbol,signal,ai_decision_id,account,size,comment,strategy"
+                "entry_time,exit_time,symbol,signal,ai_decision_id,total_pnl,account,size,comment,strategy"
             )
             .order("entry_time", desc=True)
             .limit(limit)
@@ -92,16 +91,6 @@ def _fetch_trade_results(limit: int = 25) -> Tuple[List[Dict[str, object]], Opti
     except Exception as e:
         logging.error("Failed to fetch trade_results: %s", e)
         return rows, str(e)
-
-    for row in rows:
-        row["entry_time"] = _format_ts(row.get("entry_time"))
-        row["exit_time"] = _format_ts(row.get("exit_time"))
-
-        if "duration" not in row:
-            duration_val = row.get("duration_sec_text") or row.get("duration_sec")
-            row["duration"] = duration_val
-        else:
-            row["duration"] = row.get("duration")
 
     return rows, None
 
@@ -120,95 +109,50 @@ def _fetch_ai_reasons(ids: List[object]) -> Tuple[Dict[object, Dict[str, object]
         logging.warning("Dashboard Supabase client unavailable for reasons: %s", e)
         return reasons, str(e)
 
-    def _first_url(value: object) -> str:
-        if not value:
-            return ""
-        if isinstance(value, str):
-            return value
-        if isinstance(value, dict):
-            for candidate in value.values():
-                found = _first_url(candidate)
-                if found:
-                    return found
-            return ""
-        if isinstance(value, (list, tuple, set)):
-            for item in value:
-                found = _first_url(item)
-                if found:
-                    return found
-        return ""
-
-    def _parse_urls(urls_value: object) -> object:
-        """Return JSON-decoded urls column when it is a string."""
-
-        if isinstance(urls_value, str):
-            try:
-                return json.loads(urls_value)
-            except json.JSONDecodeError:
-                return urls_value
-        return urls_value
-
     try:
-        # Only request known columns to avoid missing-column errors (e.g., screenshot_url).
         res = (
             supabase.table("ai_trading_log")
-            .select("ai_decision_id,timestamp,strategy,signal,symbol,account,size,urls,reason")
+            .select("ai_decision_id,reason,screenshot_url,urls")
             .in_("ai_decision_id", cleaned_ids)
             .execute()
         )
         for row in res.data or []:
-            urls = _parse_urls(row.get("urls"))
-            screenshot_url = _first_url(urls)
+            urls = row.get("urls")
+            if isinstance(urls, str):
+                try:
+                    urls = json.loads(urls)
+                except json.JSONDecodeError:
+                    # Keep the raw string as a potential direct URL fallback
+                    pass
 
+            def _first_url(value: object) -> str:
+                if not value:
+                    return ""
+                if isinstance(value, str):
+                    return value
+                if isinstance(value, dict):
+                    for candidate in value.values():
+                        found = _first_url(candidate)
+                        if found:
+                            return found
+                    return ""
+                if isinstance(value, (list, tuple, set)):
+                    for item in value:
+                        found = _first_url(item)
+                        if found:
+                            return found
+                return ""
+
+            screenshot_url = row.get("screenshot_url") or _first_url(urls)
             reasons[row.get("ai_decision_id")] = {
                 "reason": row.get("reason") or "",
                 "screenshot_url": screenshot_url or "",
-                "symbol": row.get("symbol") or "MES",
-                "strategy": row.get("strategy"),
-                "signal": row.get("signal"),
-                "account": row.get("account"),
-                "size": row.get("size"),
-                "created_at": row.get("timestamp"),
             }
     except Exception as e:
         logging.error("Failed to fetch AI reasons: %s", e)
         return reasons, str(e)
 
     return reasons, None
-
-
-def _summarize_trades(trade_rows: List[Dict[str, object]]) -> Dict[str, object]:
-    total_pnl = 0.0
-    wins = 0
-    losses = 0
-    max_gain = None
-    max_loss = None
-
-    for row in trade_rows:
-        pnl = row.get("total_pnl")
-        try:
-            num = float(pnl)
-        except (TypeError, ValueError):
-            continue
-        total_pnl += num
-        if num >= 0:
-            wins += 1
-            max_gain = num if max_gain is None else max(max_gain, num)
-        else:
-            losses += 1
-            max_loss = num if max_loss is None else min(max_loss, num)
-
-    total = wins + losses
-    win_rate = (wins / total * 100) if total else 0.0
-
-    return {
-        "total_pnl": total_pnl,
-        "wins": wins,
-        "losses": losses,
-        "win_rate": win_rate,
-        "max_gain": max_gain,
-        "max_loss": max_loss,
-    }
 
 
 def _dashboard_payload() -> Dict[str, object]:
@@ -228,25 +172,12 @@ def _dashboard_payload() -> Dict[str, object]:
         session["reason"] = reason_details.get("reason")
         session["screenshot_url"] = reason_details.get("screenshot_url")
 
-    ai_journal = list(ai_reasons.values())
-
-    def _journal_sort(item: Dict[str, object]):
-        ts = item.get("created_at")
-        try:
-            return datetime.fromisoformat(ts) if isinstance(ts, str) else ts or datetime.min
-        except Exception:
-            return datetime.min
-
-    ai_journal = sorted(ai_journal, key=_journal_sort, reverse=True)
-
     return {
         "updated_at": datetime.now(CT).isoformat(),
         "active_sessions": active_sessions,
         "trade_results": trade_rows,
         "trade_results_error": trade_error,
         "ai_reason_error": reason_error,
-        "trade_summary": _summarize_trades(trade_rows),
-        "ai_journal": ai_journal,
     }
 
 

@@ -157,28 +157,6 @@
             background: rgba(255, 255, 255, 0.01);
         }
         .table-wrapper table { min-width: 100%; }
-        .wide-grid {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 16px;
-            padding: 0 24px 24px;
-        }
-        .wide-grid .card { min-height: 100%; }
-        .badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 6px 10px;
-            border-radius: 10px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--border);
-            font-size: 13px;
-            color: var(--muted);
-        }
-        .stat-highlight {
-            font-size: 28px;
-            font-weight: 800;
-        }
         .btn-link {
             background: rgba(167, 139, 250, 0.16);
             color: #c4b5fd;
@@ -215,16 +193,6 @@
             <div class="stat-label">Recent trades</div>
             <div class="stat-value" id="trade-count">—</div>
             <div class="stat-subtle">Latest 25 entries</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Total PnL</div>
-            <div class="stat-highlight" id="total-pnl">—</div>
-            <div class="stat-subtle">Across recent trades</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Win rate</div>
-            <div class="stat-highlight" id="win-rate">—</div>
-            <div class="stat-subtle">Wins / Losses</div>
         </div>
         <div class="stat-card">
             <div class="stat-label">Refresh cadence</div>
@@ -267,16 +235,12 @@
                         <tr>
                             <th>Entry</th>
                             <th>Exit</th>
-                            <th>Duration</th>
                             <th>Symbol</th>
                             <th>Signal</th>
                             <th>Size</th>
                             <th>PnL</th>
                             <th>AI ID</th>
                             <th>Reason</th>
-                            <th>Order</th>
-                            <th>Trades</th>
-                            <th>Raw</th>
                             <th>Screenshot</th>
                             <th>Account</th>
                         </tr>
@@ -288,67 +252,17 @@
         </section>
     </div>
 
-    <div class="wide-grid">
-        <section class="card">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
-                <h2>AI Trade Journal</h2>
-                <span class="badge">Charts, hypotheses, actions, results, and conclusions</span>
-            </div>
-            <div class="table-wrapper" style="max-height:480px;">
-                <table id="journal">
-                    <thead>
-                        <tr>
-                            <th>Time</th>
-                            <th>Symbol</th>
-                            <th>Hypothesis</th>
-                            <th>Action</th>
-                            <th>Result / PnL</th>
-                            <th>Conclusion</th>
-                            <th>Screenshot</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
-            </div>
-            <div class="meta" id="journal-empty">Loading…</div>
-        </section>
-
-        <section class="card">
-            <h2>Desk Signals</h2>
-            <div class="badge" style="margin-bottom:12px;">Practical cheat sheet for intraday calls</div>
-            <div style="display:grid;gap:12px;font-size:14px;color:var(--muted);">
-                <div>
-                    <strong style="color:var(--text);">What day traders see:</strong><br />
-                    Realtime AI feed with chart screenshots, thesis, chosen side (long/short), and outcome recap.
-                </div>
-                <div>
-                    <strong style="color:var(--text);">How to use:</strong><br />
-                    Scan hypotheses → validate with screenshot → act on the AI's long/short call → review PnL and conclusion.
-                </div>
-                <div>
-                    <strong style="color:var(--text);">Risk radar:</strong><br />
-                    Confidence + timeframe provide the context for scalp vs. swing intent. Watch win rate and max gain/loss for edge drift.
-                </div>
-            </div>
-        </section>
-    </div>
-
     <script>
         const sessionsBody = document.querySelector('#sessions tbody');
         const tradesBody = document.querySelector('#trades tbody');
-        const journalBody = document.querySelector('#journal tbody');
         const sessionsEmpty = document.getElementById('sessions-empty');
         const tradesEmpty = document.getElementById('trades-empty');
-        const journalEmpty = document.getElementById('journal-empty');
         const tradeError = document.getElementById('trade-error');
         const reasonError = document.createElement('div');
         reasonError.className = 'error';
         reasonError.style.display = 'none';
         tradeError.insertAdjacentElement('afterend', reasonError);
         const updatedEl = document.getElementById('updated');
-
-        const pnlTotalEl = document.getElementById('total-pnl');
-        const winRateEl = document.getElementById('win-rate');
 
         function pill(label, type) {
             const cls = (type || '').toLowerCase();
@@ -399,43 +313,16 @@
                 row.innerHTML = `
                     <td class="muted">${t.entry_time || ''}</td>
                     <td class="muted">${t.exit_time || ''}</td>
-                    <td class="muted">${t.duration || ''}</td>
                     <td>${t.symbol || ''}</td>
                     <td>${pill(t.signal, t.signal)}</td>
                     <td>${t.size ?? ''}</td>
                     <td>${formatPnL(t.total_pnl)}</td>
                     <td>${t.ai_decision_id ?? ''}</td>
                     <td class="muted reason">${t.reason || ''}</td>
-                    <td>${t.order_id || ''}</td>
-                    <td class="muted">${t.trade_ids || ''}</td>
-                    <td class="muted reason">${t.raw_trades || ''}</td>
                     <td>${t.screenshot_url ? `<a class="btn-link" href="${t.screenshot_url}" target="_blank" rel="noopener">Open</a>` : ''}</td>
                     <td>${t.account || ''}</td>
                 `;
                 tradesBody.appendChild(row);
-            });
-        }
-
-        function renderJournal(entries) {
-            journalBody.innerHTML = '';
-            if (!entries || entries.length === 0) {
-                journalEmpty.textContent = 'No AI trade journal entries available';
-                return;
-            }
-            journalEmpty.textContent = '';
-            entries.forEach((j) => {
-                const row = document.createElement('tr');
-                const actionLabel = j.action || j.reason || '';
-                row.innerHTML = `
-                    <td class="muted">${j.created_at ? new Date(j.created_at).toLocaleString() : ''}</td>
-                    <td>${j.symbol || ''}</td>
-                    <td class="reason">${j.hypothesis || j.reason || ''}</td>
-                    <td>${actionLabel ? pill(actionLabel, actionLabel) : ''}</td>
-                    <td>${j.result || (j.pnl !== undefined && j.pnl !== null ? formatPnL(j.pnl) : '')}</td>
-                    <td class="reason">${j.conclusion || ''}</td>
-                    <td>${j.screenshot_url ? `<a class="btn-link" href="${j.screenshot_url}" target="_blank" rel="noopener">Open</a>` : ''}</td>
-                `;
-                journalBody.appendChild(row);
             });
         }
 
@@ -446,19 +333,8 @@
                 updatedEl.textContent = new Date(data.updated_at).toLocaleString();
                 renderSessions(data.active_sessions || []);
                 renderTrades(data.trade_results || []);
-                renderJournal(data.ai_journal || []);
                 document.getElementById('active-count').textContent = data.active_sessions?.length ?? 0;
                 document.getElementById('trade-count').textContent = data.trade_results?.length ?? 0;
-
-                if (data.trade_summary) {
-                    const { total_pnl, wins, losses, win_rate } = data.trade_summary;
-                    const pnlClass = Number(total_pnl) >= 0 ? 'pnl-positive' : 'pnl-negative';
-                    pnlTotalEl.innerHTML = `<span class="${pnlClass}">${Number(total_pnl).toFixed(2)}</span>`;
-                    winRateEl.textContent = `${Number(win_rate || 0).toFixed(1)}% (${wins}W / ${losses}L)`;
-                } else {
-                    pnlTotalEl.textContent = '—';
-                    winRateEl.textContent = '—';
-                }
 
                 if (data.trade_results_error) {
                     tradeError.style.display = 'block';
