@@ -37,7 +37,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={\n  \"strategy\": \"{{ $('Code').item.json.strategy }}\",\n  \"signal\": \"{{ $('Code').item.json.signal }}\",\n  \"symbol\": \"{{ $('Code').item.json.symbol }}\",\n  \"account\": \"{{ $('Code').item.json.account }}\",\n  \"size\": {{ $('Code').item.json.size }},\n  \"ai_decision_id\": \"{{ $json.ai_decision_id }}\"\n}\n",
+        "responseBody": "={\n  \"strategy\": \"{{ $('Code').item.json.strategy }}\",\n  \"signal\": \"{{ $('Code').item.json.signal }}\",\n  \"symbol\": \"{{ $('Code').item.json.symbol }}\",\n  \"account\": \"{{ $('Code').item.json.account }}\",\n  \"size\": {{ $('Code').item.json.size }},\n  \"reason\": \"{{ $('Supabase').item.json.reason }}\",\n  \"ai_decision_id\": \"{{ $json.ai_decision_id }}\"\n}\n",
         "options": {}
       },
       "type": "n8n-nodes-base.respondToWebhook",
@@ -458,7 +458,7 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "=up or down? \n\n**Respond with valid JSON only** (no extra text):\n{\n  \"strategy\": \"bracket\",\n  \"signal\": \"BUY|SELL|HOLD|FLATTEN\",\n  \"symbol\": \"CON.F.US.MES.H25\",\n  \"account\": \"{{ $('Webhook').item.json.body.account }}\",\n  \"size\": \"3\",\n  \"reason\": \"<reasoning>\",\n  \"urls\": \"{{ $json.url }}\"\n  \n}\n",
+        "text": "=buy, sell, hold, flatten? \n\ncurrent position data: \nhas position={{ $('Webhook').item.json.body.position_context.current_position.has_position }}\ncontracts={{ $('Webhook').item.json.body.position_context.current_position.size }}\nside={{ $('Webhook').item.json.body.position_context.current_position.side }}\npnl=${{ $('Webhook').item.json.body.position_context.current_position.unrealized_pnl }}\nSL=$-30\nTP=$60\nduration_mins={{ $('Webhook').item.json.body.position_context.current_position.duration_minutes }}\n\n**Respond with valid JSON only** (no extra text):\n{\n  \"timestamp\":\"{{ $now }}\"\n  \"strategy\": \"simple\",\n  \"signal\": \"BUY|SELL|HOLD|FLATTEN\",\n  \"symbol\": \"CON.F.US.MES.H26\",\n  \"account\": \"{{ $('Webhook').item.json.body.account }}\",\n  \"size\": \"2\",\n  \"reason\": \"<reasoning>\",\n  \"urls\": \"{{ $json.url }}\"\n  \n}\n",
         "messages": {
           "messageValues": [
             {
@@ -475,7 +475,8 @@
         368
       ],
       "id": "da7c90e7-6b11-4978-92ec-cc9f0e64f840",
-      "name": "Basic LLM Chain"
+      "name": "Basic LLM Chain",
+      "retryOnFail": true
     },
     {
       "parameters": {
@@ -586,13 +587,13 @@
           "headers": {
             "host": "n8n.thetopham.com",
             "user-agent": "python-requests/2.32.5",
-            "content-length": "117",
+            "content-length": "1033",
             "accept": "*/*",
             "accept-encoding": "gzip, br",
             "cdn-loop": "cloudflare; loops=1",
             "cf-connecting-ip": "71.218.241.177",
             "cf-ipcountry": "US",
-            "cf-ray": "9b655a005f337b0c-DEN",
+            "cf-ray": "9b688700dd721f3c-DEN",
             "cf-visitor": "{\"scheme\":\"https\"}",
             "cf-warp-tag-id": "ab76dbd7-011c-42ec-9501-c562736f8c45",
             "connection": "keep-alive",
@@ -608,7 +609,58 @@
             "signal": "",
             "symbol": "CON.F.US.MES.M25",
             "size": 3,
-            "alert": "APScheduler 5m"
+            "alert": "APScheduler 5m",
+            "positions": [
+              {
+                "id": 505193604,
+                "accountId": 11065802,
+                "contractId": "CON.F.US.MES.H26",
+                "creationTimestamp": "2025-12-31T08:35:28.679427+00:00",
+                "type": 2,
+                "size": 2,
+                "averagePrice": 6923.75
+              }
+            ],
+            "position_summary": [
+              {
+                "contract": "CON.F.US.MES.H26",
+                "side": "SHORT",
+                "size": 2,
+                "avg_price": 6923.75,
+                "pnl": -2
+              }
+            ],
+            "position_context": {
+              "current_position": {
+                "has_position": true,
+                "size": 2,
+                "side": "SHORT",
+                "entry_price": 6923.75,
+                "current_price": 6924.75,
+                "current_pnl": -10,
+                "unrealized_pnl": -10,
+                "realized_pnl": 0,
+                "duration_minutes": 14.608193466666668,
+                "stop_count": 1,
+                "target_count": 1
+              },
+              "account_metrics": {
+                "daily_pnl": 26.67,
+                "win_rate": 0.25,
+                "consecutive_losses": 0,
+                "open_positions": 1,
+                "risk_level": "low",
+                "can_trade": true
+              },
+              "risk_limits": {
+                "max_daily_loss": -500,
+                "profit_target": 500,
+                "max_consecutive_losses": 3,
+                "consecutive_loss_guard_enabled": true
+              },
+              "warnings": [],
+              "suggestions": []
+            }
           },
           "webhookUrl": "https://n8n.thetopham.com/webhook/simple",
           "executionMode": "production"
@@ -853,7 +905,7 @@
     "callerPolicy": "workflowsFromSameOwner",
     "executionOrder": "v1"
   },
-  "versionId": "2e3df051-86e7-47bf-8e0a-3b80fa062f3e",
+  "versionId": "13b20a3f-8297-4937-a5de-ce8294db402e",
   "meta": {
     "templateId": "2569",
     "templateCredsSetupCompleted": true,
