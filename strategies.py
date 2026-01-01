@@ -17,6 +17,7 @@ STOP_LOSS_POINTS = config.get('STOP_LOSS_POINTS', 5.75)
 TP_POINTS = config.get('TP_POINTS', [2.5, 5.0])
 TICKS_PER_POINT = config.get('TICKS_PER_POINT', 4)
 CT = config['CT']
+ACCOUNT_NAME_BY_ID = {v: k for k, v in config.get('ACCOUNTS', {}).items()}
 
 
 def points_to_ticks(points: float) -> int:
@@ -37,7 +38,14 @@ def _compute_entry_fill(acct_id: int, oid: int) -> float | None:
 def run_simple(acct_id: int, sym: str, sig: str, size: int, alert: str, ai_decision_id=None):
     """Execute a simple market order; server-side brackets handled by broker."""
     cid = get_contract(sym)
+    sig = (sig or "").upper()
+    if sig not in {"BUY", "SELL"}:
+        logging.error("run_simple: unsupported signal '%s' (expected BUY/SELL)", sig)
+        return
     side = 0 if sig == "BUY" else 1
+
+    account_label = ACCOUNT_NAME_BY_ID.get(acct_id, str(acct_id))
+    log_symbol = cid or sym
 
     positions = [p for p in search_pos(acct_id) if p.get("contractId") == cid]
 
@@ -59,7 +67,7 @@ def run_simple(acct_id: int, sym: str, sig: str, size: int, alert: str, ai_decis
     logging.info(
         "run_simple: %s %s size=%s price=%s alert=%s decision_id=%s",
         sig,
-        sym,
+        log_symbol,
         size,
         fill_price,
         alert,
@@ -76,8 +84,8 @@ def run_simple(acct_id: int, sym: str, sig: str, size: int, alert: str, ai_decis
         size=size,
         order_id=entry.get("orderId"),
         alert=alert,
-        account=acct_id,
-        symbol=sym,
+        account=account_label,
+        symbol=log_symbol,
         sl_id=None,
         tp_ids=None,
         trades=[entry],
