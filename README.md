@@ -71,41 +71,7 @@ Two source tables exist:
 - `ai_trading_log` – AI decisions (account, symbol, signal, size, reason, urls)
 - `trade_results` – realized results on close (entry/exit/pnl, raw_trades, trace/session ids)
 
-### Merged feed view (recommended)
 
-Create a view that joins them by `ai_decision_id`:
-
-```sql
-create or replace view public.ai_trade_feed_v as
-with tr_agg as (
-  select
-    ai_decision_id,
-    min(entry_time) as entry_time,
-    max(exit_time)  as exit_time,
-    sum(total_pnl)  as total_pnl
-  from public.trade_results
-  where ai_decision_id is not null
-  group by ai_decision_id
-)
-select
-  ai.ai_decision_id,
-  ai."timestamp" as decision_time,
-  tr.entry_time,
-  tr.exit_time,
-  ai.account,
-  ai.symbol,
-  ai.signal,
-  ai.size,
-  tr.total_pnl,
-  ai.reason,
-  coalesce(ai.urls->>'5m', ai.urls->>'1m', ai.urls->>'15m', ai.urls->>'30m') as screenshot_url,
-  ai.strategy
-from public.ai_trading_log ai
-left join tr_agg tr
-  on tr.ai_decision_id = ai.ai_decision_id;
-```
-
-The dashboard will try `ai_trade_feed_v` first, and fall back to `ai_trade_feed` if you later materialize it.
 
 ## Notes
 
