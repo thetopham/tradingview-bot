@@ -639,7 +639,12 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
             try:
                 ai_decision_id_out = int(ai_decision_id)
             except (ValueError, TypeError):
+                # Preserve a readable note and try a lenient numeric parse so we do not lose the ID
                 ai_decision_note = f"ai_decision={ai_decision_id}"
+                try:
+                    ai_decision_id_out = int(str(ai_decision_id).strip().split()[0])
+                except Exception:
+                    ai_decision_id_out = None
 
         if ai_decision_id_out is None and entry_time:
             recovered_ai_id = _recover_ai_id_from_entry(entry_time)
@@ -670,7 +675,51 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
             "order_id":      str(meta.get("order_id") or ""),
             "comment":       comment,
             "trade_ids":     trade_ids if trade_ids else [],
+            "trace_id":      trace_id,
         }
+
+        # --- Idempotency guard: update existing row instead of inserting duplicates ---
+        try:
+            supabase = get_supabase_client()
+            entry_iso = payload["entry_time"]
+
+            res = (
+                supabase.table("trade_results")
+                .select("id,ai_decision_id,total_pnl,comment")
+                .eq("symbol", payload["symbol"])
+                .eq("account", payload["account"])
+                .gte("entry_time", entry_iso)
+                .lte("entry_time", entry_iso)
+                .limit(1)
+                .execute()
+            )
+
+            existing = (res.data or [None])[0]
+            if existing:
+                updates = {}
+                if existing.get("ai_decision_id") is None and payload.get("ai_decision_id") is not None:
+                    updates["ai_decision_id"] = payload["ai_decision_id"]
+                if existing.get("total_pnl") in (None, "") and payload.get("total_pnl") is not None:
+                    updates["total_pnl"] = payload["total_pnl"]
+                if trace_id and (not existing.get("comment") or trace_id not in str(existing.get("comment"))):
+                    updates["comment"] = (existing.get("comment") or "").strip()
+                    if updates["comment"]:
+                        updates["comment"] += " | "
+                    updates["comment"] += f"trace_id={trace_id}"
+
+                if updates:
+                    supabase.table("trade_results").update(updates).eq("id", existing["id"]).execute()
+                    logging.info(
+                        "[log_trade_results_to_supabase] Updated existing trade result id=%s with %s",
+                        existing["id"],
+                        sorted(updates.keys()),
+                    )
+                    return
+                else:
+                    logging.info("[log_trade_results_to_supabase] Duplicate trade result detected, skipping insert")
+                    return
+        except Exception as e:
+            logging.warning("[log_trade_results_to_supabase] Idempotency check failed: %s", e)
 
         url = f"{SUPABASE_URL}/rest/v1/trade_results"
         headers = {
