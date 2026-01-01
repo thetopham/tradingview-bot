@@ -505,258 +505,415 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=N
         }
         
 
+
 def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta=None):
+    """Persist closed-trade results to Supabase with best-effort correlation.
+
+    Key behaviors:
+    - Normalizes timestamps (entry/exit) to tz-aware Chicago time for storage.
+    - Queries ProjectX trades in a bounded window around the position lifecycle.
+    - Retries briefly to avoid race conditions where fills/PnL arrive after the position-close event.
+    - Uses trace_id (preferred) or ai_decision_id+entry_time window as an idempotency key to update instead of duplicating rows.
+    """
+
     import json
     import time
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     import logging
 
     meta = meta or {}
 
-    # --- Normalize entry_time to be timezone-aware (Chicago) ---
-    try:
-        if isinstance(entry_time, (float, int)):
-            entry_time = datetime.fromtimestamp(entry_time, CT)
-        elif isinstance(entry_time, str):
-            # Handles ISO8601 strings like '2025-05-23T13:50:50.957529+00:00'
-            entry_time = parser.isoparse(entry_time).astimezone(CT)
-        elif entry_time.tzinfo is None:
-            entry_time = CT.localize(entry_time)
-        else:
-            entry_time = entry_time.astimezone(CT)
-    except Exception as e:
-        logging.error(f"[log_trade_results_to_supabase] entry_time conversion error: {entry_time} ({type(entry_time)}): {e}")
-        entry_time = datetime.now(CT)
+    # ---------------------------------------------------------------------
+    # Helpers
+    # ---------------------------------------------------------------------
+    def _account_slug_from_acct_id() -> str:
+        try:
+            for name, _id in ACCOUNTS.items():
+                if _id == acct_id:
+                    return str(name)
+        except Exception:
+            pass
+        return str(acct_id)
 
-    exit_time = datetime.now(CT)
-    start_time = entry_time - timedelta(minutes=2)
-    try:
-        resp = post("/api/Trade/search", {
-            "accountId": acct_id,
-            "startTimestamp": start_time.isoformat()
-        })
-        trades = resp.get("trades", [])
+    def _normalize_entry_time(value) -> datetime:
+        """Normalize entry_time to a tz-aware Chicago datetime."""
+        try:
+            if isinstance(value, (float, int)):
+                return datetime.fromtimestamp(value, CT)
 
-        order_ids_raw = meta.get("order_id")
-        order_ids = set()
-        if isinstance(order_ids_raw, (list, tuple, set)):
-            for oid in order_ids_raw:
-                if oid is not None:
-                    order_ids.add(str(oid))
-        elif order_ids_raw is not None:
-            order_ids.add(str(order_ids_raw))
+            if isinstance(value, str):
+                return parser.isoparse(value).astimezone(CT)
 
-        if order_ids:
-            relevant_trades = [
-                t
-                for t in trades
-                if not t.get("voided", False)
-                and t.get("size", 0) > 0
-                and str(t.get("orderId")) in order_ids
-            ]
+            if getattr(value, "tzinfo", None) is None:
+                return CT.localize(value)
 
-            if not relevant_trades:
-                logging.warning(
-                    "[log_trade_results_to_supabase] No trades matched order_ids %s; falling back to contractId filter",
-                    sorted(order_ids),
-                )
-        else:
-            relevant_trades = []
+            return value.astimezone(CT)
+        except Exception as exc:
+            logging.error(
+                "[log_trade_results_to_supabase] entry_time conversion error: %r (%s): %s",
+                value,
+                type(value),
+                exc,
+            )
+            return datetime.now(CT)
 
-        if not relevant_trades:
-            relevant_trades = [
-                t for t in trades
-                if t.get("contractId") == cid and not t.get("voided", False) and t.get("size", 0) > 0
-            ]
-
-        if not relevant_trades:
-            logging.warning("[log_trade_results_to_supabase] No relevant trades found, skipping Supabase log.")
-            try:
-                with open("/tmp/trade_results_missing.jsonl", "a") as f:
-                    f.write(json.dumps({
-                        "acct_id": acct_id,
-                        "cid": cid,
-                        "entry_time": entry_time.isoformat(),
-                        "ai_decision_id": ai_decision_id,
-                        "meta": meta,
-                        "all_trades": trades
-                    }) + "\n")
-            except Exception as e2:
-                logging.error(f"[log_trade_results_to_supabase] Failed to write missing-trade log: {e2}")
-            return
-
-        total_pnl = sum(float(t.get("profitAndLoss") or 0.0) for t in relevant_trades)
-        trade_ids = [t.get("id") for t in relevant_trades]
-        duration_sec = int((exit_time - entry_time).total_seconds())
-
-        def _recover_ai_id_from_entry(entry_dt):
-            try:
-                supabase = get_supabase_client()
-            except Exception as e:
-                logging.warning(
-                    "[log_trade_results_to_supabase] Unable to init Supabase client for recovery: %s",
-                    e,
-                )
-                return None
-
-            try:
-                start = (entry_dt - timedelta(minutes=5)).isoformat()
-                end = (entry_dt + timedelta(minutes=5)).isoformat()
-                res = (
-                    supabase.table("trade_results")
-                    .select("ai_decision_id,entry_time")
-                    .gte("entry_time", start)
-                    .lte("entry_time", end)
-                    .order("entry_time")
-                    .limit(1)
-                    .execute()
-                )
-
-                for row in res.data or []:
-                    candidate = row.get("ai_decision_id")
-                    if candidate is None:
-                        continue
-                    try:
-                        recovered = int(candidate)
-                        logging.info(
-                            "[log_trade_results_to_supabase] Recovered ai_decision_id=%s from entry_time window",
-                            recovered,
-                        )
-                        return recovered
-                    except (ValueError, TypeError):
-                        continue
-            except Exception as e:
-                logging.error(
-                    "[log_trade_results_to_supabase] Failed to recover ai_decision_id from entry_time: %s",
-                    e,
-                )
-
+    def _parse_trade_ts(trade: dict) -> datetime | None:
+        raw = (
+            trade.get("creationTimestamp")
+            or trade.get("timestamp")
+            or trade.get("time")
+            or trade.get("ts")
+        )
+        if not raw:
             return None
-
-        ai_decision_id_out = None
-        ai_decision_note = ""
-        if ai_decision_id is not None:
+        if isinstance(raw, (int, float)):
+            return datetime.fromtimestamp(float(raw), timezone.utc)
+        if isinstance(raw, datetime):
+            return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+        if isinstance(raw, str):
             try:
-                ai_decision_id_out = int(ai_decision_id)
-            except (ValueError, TypeError):
-                # Preserve a readable note and try a lenient numeric parse so we do not lose the ID
-                ai_decision_note = f"ai_decision={ai_decision_id}"
-                try:
-                    ai_decision_id_out = int(str(ai_decision_id).strip().split()[0])
-                except Exception:
-                    ai_decision_id_out = None
+                dt = parser.isoparse(raw)
+                return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                return None
+        return None
 
-        if ai_decision_id_out is None and entry_time:
-            recovered_ai_id = _recover_ai_id_from_entry(entry_time)
-            if recovered_ai_id is not None:
-                ai_decision_id_out = recovered_ai_id
+    def _extract_order_ids(value) -> set[str]:
+        ids: set[str] = set()
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                if item is not None:
+                    ids.add(str(item))
+        elif value is not None:
+            ids.add(str(value))
+        return ids
 
-        if ai_decision_id_out is None and ai_decision_note:
-            ai_decision_note = f"{ai_decision_note}|recovery_failed"
+    # ---------------------------------------------------------------------
+    # Normalize context
+    # ---------------------------------------------------------------------
+    entry_dt = _normalize_entry_time(entry_time)
+    exit_guess = datetime.now(CT)
 
-        base_comment = str(meta.get("comment") or "")
-        trace_id = meta.get("trace_id")
-        comment_parts = [part for part in [base_comment, f"trace_id={trace_id}" if trace_id else None, ai_decision_note or None] if part]
-        comment = " | ".join(comment_parts)
+    # Query window (buffered to handle slight clock skew + partial fills)
+    start_dt = entry_dt - timedelta(minutes=5)
+    end_dt = exit_guess + timedelta(minutes=2)
+    start_utc = start_dt.astimezone(timezone.utc)
+    end_utc = end_dt.astimezone(timezone.utc)
 
-        payload = {
-            "strategy":      str(meta.get("strategy") or ""),
-            "signal":        str(meta.get("signal") or ""),
-            "symbol":        str(meta.get("symbol") or ""),
-            "account":       str(meta.get("account") or ""),
-            "size":          int(meta.get("size") or 0),
-            "ai_decision_id": ai_decision_id_out,
-            "entry_time":    entry_time.isoformat() if hasattr(entry_time, "isoformat") else str(entry_time),
-            "exit_time":     exit_time.isoformat() if hasattr(exit_time, "isoformat") else str(exit_time),
-            "duration_sec":  str(duration_sec) if duration_sec is not None else "0",
-            "alert":         str(meta.get("alert") or ""),
-            "total_pnl":     float(total_pnl) if total_pnl is not None else 0.0,
-            "raw_trades":    relevant_trades if relevant_trades else [],
-            "order_id":      str(meta.get("order_id") or ""),
-            "comment":       comment,
-            "trade_ids":     trade_ids if trade_ids else [],
-            "trace_id":      trace_id,
-        }
+    account_slug = str(meta.get("account") or _account_slug_from_acct_id())
+    symbol_value = str(meta.get("symbol") or cid or "")
+    trace_id = meta.get("trace_id")
 
-        # --- Idempotency guard: update existing row instead of inserting duplicates ---
+    order_ids = _extract_order_ids(meta.get("order_id"))
+
+    # ---------------------------------------------------------------------
+    # Trade search with retries to avoid close-event race conditions
+    # ---------------------------------------------------------------------
+    def _fetch_relevant_trades():
+        resp = post(
+            "/api/Trade/search",
+            {
+                "accountId": acct_id,
+                "startTimestamp": start_utc.isoformat(),
+            },
+        )
+        trades = resp.get("trades", []) or []
+
+        relevant = []
+        for t in trades:
+            if not isinstance(t, dict):
+                continue
+            if t.get("voided", False):
+                continue
+            if (t.get("size") or 0) <= 0:
+                continue
+            if t.get("contractId") != cid:
+                continue
+
+            t_ts = _parse_trade_ts(t)
+            if t_ts and t_ts.astimezone(timezone.utc) > end_utc:
+                continue
+
+            relevant.append(t)
+
+        # stable sort by timestamp if available
+        relevant.sort(key=lambda x: (_parse_trade_ts(x) or datetime.min.replace(tzinfo=timezone.utc)))
+        return relevant, trades
+
+    sleeps = [0.5, 1, 2, 3, 5, 8]
+    relevant_trades: list[dict] = []
+    all_trades: list[dict] = []
+
+    for attempt in range(len(sleeps) + 1):
+        try:
+            relevant_trades, all_trades = _fetch_relevant_trades()
+        except Exception as exc:
+            logging.error("[log_trade_results_to_supabase] Trade search failed: %s", exc)
+            relevant_trades, all_trades = [], []
+
+        has_pnl = any(t.get("profitAndLoss") is not None for t in relevant_trades)
+
+        if relevant_trades and has_pnl:
+            break
+
+        if attempt < len(sleeps):
+            if relevant_trades and not has_pnl:
+                logging.info(
+                    "[log_trade_results_to_supabase] Trades found but PnL not ready yet (attempt %s/%s). Retrying...",
+                    attempt + 1,
+                    len(sleeps) + 1,
+                )
+            else:
+                logging.info(
+                    "[log_trade_results_to_supabase] No relevant trades yet (attempt %s/%s). Retrying...",
+                    attempt + 1,
+                    len(sleeps) + 1,
+                )
+            time.sleep(sleeps[attempt])
+
+    if not relevant_trades:
+        logging.warning(
+            "[log_trade_results_to_supabase] No relevant trades found for acct=%s cid=%s (window %s → %s). Skipping Supabase log.",
+            acct_id,
+            cid,
+            start_utc.isoformat(),
+            end_utc.isoformat(),
+        )
+        try:
+            with open("/tmp/trade_results_missing.jsonl", "a") as f:
+                f.write(
+                    json.dumps(
+                        {
+                            "acct_id": acct_id,
+                            "cid": cid,
+                            "entry_time": entry_dt.isoformat(),
+                            "exit_time_guess": exit_guess.isoformat(),
+                            "ai_decision_id": ai_decision_id,
+                            "meta": meta,
+                            "all_trades": all_trades,
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception as e2:
+            logging.error("[log_trade_results_to_supabase] Failed to write missing-trade log: %s", e2)
+        return
+
+    # Choose exit_time as the last observed trade timestamp (fallback to now)
+    trade_times = [ts for ts in (_parse_trade_ts(t) for t in relevant_trades) if ts is not None]
+    exit_dt = max(trade_times).astimezone(CT) if trade_times else exit_guess
+
+    # Compute total PnL (sum only the trade records that actually report PnL)
+    pnl_values = []
+    for t in relevant_trades:
+        pnl = t.get("profitAndLoss")
+        if pnl is None:
+            continue
+        try:
+            pnl_values.append(float(pnl))
+        except Exception:
+            continue
+    total_pnl = float(sum(pnl_values)) if pnl_values else 0.0
+
+    trade_ids = [t.get("id") for t in relevant_trades if t.get("id") is not None]
+    duration_sec = int(max((exit_dt - entry_dt).total_seconds(), 0))
+
+    # Provide a helpful note if the contract/time-window match did not include the entry order id.
+    if order_ids:
+        matched_orders = sum(1 for t in relevant_trades if str(t.get("orderId")) in order_ids)
+        if matched_orders == 0:
+            logging.warning(
+                "[log_trade_results_to_supabase] Trade window matched contract but not entry order_id(s)=%s; continuing anyway.",
+                sorted(order_ids),
+            )
+
+    # ---------------------------------------------------------------------
+    # AI decision id normalization + recovery
+    # ---------------------------------------------------------------------
+    def _recover_ai_id_from_ai_log(entry_dt_ct: datetime) -> int | None:
+        """Attempt to recover ai_decision_id from ai_trading_log near entry_time."""
         try:
             supabase = get_supabase_client()
-            entry_iso = payload["entry_time"]
+        except Exception as e:
+            logging.warning(
+                "[log_trade_results_to_supabase] Unable to init Supabase client for ai_trading_log recovery: %s",
+                e,
+            )
+            return None
 
+        try:
+            start = (entry_dt_ct - timedelta(minutes=10)).astimezone(timezone.utc).isoformat()
+            end = (entry_dt_ct + timedelta(minutes=10)).astimezone(timezone.utc).isoformat()
             res = (
-                supabase.table("trade_results")
-                .select("id,ai_decision_id,total_pnl,comment")
-                .eq("symbol", payload["symbol"])
-                .eq("account", payload["account"])
-                .gte("entry_time", entry_iso)
-                .lte("entry_time", entry_iso)
+                supabase.table("ai_trading_log")
+                .select("ai_decision_id,timestamp")
+                .eq("account", account_slug)
+                .eq("symbol", symbol_value)
+                .gte("timestamp", start)
+                .lte("timestamp", end)
+                .order("timestamp", desc=True)
                 .limit(1)
                 .execute()
             )
-
-            existing = (res.data or [None])[0]
-            if existing:
-                updates = {}
-                if existing.get("ai_decision_id") is None and payload.get("ai_decision_id") is not None:
-                    updates["ai_decision_id"] = payload["ai_decision_id"]
-                if existing.get("total_pnl") in (None, "") and payload.get("total_pnl") is not None:
-                    updates["total_pnl"] = payload["total_pnl"]
-                if trace_id and (not existing.get("comment") or trace_id not in str(existing.get("comment"))):
-                    updates["comment"] = (existing.get("comment") or "").strip()
-                    if updates["comment"]:
-                        updates["comment"] += " | "
-                    updates["comment"] += f"trace_id={trace_id}"
-
-                if updates:
-                    supabase.table("trade_results").update(updates).eq("id", existing["id"]).execute()
-                    logging.info(
-                        "[log_trade_results_to_supabase] Updated existing trade result id=%s with %s",
-                        existing["id"],
-                        sorted(updates.keys()),
-                    )
-                    return
-                else:
-                    logging.info("[log_trade_results_to_supabase] Duplicate trade result detected, skipping insert")
-                    return
+            for row in res.data or []:
+                candidate = row.get("ai_decision_id")
+                if candidate is None:
+                    continue
+                try:
+                    return int(candidate)
+                except Exception:
+                    continue
         except Exception as e:
-            logging.warning("[log_trade_results_to_supabase] Idempotency check failed: %s", e)
+            logging.error("[log_trade_results_to_supabase] Failed ai_trading_log recovery: %s", e)
 
-        url = f"{SUPABASE_URL}/rest/v1/trade_results"
-        headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
-            "Content-Type": "application/json",
-            "Prefer": "return=minimal"
-        }
+        return None
+
+    ai_decision_id_out = None
+    ai_decision_note = ""
+
+    if ai_decision_id is not None:
         try:
-            r = session.post(url, json=payload, headers=headers, timeout=(3.05, 10))
-            if r.status_code == 201:
-                logging.info(
-                    "[log_trade_results_to_supabase] Uploaded trade result for acct=%s, cid=%s, PnL=%s, ai_decision_id=%s, trace_id=%s",
-                    acct_id,
-                    cid,
-                    total_pnl,
-                    ai_decision_id_out,
-                    trace_id,
-                )
-            else:
-                logging.warning(f"[log_trade_results_to_supabase] Supabase returned non-201: status={r.status_code}, text={r.text}")
-            r.raise_for_status()
-        except Exception as e:
-            logging.error(f"[log_trade_results_to_supabase] Supabase upload failed: {e}")
+            ai_decision_id_out = int(ai_decision_id)
+        except (ValueError, TypeError):
+            ai_decision_note = f"ai_decision={ai_decision_id}"
+
+            # Try a lenient parse for strings like "123 something"
             try:
-                with open("/tmp/trade_results_fallback.jsonl", "a") as f:
-                    f.write(json.dumps(payload) + "\n")
-                logging.info("[log_trade_results_to_supabase] Trade result written to local fallback log.")
-            except Exception as e2:
-                logging.error(f"[log_trade_results_to_supabase] Failed to write trade result to local log: {e2}")
+                ai_decision_id_out = int(str(ai_decision_id).strip().split()[0])
+            except Exception:
+                ai_decision_id_out = None
 
+    if ai_decision_id_out is None:
+        recovered = _recover_ai_id_from_ai_log(entry_dt)
+        if recovered is not None:
+            ai_decision_id_out = recovered
+            ai_decision_note = (ai_decision_note + "|recovered_from_ai_log").strip("|")
+
+    # ---------------------------------------------------------------------
+    # Build payload
+    # ---------------------------------------------------------------------
+    base_comment = str(meta.get("comment") or "")
+    comment_parts = [
+        part
+        for part in [
+            base_comment,
+            f"trace_id={trace_id}" if trace_id else None,
+            ai_decision_note or None,
+            "pnl_missing" if not pnl_values else None,
+        ]
+        if part
+    ]
+    comment = " | ".join(comment_parts)
+
+    payload = {
+        "strategy": str(meta.get("strategy") or ""),
+        "signal": str(meta.get("signal") or ""),
+        "symbol": symbol_value,
+        "account": account_slug,
+        "size": int(meta.get("size") or 0),
+        "ai_decision_id": ai_decision_id_out,
+        "entry_time": entry_dt.isoformat(),
+        "exit_time": exit_dt.isoformat(),
+        "duration_sec": duration_sec,
+        "alert": str(meta.get("alert") or ""),
+        "total_pnl": total_pnl,
+        "raw_trades": relevant_trades if relevant_trades else [],
+        "order_id": json.dumps(sorted(order_ids)) if order_ids else str(meta.get("order_id") or ""),
+        "comment": comment,
+        "trade_ids": trade_ids if trade_ids else [],
+        "trace_id": trace_id,
+        "session_id": meta.get("session_id"),
+    }
+
+    # ---------------------------------------------------------------------
+    # Idempotency guard: update existing row instead of inserting duplicates
+    # ---------------------------------------------------------------------
+    try:
+        supabase = get_supabase_client()
+        existing = None
+
+        if trace_id:
+            res = (
+                supabase.table("trade_results")
+                .select("id,ai_decision_id,trace_id,total_pnl,comment")
+                .eq("trace_id", trace_id)
+                .limit(1)
+                .execute()
+            )
+            existing = (res.data or [None])[0]
+
+        if not existing and ai_decision_id_out is not None:
+            start = (entry_dt - timedelta(minutes=10)).isoformat()
+            end = (entry_dt + timedelta(minutes=10)).isoformat()
+            res = (
+                supabase.table("trade_results")
+                .select("id,ai_decision_id,entry_time,total_pnl,comment,trace_id")
+                .eq("ai_decision_id", ai_decision_id_out)
+                .gte("entry_time", start)
+                .lte("entry_time", end)
+                .order("entry_time", desc=True)
+                .limit(1)
+                .execute()
+            )
+            existing = (res.data or [None])[0]
+
+        if existing:
+            updates = {
+                "exit_time": payload["exit_time"],
+                "duration_sec": payload["duration_sec"],
+                "total_pnl": payload["total_pnl"],
+                "raw_trades": payload["raw_trades"],
+                "trade_ids": payload["trade_ids"],
+                "order_id": payload["order_id"],
+                "comment": payload["comment"],
+            }
+            if payload.get("ai_decision_id") is not None and existing.get("ai_decision_id") in (None, ""):
+                updates["ai_decision_id"] = payload["ai_decision_id"]
+            if trace_id and not existing.get("trace_id"):
+                updates["trace_id"] = trace_id
+
+            supabase.table("trade_results").update(updates).eq("id", existing["id"]).execute()
+            logging.info(
+                "[log_trade_results_to_supabase] Updated existing trade result id=%s (trace_id=%s ai_decision_id=%s)",
+                existing["id"],
+                trace_id,
+                ai_decision_id_out,
+            )
+            return
     except Exception as e:
-        logging.error(f"[log_trade_results_to_supabase] Outer error: {e}")
+        logging.warning("[log_trade_results_to_supabase] Idempotency update failed: %s", e)
 
-
-
-
-
-
-
+    # Insert to Supabase
+    url = f"{SUPABASE_URL}/rest/v1/trade_results"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    try:
+        r = session.post(url, json=payload, headers=headers, timeout=(3.05, 10))
+        if r.status_code == 201:
+            logging.info(
+                "[log_trade_results_to_supabase] Uploaded trade result for acct=%s, cid=%s, PnL=%s, ai_decision_id=%s, trace_id=%s",
+                acct_id,
+                cid,
+                total_pnl,
+                ai_decision_id_out,
+                trace_id,
+            )
+        else:
+            logging.warning(
+                "[log_trade_results_to_supabase] Supabase returned non-201: status=%s, text=%s",
+                r.status_code,
+                r.text,
+            )
+        r.raise_for_status()
+    except Exception as e:
+        logging.error("[log_trade_results_to_supabase] Supabase upload failed: %s", e)
+        try:
+            with open("/tmp/trade_results_fallback.jsonl", "a") as f:
+                f.write(json.dumps(payload) + "\n")
+            logging.info("[log_trade_results_to_supabase] Trade result written to local fallback log.")
+        except Exception as e2:
+            logging.error("[log_trade_results_to_supabase] Failed to write trade result to local log: %s", e2)
