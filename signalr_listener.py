@@ -18,23 +18,6 @@ positions_state = {}
 trade_meta = {}
 recent_closures = {}
 
-
-def _build_trace_id(entry_time, ai_decision_id, order_id=None, session_id=None):
-    try:
-        if isinstance(entry_time, (int, float)):
-            ts = int(entry_time)
-        elif isinstance(entry_time, str):
-            ts = int(parser.isoparse(entry_time).timestamp())
-        else:
-            ts = int(getattr(entry_time, "timestamp", lambda: time.time())())
-    except Exception:
-        ts = int(time.time())
-
-    base = ai_decision_id if ai_decision_id is not None else "no_ai_id"
-    suffix = str(order_id or session_id or "unknown")
-    return f"{base}-{suffix}-{ts}"
-
-
 def _build_trace_id(entry_time, ai_decision_id, order_id=None, session_id=None):
     try:
         if isinstance(entry_time, (int, float)):
