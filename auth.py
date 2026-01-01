@@ -5,9 +5,10 @@ import threading
 import logging
 from datetime import datetime
 import pytz
-
-from state import session  # Only if using shared session, otherwise use requests.Session()
+import requests
 from config import load_config
+
+session = requests.Session()
 
 config = load_config()
 PX_BASE = config['PX_BASE']

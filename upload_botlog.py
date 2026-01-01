@@ -17,7 +17,7 @@ log_dir = '/tmp/'
 log_base = 'tradingview_projectx_bot.log'
 log_pattern = os.path.join(log_dir, log_base + '*')  # matches .log, .log.1, .log.2, etc.
 BUCKET = 'botlogs'
-DAYS_TO_KEEP = 7
+DAYS_TO_KEEP = 30
 
 now = time.time()
 utcnow = datetime.datetime.utcnow()
