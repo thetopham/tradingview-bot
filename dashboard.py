@@ -31,7 +31,15 @@ def _format_ts(ts: Optional[object]) -> str:
             return datetime.fromtimestamp(float(ts), DASHBOARD_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
 
         if isinstance(ts, str):
-            return ts
+            try:
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            except ValueError:
+                return ts
+
+            if dt.tzinfo is None:
+                dt = pytz.UTC.localize(dt)
+
+            return dt.astimezone(DASHBOARD_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
 
         if hasattr(ts, "astimezone"):
             return ts.astimezone(DASHBOARD_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
@@ -146,7 +154,6 @@ def _fetch_trade_results(limit: int = 25) -> Tuple[List[Dict[str, object]], Opti
             if entry_utc < cutoff or entry_utc > future_limit:
                 continue
 
-            row["symbol"] = "MES"
             row["entry_time"] = entry_dt.astimezone(DASHBOARD_TZ)
             row["exit_time"] = exit_dt.astimezone(DASHBOARD_TZ) if exit_dt else None
             filtered.append(row)
@@ -239,7 +246,11 @@ def _fetch_ai_reasons(ids: List[object]) -> Tuple[Dict[object, Dict[str, object]
 
 
 def _fetch_merged_feed(limit: int = 50) -> Tuple[List[Dict[str, object]], Optional[str]]:
-    """Retrieve pre-merged AI trade feed if the Supabase table exists."""
+    """Retrieve pre-merged AI trade feed if the Supabase view/table exists.
+
+    Preferred source is the `ai_trade_feed_v` view (joins ai_trading_log + trade_results).
+    Falls back to `ai_trade_feed` table if you materialize the feed later.
+    """
 
     rows: List[Dict[str, object]] = []
     try:
@@ -248,27 +259,32 @@ def _fetch_merged_feed(limit: int = 50) -> Tuple[List[Dict[str, object]], Option
         logging.warning("Dashboard Supabase client unavailable for ai_trade_feed: %s", e)
         return rows, str(e)
 
-    try:
-        res = (
-            supabase.table("ai_trade_feed")
-            .select(
-                "ai_decision_id,decision_time,entry_time,exit_time,account,symbol,signal,size,total_pnl,reason,screenshot_url,strategy"
+    last_error: Optional[Exception] = None
+    for feed_name in ("ai_trade_feed_v", "ai_trade_feed"):
+        try:
+            res = (
+                supabase.table(feed_name)
+                .select(
+                    "ai_decision_id,decision_time,entry_time,exit_time,account,symbol,signal,size,total_pnl,reason,screenshot_url,strategy"
+                )
+                .order("decision_time", desc=True)
+                .limit(limit)
+                .execute()
             )
-            .order("decision_time", desc=True)
-            .limit(limit)
-            .execute()
-        )
 
-        for row in res.data or []:
-            row["entry_time"] = _format_ts(row.get("entry_time"))
-            row["exit_time"] = _format_ts(row.get("exit_time"))
-            row["decision_time"] = _format_ts(row.get("decision_time"))
-            rows.append(row)
-    except Exception as e:
-        logging.error("Failed to fetch ai_trade_feed: %s", e)
-        return rows, str(e)
+            for row in res.data or []:
+                row["entry_time"] = _format_ts(row.get("entry_time"))
+                row["exit_time"] = _format_ts(row.get("exit_time"))
+                row["decision_time"] = _format_ts(row.get("decision_time"))
+                rows.append(row)
 
-    return rows, None
+            return rows, None
+        except Exception as e:
+            last_error = e
+            rows = []
+
+    logging.error("Failed to fetch ai_trade_feed from view/table: %s", last_error)
+    return rows, str(last_error) if last_error else "unknown error"
 
 
 def _merge_trades_and_decisions(

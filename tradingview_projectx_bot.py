@@ -63,7 +63,7 @@ def tv_webhook():
 
 def handle_webhook_logic(data):
     try:
-        strat = data.get("strategy", "bracket").lower()
+        strat = (data.get("strategy") or "simple").lower()
         acct  = (data.get("account") or DEFAULT_ACCOUNT).lower()
         sig   = data.get("signal", "").upper()
         sym   = data.get("symbol", "")
@@ -139,23 +139,21 @@ def handle_webhook_logic(data):
             strat = ai_decision.get("strategy", strat)
             sig = ai_decision.get("signal", sig)
             sym = ai_decision.get("symbol", sym)
-            size = ai_decision.get("size", size)
+            try:
+                size = int(ai_decision.get("size", size))
+            except Exception:
+                logging.warning("AI returned non-integer size=%r; keeping size=%s", ai_decision.get("size"), size)
             alert = ai_decision.get("alert", alert)
             ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
             cid = get_contract(sym)
             
               
         # --- Strategy Dispatch ---
-        if strat == "bracket":
-            run_bracket(acct_id, sym, sig, size, alert, ai_decision_id)
-        elif strat == "brackmod":
-            run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id)
-        elif strat == "pivot":
-            run_pivot(acct_id, sym, sig, size, alert, ai_decision_id)
-        elif strat == "simple":
-            run_simple(acct_id, sym, sig, size, alert, ai_decision_id)
-        else:
-            logging.error(f"Unknown strategy '{strat}'")
+        if strat != "simple":
+            logging.error("Strategy '%s' is not implemented in this build (supported: simple)", strat)
+            return
+
+        run_simple(acct_id, sym, sig, size, alert, ai_decision_id)
     except Exception as e:
         import traceback
         logging.error(f"Exception in handle_webhook_logic: {e}\n{traceback.format_exc()}")
