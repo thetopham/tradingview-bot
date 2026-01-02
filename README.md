@@ -64,6 +64,12 @@ Then open:
 
 - Dashboard: `http://localhost:<TV_PORT>/dashboard`
 
+The dashboard pulls the `ai_trade_feed` view from Supabase and exposes two helper
+endpoints used by the front-end:
+
+- `/api/dashboard/feed` – latest combined AI decisions/trade results (entry, exit, size, PnL, AI id, reason, screenshot, etc.)
+- `/api/dashboard/metrics` – intraday win rate, daily PnL, and open-position PnL snapshot
+
 
 ```bash
 sudo systemctl daemon-reload
