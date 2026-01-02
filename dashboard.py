@@ -400,7 +400,7 @@ dashboard_path = "/dashboard"
 
 @dashboard_bp.route(dashboard_path)
 def dashboard():
-    account = request.args.get("account", DEFAULT_ACCOUNT)
+    account = request.args.get("account", "all")
     if account == "all":
         account = "all"
     account = account if account in ACCOUNTS or account == "all" else DEFAULT_ACCOUNT

@@ -27,7 +27,7 @@
         <div class="col-md-3">
             <label class="form-label">Account</label>
             <select id="accountFilter" class="form-select">
-                <option value="all">All</option>
+                <option value="all" {% if default_account == 'all' %}selected{% endif %}>All</option>
                 {% for acct in accounts %}
                 <option value="{{ acct }}" {% if acct == default_account %}selected{% endif %}>{{ acct }}</option>
                 {% endfor %}
