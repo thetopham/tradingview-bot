@@ -37,8 +37,11 @@ def load_config():
         or [2.5, 5.0]
     )
     config['TICKS_PER_POINT'] = float(os.getenv("TICKS_PER_POINT", 4))
-    config['GET_FLAT_START'] = dtime(15, 7)
+    # Get-flat window is defined in Central Time (one hour ahead of Mountain Time)
+    config['GET_FLAT_START'] = dtime(15, 5)
     config['GET_FLAT_END'] = dtime(17, 0)
+    config['SUNDAY_MARKET_OPEN'] = dtime(17, 0)
     config['CT'] = pytz.timezone("America/Chicago")
+    config['MT'] = pytz.timezone("America/Denver")
     return config
 

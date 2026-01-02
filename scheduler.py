@@ -5,11 +5,41 @@ import pytz
 import logging
 import requests
 from config import load_config
+from api import flatten_contract, search_pos
 
 config = load_config()
 WEBHOOK_SECRET = config['WEBHOOK_SECRET']
 CT = pytz.timezone("America/Chicago")
 TV_PORT = config['TV_PORT']
+ACCOUNTS = config['ACCOUNTS']
+
+
+def _flatten_all_positions():
+    """Flatten all open positions across accounts (used by daily cron)."""
+
+    for acct_name, acct_id in ACCOUNTS.items():
+        try:
+            positions = search_pos(acct_id)
+        except Exception as exc:
+            logging.error("[APScheduler] Unable to fetch positions for %s: %s", acct_name, exc)
+            continue
+
+        if not positions:
+            logging.info("[APScheduler] No open positions for %s", acct_name)
+            continue
+
+        seen_cids = set()
+        for pos in positions:
+            cid = pos.get("contractId") or pos.get("contractSymbol")
+            if not cid or cid in seen_cids:
+                continue
+
+            seen_cids.add(cid)
+            logging.info("[APScheduler] Auto-flattening %s for account %s", cid, acct_name)
+            try:
+                flatten_contract(acct_id, cid, timeout=15)
+            except Exception as exc:
+                logging.error("[APScheduler] Auto-flatten failed for %s (%s): %s", acct_name, cid, exc)
 
 def start_scheduler(app):
     scheduler = BackgroundScheduler()
@@ -34,10 +64,12 @@ def start_scheduler(app):
         id='5m_job',
         replace_existing=True
     )
+    scheduler.add_job(
+        _flatten_all_positions,
+        CronTrigger(hour=15, minute=7, day_of_week='mon-fri', timezone=CT),
+        id='daily_flatten_job',
+        replace_existing=True,
+    )
     scheduler.start()
-    logging.info("[APScheduler] Scheduler started with 5m job.")
+    logging.info("[APScheduler] Scheduler started with 5m job and daily auto-flatten.")
     return scheduler
-
-    return scheduler
-
-
