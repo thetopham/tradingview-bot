@@ -10,7 +10,11 @@ from typing import Dict, List, Optional, Tuple
 from flask import Blueprint, jsonify, render_template
 import pytz
 
-from api import get_supabase_client
+from api import (
+    get_supabase_client,
+    search_pos,
+    _compute_simple_position_context,
+)
 from config import load_config
 from signalr_listener import trade_meta
 
@@ -47,6 +51,58 @@ def _format_ts(ts: Optional[object]) -> str:
         logging.exception("Failed to format timestamp %s", ts)
 
     return str(ts)
+
+
+def _format_side(position_type: Optional[int]) -> str:
+    if position_type == 1:
+        return "LONG"
+    if position_type == 2:
+        return "SHORT"
+    return "UNKNOWN"
+
+
+def _collect_open_positions() -> Tuple[List[Dict[str, object]], Optional[str]]:
+    open_positions: List[Dict[str, object]] = []
+    errors: List[str] = []
+
+    for account_label, account_id in config["ACCOUNTS"].items():
+        try:
+            positions = search_pos(account_id)
+        except Exception as exc:  # pragma: no cover - defensive dashboard fetch
+            logging.warning("Failed to fetch positions for %s: %s", account_label, exc)
+            errors.append(f"{account_label}: {exc}")
+            continue
+
+        for pos in positions:
+            size = pos.get("size", 0)
+            if not size:
+                continue
+
+            position_type = pos.get("type")
+            entry_price = pos.get("averagePrice") or pos.get("avgPrice") or pos.get("entryPrice")
+            symbol = pos.get("contractSymbol") or pos.get("contractId") or pos.get("symbol")
+
+            simple_context = _compute_simple_position_context([pos], symbol or "MES")
+
+            open_positions.append(
+                {
+                    "account": account_label,
+                    "symbol": symbol,
+                    "side": _format_side(position_type),
+                    "size": size,
+                    "entry_price": entry_price,
+                    "current_price": simple_context.get("current_price"),
+                    "unrealized_pnl": simple_context.get("unrealized_pnl"),
+                    "entry_time": _format_ts(pos.get("creationTimestamp")),
+                }
+            )
+
+    def _sort_key(pos: Dict[str, object]):
+        return pos.get("entry_time") or ""
+
+    open_positions.sort(key=_sort_key, reverse=True)
+
+    return open_positions, "; ".join(errors) if errors else None
 
 
 def _collect_active_sessions() -> List[Dict[str, object]]:
@@ -387,10 +443,12 @@ def _merge_trades_and_decisions(
 
 def _dashboard_payload() -> Dict[str, object]:
     merged_feed, merged_error = _fetch_merged_feed()
+    open_positions, open_positions_error = _collect_open_positions()
     active_sessions = _collect_active_sessions()
 
     return {
         "updated_at": datetime.now(CT).isoformat(),
+        "open_positions": open_positions,
         "active_sessions": active_sessions,
         "trade_results": [],
         "ai_decisions": [],
@@ -399,6 +457,7 @@ def _dashboard_payload() -> Dict[str, object]:
         "trade_results_error": None,
         "ai_decision_error": None,
         "ai_reason_error": None,
+        "open_positions_error": open_positions_error,
     }
 
 
@@ -413,3 +472,9 @@ def dashboard_view():
 @dashboard_bp.route("/dashboard/data")
 def dashboard_data():
     return jsonify(_dashboard_payload())
+
+
+@dashboard_bp.route("/dashboard/positions")
+def dashboard_positions():
+    positions, error = _collect_open_positions()
+    return jsonify({"open_positions": positions, "open_positions_error": error})
