@@ -248,8 +248,7 @@ def _fetch_ai_reasons(ids: List[object]) -> Tuple[Dict[object, Dict[str, object]
 def _fetch_merged_feed(limit: int = 50) -> Tuple[List[Dict[str, object]], Optional[str]]:
     """Retrieve pre-merged AI trade feed if the Supabase view/table exists.
 
-    Preferred source is the `ai_trade_feed_v` view (joins ai_trading_log + trade_results).
-    Falls back to `ai_trade_feed` table if you materialize the feed later.
+    Preferred source is the `ai_trade_feed` table 
     """
 
     rows: List[Dict[str, object]] = []
@@ -260,7 +259,7 @@ def _fetch_merged_feed(limit: int = 50) -> Tuple[List[Dict[str, object]], Option
         return rows, str(e)
 
     last_error: Optional[Exception] = None
-    for feed_name in ("ai_trade_feed_v", "ai_trade_feed"):
+    for feed_name in ("ai_trade_feed"):
         try:
             res = (
                 supabase.table(feed_name)
