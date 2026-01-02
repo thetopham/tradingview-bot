@@ -285,11 +285,32 @@ def _fetch_merged_feed(limit: int = 50) -> Tuple[List[Dict[str, object]], Option
                 .execute()
             )
 
+            def _sortable(value: object) -> float:
+                if isinstance(value, datetime):
+                    return value.timestamp()
+                if isinstance(value, (int, float)):
+                    return float(value)
+                if isinstance(value, str):
+                    try:
+                        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+                    except ValueError:
+                        return 0.0
+                return 0.0
+
             for row in res.data or []:
+                sort_key = _sortable(row.get("decision_time"))
+                rows.append({**row, "_sort_key": sort_key})
+
+            rows.sort(
+                key=lambda r: (r.get("_sort_key", 0.0), float(r.get("ai_decision_id") or 0.0)),
+                reverse=True,
+            )
+
+            for row in rows:
                 row["entry_time"] = _format_ts(row.get("entry_time"))
                 row["exit_time"] = _format_ts(row.get("exit_time"))
                 row["decision_time"] = _format_ts(row.get("decision_time"))
-                rows.append(row)
+                row.pop("_sort_key", None)
 
             return rows, None
         except Exception as e:
