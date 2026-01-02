@@ -605,6 +605,91 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
     trace_id = meta.get("trace_id")
 
     order_ids = _extract_order_ids(meta.get("order_id"))
+    
+    def _extract_trade_fees(trade: dict) -> float:
+        """Return total fees/commissions for a trade record (absolute)."""
+        if not isinstance(trade, dict):
+            return 0.0
+
+        def _to_float(value) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return 0.0
+
+        # ProjectX commonly uses `fees`
+        preferred_keys = (
+            "fees",
+            "commission",
+            "commissionAndFees",
+            "totalFees",
+            "feesTotal",
+            "brokerageFeesTotal",
+        )
+        for key in preferred_keys:
+            if key in trade and trade.get(key) is not None:
+                v = _to_float(trade.get(key))
+                if v:
+                    return abs(v)
+
+        fee_sum = 0.0
+        for k, v in trade.items():
+            if isinstance(k, str) and ("fee" in k.lower() or "commission" in k.lower()):
+                fee_sum += abs(_to_float(v))
+        return fee_sum
+
+    def _signed_qty(trade: dict) -> float:
+        """Buy=+size, Sell=-size (ProjectX side: 0=BUY, 1=SELL)."""
+        try:
+            qty = float(trade.get("size") or 0)
+        except Exception:
+            return 0.0
+        if qty <= 0:
+            return 0.0
+        side = trade.get("side")
+        if side == 0:
+            return qty
+        if side == 1:
+            return -qty
+        return 0.0
+
+    def _slice_round_trip(trades: list[dict], entry_order_ids: set[str], entry_dt_ct: datetime) -> list[dict]:
+        """Slice trades to *this* position: start at entry orderId, stop when position returns to flat."""
+        if not trades:
+            return []
+
+        start_idx = 0
+
+        # Prefer anchoring to the entry order_id(s)
+        if entry_order_ids:
+            for i, t in enumerate(trades):
+                if str(t.get("orderId")) in entry_order_ids:
+                    start_idx = i
+                    break
+            else:
+                # Fallback: first trade at/after entry time (30s buffer)
+                entry_utc = entry_dt_ct.astimezone(timezone.utc)
+                for i, t in enumerate(trades):
+                    ts = _parse_trade_ts(t)
+                    if ts and ts >= (entry_utc - timedelta(seconds=30)):
+                        start_idx = i
+                        break
+
+        sliced: list[dict] = []
+        pos = 0.0
+
+        for t in trades[start_idx:]:
+            delta = _signed_qty(t)
+            if delta == 0:
+                continue
+            pos += delta
+            sliced.append(t)
+
+            # stop when flat AND we've seen at least one pnl-bearing trade
+            if abs(pos) < 1e-9 and any(x.get("profitAndLoss") is not None for x in sliced):
+                break
+
+        return sliced or trades
 
     # ---------------------------------------------------------------------
     # Trade search with retries to avoid close-event race conditions
@@ -638,7 +723,11 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
 
         # stable sort by timestamp if available
         relevant.sort(key=lambda x: (_parse_trade_ts(x) or datetime.min.replace(tzinfo=timezone.utc)))
-        return relevant, trades
+
+        # NEW: slice to this specific entry->flat lifecycle (prevents mixing other round-trips)
+        session_trades = _slice_round_trip(relevant, order_ids, entry_dt)
+        return session_trades, trades
+
 
     sleeps = [0.5, 1, 2, 3, 5, 8]
     relevant_trades: list[dict] = []
@@ -703,8 +792,8 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
     trade_times = [ts for ts in (_parse_trade_ts(t) for t in relevant_trades) if ts is not None]
     exit_dt = max(trade_times).astimezone(CT) if trade_times else exit_guess
 
-    # Compute total PnL (sum only the trade records that actually report PnL)
-    pnl_values = []
+    # Compute gross PnL (sum only the trade records that report profitAndLoss)
+    pnl_values: list[float] = []
     for t in relevant_trades:
         pnl = t.get("profitAndLoss")
         if pnl is None:
@@ -713,7 +802,15 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
             pnl_values.append(float(pnl))
         except Exception:
             continue
-    total_pnl = float(sum(pnl_values)) if pnl_values else 0.0
+
+    gross_pnl = float(sum(pnl_values)) if pnl_values else 0.0
+
+    # Fees/commissions: include entry + exit fills
+    fees_total = float(sum(_extract_trade_fees(t) for t in relevant_trades)) if relevant_trades else 0.0
+
+    # Net = gross - fees
+    net_pnl = gross_pnl - fees_total
+
 
     trade_ids = [t.get("id") for t in relevant_trades if t.get("id") is not None]
     duration_sec = int(max((exit_dt - entry_dt).total_seconds(), 0))
@@ -816,7 +913,9 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         "exit_time": exit_dt.isoformat(),
         "duration_sec": duration_sec,
         "alert": str(meta.get("alert") or ""),
-        "total_pnl": total_pnl,
+        "total_pnl": gross_pnl,
+        "fees_total": fees_total,
+        "net_pnl": net_pnl,
         "raw_trades": relevant_trades if relevant_trades else [],
         "order_id": json.dumps(sorted(order_ids)) if order_ids else str(meta.get("order_id") or ""),
         "comment": comment,
@@ -862,6 +961,8 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
                 "exit_time": payload["exit_time"],
                 "duration_sec": payload["duration_sec"],
                 "total_pnl": payload["total_pnl"],
+                "fees_total": payload.get("fees_total"),
+                "net_pnl": payload.get("net_pnl"),
                 "raw_trades": payload["raw_trades"],
                 "trade_ids": payload["trade_ids"],
                 "order_id": payload["order_id"],
