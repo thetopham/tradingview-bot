@@ -281,28 +281,6 @@
     </section>
 
     <div class="grid">
-        <section class="card">
-            <h2>Open Positions</h2>
-            <div id="position-error" class="error" style="display:none"></div>
-            <div class="table-wrapper">
-                <table id="open-positions">
-                    <thead>
-                        <tr>
-                            <th>Account</th>
-                            <th>Symbol</th>
-                            <th>Side</th>
-                            <th>Size</th>
-                            <th>Entry</th>
-                            <th>Entry Price</th>
-                            <th>Current Price</th>
-                            <th>Unrealized PnL</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
-            </div>
-            <div class="meta" id="positions-empty">Loading…</div>
-        </section>
         <section class="card" style="grid-column: 1 / -1;">
             <h2>AI Trades (Merged)</h2>
             <div id="trade-error" class="error" style="display:none"></div>
@@ -350,9 +328,6 @@
         const winRateMetaEl = document.getElementById('win-rate-meta');
         const bestTradeEl = document.getElementById('best-trade');
         const bestTradeMetaEl = document.getElementById('best-trade-meta');
-        const positionsBody = document.querySelector('#open-positions tbody');
-        const positionsEmpty = document.getElementById('positions-empty');
-        const positionError = document.getElementById('position-error');
         const REFRESH_MS = 15000;
         let lastRefresh = Date.now();
 
@@ -443,36 +418,6 @@
             return returnRawHtml ? formatted : formatted;
         }
 
-        function formatPrice(value) {
-            const num = Number(value);
-            if (Number.isNaN(num)) return value ?? '';
-            return num.toFixed(2);
-        }
-
-        function renderOpenPositions(positions = []) {
-            positionsBody.innerHTML = '';
-            if (!positions.length) {
-                positionsEmpty.textContent = 'No open positions';
-                return;
-            }
-            positionsEmpty.textContent = '';
-
-            positions.forEach((pos) => {
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>${pos.account || ''}</td>
-                    <td>${pos.symbol || ''}</td>
-                    <td>${pill(pos.side, pos.side)}</td>
-                    <td>${pos.size ?? ''}</td>
-                    <td class="muted">${pos.entry_time || ''}</td>
-                    <td>${formatPrice(pos.entry_price)}</td>
-                    <td>${formatPrice(pos.current_price)}</td>
-                    <td>${formatPnL(pos.unrealized_pnl)}</td>
-                `;
-                positionsBody.appendChild(row);
-            });
-        }
-
         function renderMerged(trades) {
             mergedBody.innerHTML = '';
             if (!trades || trades.length === 0) {
@@ -507,7 +452,6 @@
                 updatedEl.textContent = new Date(data.updated_at).toLocaleString();
                 renderMerged(data.merged_trades || []);
                 renderSummary(data.merged_trades || [], data.active_sessions || []);
-                renderOpenPositions(data.open_positions || []);
                 lastRefresh = Date.now();
                 updateRefreshTimer();
 
@@ -533,13 +477,6 @@
                     reasonError.textContent = `AI reason lookup error: ${data.ai_reason_error}`;
                 } else {
                     reasonError.style.display = 'none';
-                }
-
-                if (data.position_error) {
-                    positionError.style.display = 'block';
-                    positionError.textContent = `Position lookup error: ${data.position_error}`;
-                } else {
-                    positionError.style.display = 'none';
                 }
             } catch (err) {
                 tradeError.style.display = 'block';
