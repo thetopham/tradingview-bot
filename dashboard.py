@@ -11,7 +11,7 @@ from dateutil import parser as date_parser
 from flask import Blueprint, jsonify, render_template
 import pytz
 
-from api import get_supabase_client
+from api import get_current_market_price, get_supabase_client, search_pos
 from config import load_config
 from signalr_listener import trade_meta
 
@@ -106,6 +106,68 @@ def _collect_active_sessions() -> List[Dict[str, object]]:
         return raw if isinstance(raw, str) else str(raw)
 
     return sorted(sessions, key=_sort_key, reverse=True)
+
+
+def _collect_open_positions() -> Tuple[List[Dict[str, object]], Optional[str]]:
+    """Gather current open positions with entry price and live PnL."""
+
+    positions: List[Dict[str, object]] = []
+    last_error: Optional[str] = None
+    price_cache: Dict[str, Tuple[Optional[float], Optional[str]]] = {}
+
+    for account_name, acct_id in config["ACCOUNTS"].items():
+        try:
+            acct_positions = search_pos(acct_id)
+        except Exception as exc:
+            logging.error("Failed to fetch positions for %s: %s", account_name, exc)
+            last_error = str(exc)
+            continue
+
+        for pos in acct_positions:
+            size = pos.get("size") or 0
+            if size == 0:
+                continue
+
+            symbol = pos.get("contractId") or pos.get("contractSymbol") or pos.get("symbol")
+            side_code = pos.get("type")
+            side = "LONG" if side_code == 1 else "SHORT" if side_code == 2 else ""
+            entry_price = pos.get("avgPrice") or pos.get("averagePrice") or pos.get("entryPrice")
+            entry_time = pos.get("creationTimestamp")
+
+            if symbol and symbol not in price_cache:
+                try:
+                    price_cache[symbol] = get_current_market_price(symbol=symbol, max_age_seconds=600)
+                except Exception as exc:
+                    logging.error("Failed to fetch price for %s: %s", symbol, exc)
+                    price_cache[symbol] = (None, str(exc))
+
+            current_price, price_source = price_cache.get(symbol, (None, None))
+
+            if entry_price is None or current_price is None:
+                pnl: Optional[float] = None
+            elif side == "LONG":
+                pnl = (current_price - entry_price) * size
+            elif side == "SHORT":
+                pnl = (entry_price - current_price) * size
+            else:
+                pnl = None
+
+            positions.append(
+                {
+                    "account": account_name,
+                    "symbol": symbol,
+                    "side": side,
+                    "size": size,
+                    "entry_price": entry_price,
+                    "current_price": current_price,
+                    "price_source": price_source,
+                    "pnl": pnl,
+                    "entry_time": _format_ts(entry_time),
+                }
+            )
+
+    positions.sort(key=lambda p: p.get("entry_time") or "", reverse=True)
+    return positions, last_error
 
 
 def _extract_first_url(value: object) -> str:
@@ -414,10 +476,12 @@ def _merge_trades_and_decisions(
 def _dashboard_payload() -> Dict[str, object]:
     merged_feed, merged_error = _fetch_merged_feed()
     active_sessions = _collect_active_sessions()
+    open_positions, open_positions_error = _collect_open_positions()
 
     return {
         "updated_at": datetime.now(CT).isoformat(),
         "active_sessions": active_sessions,
+        "open_positions": open_positions,
         "trade_results": [],
         "ai_decisions": [],
         "merged_trades": merged_feed,
@@ -425,6 +489,7 @@ def _dashboard_payload() -> Dict[str, object]:
         "trade_results_error": None,
         "ai_decision_error": None,
         "ai_reason_error": None,
+        "open_positions_error": open_positions_error,
     }
 
 
