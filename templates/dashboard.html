@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Trade Feed Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <style>
+        body { background-color: #0b1725; color: #dbe4f3; }
+        .card { background-color: #12263a; border: 1px solid #1c3550; }
+        .table { color: #dbe4f3; }
+        .table thead th { border-bottom: 2px solid #1c3550; }
+        .table-striped>tbody>tr:nth-of-type(odd) { background-color: rgba(255, 255, 255, 0.02); }
+        .badge { font-size: 0.9rem; }
+        .muted { color: #8ba0bf; }
+        .filter-row { gap: 1rem; }
+        .metric-value { font-size: 1.4rem; font-weight: 700; }
+        .metric-label { font-size: 0.9rem; color: #8ba0bf; }
+        .pnl-positive { color: #5bd46d; }
+        .pnl-negative { color: #ff6b6b; }
+        .table td, .table th { vertical-align: middle; }
+        .refresh-indicator { font-size: 0.85rem; color: #8ba0bf; }
+    </style>
+</head>
+<body>
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h2 class="mb-0">AI Trade Feed</h2>
+            <div class="refresh-indicator">Updated: <span id="updated-at">-</span> &middot; Refreshing in <span id="refresh-timer">15</span>s</div>
+        </div>
+        <div class="d-flex filter-row flex-wrap">
+            <div>
+                <label class="form-label mb-1" for="account-filter">Account</label>
+                <select class="form-select form-select-sm" id="account-filter">
+                    <option value="all">All</option>
+                    {% for acct in accounts %}
+                        <option value="{{ acct }}" {% if acct == default_account %}selected{% endif %}>{{ acct }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="form-label mb-1" for="range-filter">Range</label>
+                <select class="form-select form-select-sm" id="range-filter">
+                    <option value="today" {% if default_range == 'today' %}selected{% endif %}>Today</option>
+                    <option value="7d" {% if default_range == '7d' %}selected{% endif %}>7D</option>
+                    <option value="30d" {% if default_range == '30d' %}selected{% endif %}>30D</option>
+                </select>
+            </div>
+            <div class="form-check align-self-end mb-1">
+                <input class="form-check-input" type="checkbox" id="include-open" {% if default_include_open %}checked{% endif %}>
+                <label class="form-check-label" for="include-open">Include open</label>
+            </div>
+            <button class="btn btn-primary btn-sm align-self-end" id="manual-refresh">Refresh</button>
+        </div>
+    </div>
+
+    <div class="row g-3" id="metrics-row">
+        <div class="col-md-3">
+            <div class="card p-3 h-100">
+                <div class="metric-label">Current Open Position PnL</div>
+                <div class="metric-value" id="metric-open-pnl">-</div>
+                <div class="small muted" id="metric-open-detail"></div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card p-3 h-100">
+                <div class="metric-label">Today Realized (Net / Gross)</div>
+                <div class="metric-value"><span id="metric-today-net">-</span> / <span id="metric-today-gross">-</span></div>
+                <div class="small muted">Fees: <span id="metric-today-fees">-</span></div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card p-3 h-100">
+                <div class="metric-label">Today Trades / Win% / Avg / PF</div>
+                <div class="metric-value" id="metric-today-stats">-</div>
+                <div class="small muted">Streak: <span id="metric-streak">-</span></div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card p-3 h-100">
+                <div class="metric-label">7D Net / Win%</div>
+                <div class="metric-value" id="metric-7d">-</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mt-4">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-striped mb-0" id="feed-table">
+                    <thead>
+                        <tr>
+                            <th>Decision Time</th>
+                            <th>Entry</th>
+                            <th>Exit</th>
+                            <th>Account</th>
+                            <th>Symbol</th>
+                            <th>Signal</th>
+                            <th>Size</th>
+                            <th>PnL</th>
+                            <th>Decision ID</th>
+                            <th>Reason</th>
+                            <th>Screenshot</th>
+                            <th>Strategy</th>
+                        </tr>
+                    </thead>
+                    <tbody id="feed-body">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const payload = {{ payload | tojson }};
+    const refreshSeconds = 15;
+    let refreshCountdown = refreshSeconds;
+    let countdownInterval = null;
+
+    const accountFilter = document.getElementById('account-filter');
+    const rangeFilter = document.getElementById('range-filter');
+    const includeOpenToggle = document.getElementById('include-open');
+    const refreshTimer = document.getElementById('refresh-timer');
+    const updatedAt = document.getElementById('updated-at');
+
+    function formatPnl(value) {
+        if (value === null || value === undefined || value === '') return '';
+        const num = Number(value);
+        const cls = num > 0 ? 'pnl-positive' : (num < 0 ? 'pnl-negative' : '');
+        return `<span class="${cls}">${num.toFixed(2)}</span>`;
+    }
+
+    function renderMetrics(metrics, openTotals, openPositions) {
+        const openPnlElem = document.getElementById('metric-open-pnl');
+        const openDetailElem = document.getElementById('metric-open-detail');
+        const todayNetElem = document.getElementById('metric-today-net');
+        const todayGrossElem = document.getElementById('metric-today-gross');
+        const todayFeesElem = document.getElementById('metric-today-fees');
+        const todayStatsElem = document.getElementById('metric-today-stats');
+        const streakElem = document.getElementById('metric-streak');
+        const sevenDayElem = document.getElementById('metric-7d');
+
+        const openPnl = openTotals?.unrealized_pnl ?? null;
+        openPnlElem.innerHTML = formatPnl(openPnl) || '-';
+        const activePositions = (openPositions || []).filter(p => p.has_position);
+        if (activePositions.length) {
+            const desc = activePositions.map(p => `${p.account}: ${p.side || ''} ${p.size || ''} (${(p.duration_minutes || 0).toFixed(1)}m)`).join(' | ');
+            openDetailElem.textContent = desc;
+        } else {
+            openDetailElem.textContent = 'No open positions';
+        }
+
+        todayNetElem.innerHTML = formatPnl(metrics.today_net);
+        todayGrossElem.innerHTML = formatPnl(metrics.today_gross);
+        todayFeesElem.textContent = metrics.today_fees !== undefined && metrics.today_fees !== null ? Number(metrics.today_fees).toFixed(2) : '-';
+
+        const winPct = metrics.today_win_pct ? metrics.today_win_pct.toFixed(1) + '%' : '0%';
+        const avg = metrics.today_avg !== null && metrics.today_avg !== undefined ? Number(metrics.today_avg).toFixed(2) : '0.00';
+        const pf = metrics.profit_factor ? metrics.profit_factor.toFixed(2) : '-';
+        todayStatsElem.innerHTML = `${metrics.today_trade_count || 0} / ${winPct} / ${avg} / ${pf}`;
+
+        if (metrics.streak && metrics.streak.count) {
+            streakElem.textContent = `${metrics.streak.direction} x${metrics.streak.count}`;
+        } else {
+            streakElem.textContent = '-';
+        }
+
+        const sevenWinPct = metrics.seven_day_win_pct ? metrics.seven_day_win_pct.toFixed(1) + '%' : '0%';
+        sevenDayElem.innerHTML = `${formatPnl(metrics.seven_day_net)} / ${sevenWinPct}`;
+    }
+
+    function renderRows(rows) {
+        const tbody = document.getElementById('feed-body');
+        tbody.innerHTML = '';
+        rows.forEach(row => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${row.decision_time_display || ''}</td>
+                <td>${row.entry_time_display || ''}</td>
+                <td>${row.exit_time_display || ''}</td>
+                <td>${row.account || ''}</td>
+                <td>${row.symbol || ''}</td>
+                <td>${row.signal || ''}</td>
+                <td>${row.size ?? ''}</td>
+                <td>${formatPnl(row.pnl)}</td>
+                <td>${row.ai_decision_id ?? ''}</td>
+                <td>${row.reason || ''}</td>
+                <td>${row.screenshot ? `<a href="${row.screenshot}" class="btn btn-outline-info btn-sm" target="_blank">Open</a>` : ''}</td>
+                <td>${row.strategy || ''}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function applyPayload(data) {
+        if (!data) return;
+        updatedAt.textContent = new Date(data.updated_at || Date.now()).toLocaleString();
+        renderMetrics(data.metrics || {}, data.open_totals || {}, data.open_positions || []);
+        renderRows(data.rows || []);
+    }
+
+    function buildQuery() {
+        const params = new URLSearchParams();
+        params.set('account', accountFilter.value || 'all');
+        params.set('range', rangeFilter.value || '7d');
+        params.set('include_open', includeOpenToggle.checked ? 'true' : 'false');
+        return params.toString();
+    }
+
+    async function refreshData() {
+        const url = `/dashboard/data?${buildQuery()}`;
+        try {
+            const resp = await fetch(url);
+            const data = await resp.json();
+            applyPayload(data);
+            resetTimer();
+        } catch (err) {
+            console.error('Refresh failed', err);
+        }
+    }
+
+    function resetTimer() {
+        refreshCountdown = refreshSeconds;
+        refreshTimer.textContent = refreshCountdown;
+    }
+
+    function startCountdown() {
+        if (countdownInterval) clearInterval(countdownInterval);
+        countdownInterval = setInterval(() => {
+            refreshCountdown -= 1;
+            if (refreshCountdown <= 0) {
+                refreshData();
+            }
+            refreshTimer.textContent = refreshCountdown;
+        }, 1000);
+    }
+
+    document.getElementById('manual-refresh').addEventListener('click', () => {
+        refreshData();
+    });
+
+    accountFilter.addEventListener('change', refreshData);
+    rangeFilter.addEventListener('change', refreshData);
+    includeOpenToggle.addEventListener('change', refreshData);
+
+    applyPayload(payload);
+    resetTimer();
+    startCountdown();
+</script>
+</body>
+</html>
