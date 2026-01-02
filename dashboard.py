@@ -10,14 +10,16 @@ from typing import Dict, List, Optional, Tuple
 from flask import Blueprint, jsonify, render_template
 import pytz
 
-from api import get_supabase_client
+from api import get_supabase_client, search_pos
 from config import load_config
+from position_manager import PositionManager
 from signalr_listener import trade_meta
 
 config = load_config()
 CT = config["CT"]
 ACCOUNT_NAME_BY_ID = {v: k for k, v in config["ACCOUNTS"].items()}
 DASHBOARD_TZ = pytz.timezone("America/Denver")
+POSITION_MANAGER = PositionManager(config["ACCOUNTS"])
 
 
 def _format_ts(ts: Optional[object]) -> str:
@@ -77,6 +79,55 @@ def _collect_active_sessions() -> List[Dict[str, object]]:
         return raw if isinstance(raw, str) else str(raw)
 
     return sorted(sessions, key=_sort_key, reverse=True)
+
+
+def _collect_open_positions() -> Tuple[List[Dict[str, object]], Optional[str]]:
+    rows: List[Dict[str, object]] = []
+    errors: List[str] = []
+
+    for account_label, acct_id in config["ACCOUNTS"].items():
+        try:
+            positions = search_pos(acct_id)
+        except Exception as exc:
+            logging.warning("Failed to fetch positions for %s: %s", account_label, exc)
+            errors.append(f"{account_label}: {exc}")
+            continue
+
+        by_contract: Dict[object, Dict[str, object]] = {}
+        for pos in positions:
+            cid = pos.get("contractId") or pos.get("contractSymbol")
+            if not cid:
+                continue
+            by_contract.setdefault(cid, pos)
+
+        for cid, pos in by_contract.items():
+            snapshot = POSITION_MANAGER.get_position_state_light(acct_id, cid)
+            if not snapshot.get("has_position"):
+                continue
+
+            rows.append(
+                {
+                    "account": account_label,
+                    "contract_id": cid,
+                    "symbol": pos.get("contractSymbol") or pos.get("symbol") or cid,
+                    "side": snapshot.get("side"),
+                    "size": snapshot.get("size"),
+                    "entry_price": snapshot.get("entry_price"),
+                    "current_price": snapshot.get("current_price"),
+                    "unrealized_pnl": snapshot.get("unrealized_pnl"),
+                    "entry_time": _format_ts(snapshot.get("creationTimestamp")),
+                }
+            )
+
+    def _sort_key(position: Dict[str, object]):
+        entry = position.get("entry_time")
+        if isinstance(entry, str):
+            return entry
+        return str(entry or "")
+
+    rows.sort(key=_sort_key, reverse=True)
+
+    return rows, "; ".join(errors) if errors else None
 
 
 def _extract_first_url(value: object) -> str:
@@ -388,6 +439,7 @@ def _merge_trades_and_decisions(
 def _dashboard_payload() -> Dict[str, object]:
     merged_feed, merged_error = _fetch_merged_feed()
     active_sessions = _collect_active_sessions()
+    open_positions, position_error = _collect_open_positions()
 
     return {
         "updated_at": datetime.now(CT).isoformat(),
@@ -396,6 +448,8 @@ def _dashboard_payload() -> Dict[str, object]:
         "ai_decisions": [],
         "merged_trades": merged_feed,
         "merged_error": merged_error,
+        "open_positions": open_positions,
+        "position_error": position_error,
         "trade_results_error": None,
         "ai_decision_error": None,
         "ai_reason_error": None,
@@ -413,3 +467,12 @@ def dashboard_view():
 @dashboard_bp.route("/dashboard/data")
 def dashboard_data():
     return jsonify(_dashboard_payload())
+
+
+@dashboard_bp.route("/dashboard/positions")
+def dashboard_positions():
+    open_positions, position_error = _collect_open_positions()
+    return jsonify({
+        "open_positions": open_positions,
+        "position_error": position_error,
+    })
