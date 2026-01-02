@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Trade Feed Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+    <style>
+        body { padding: 20px; }
+        .table-responsive { max-height: 600px; }
+        .metric-value { font-size: 1.3rem; font-weight: 600; }
+        .small-label { font-size: 0.85rem; color: #666; }
+        .refresh-indicator { font-size: 0.9rem; color: #6c757d; }
+    </style>
+</head>
+<body>
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h2 class="mb-0">AI Trade Feed</h2>
+            <div class="refresh-indicator">Last updated: <span id="updated-at">--</span> | Refreshing in <span id="refresh-timer">15</span>s</div>
+        </div>
+        <div class="d-flex gap-2 align-items-end">
+            <div>
+                <label class="form-label small-label">Account</label>
+                <select id="account-filter" class="form-select form-select-sm">
+                    <option value="all">All</option>
+                    {% for acct in accounts %}
+                        <option value="{{ acct }}">{{ acct }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="form-label small-label">Range</label>
+                <select id="range-filter" class="form-select form-select-sm">
+                    <option value="today">Today</option>
+                    <option value="7d" selected>Last 7D</option>
+                    <option value="30d">Last 30D</option>
+                </select>
+            </div>
+            <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" value="1" id="include-open" checked>
+                <label class="form-check-label small-label" for="include-open">
+                    Include open positions
+                </label>
+            </div>
+            <button id="refresh-btn" class="btn btn-primary btn-sm">Refresh</button>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-3" id="metrics-row">
+        <div class="col-md-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small-label">Current Open PnL</div>
+                    <div class="metric-value" id="metric-open-pnl">--</div>
+                    <div class="small-label" id="metric-open-detail"></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small-label">Today Net / Gross</div>
+                    <div class="metric-value" id="metric-today-net">--</div>
+                    <div class="small-label" id="metric-today-gross">--</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small-label">Today Fees</div>
+                    <div class="metric-value" id="metric-today-fees">--</div>
+                    <div class="small-label" id="metric-today-profit-factor">PF: -- | Win%: --</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="small-label">7D Net / Win%</div>
+                    <div class="metric-value" id="metric-7d-net">--</div>
+                    <div class="small-label" id="metric-7d-win">--</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle" id="feed-table">
+            <thead class="table-light">
+                <tr>
+                    <th>Decision Time</th>
+                    <th>Entry Time</th>
+                    <th>Exit Time</th>
+                    <th>Account</th>
+                    <th>Symbol</th>
+                    <th>Signal</th>
+                    <th>Size</th>
+                    <th>PnL</th>
+                    <th>AI Decision ID</th>
+                    <th>Reason</th>
+                    <th>Screenshot</th>
+                    <th>Strategy</th>
+                </tr>
+            </thead>
+            <tbody id="feed-body"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    const initialPayload = {{ payload | tojson }};
+    const accountSelect = document.getElementById('account-filter');
+    const rangeSelect = document.getElementById('range-filter');
+    const includeOpenToggle = document.getElementById('include-open');
+    const refreshBtn = document.getElementById('refresh-btn');
+    let refreshTimer = 15;
+    let timerInterval = null;
+
+    function formatNumber(val, digits = 2) {
+        if (val === null || val === undefined) return '--';
+        const num = Number(val);
+        if (Number.isNaN(num)) return '--';
+        return num.toFixed(digits);
+    }
+
+    function formatPercent(val) {
+        if (val === null || val === undefined) return '--';
+        return `${val.toFixed(1)}%`;
+    }
+
+    function setFiltersFromPayload() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const account = urlParams.get('account') || 'all';
+        const range = urlParams.get('range') || '7d';
+        const includeOpen = urlParams.get('include_open');
+        accountSelect.value = account;
+        rangeSelect.value = range;
+        includeOpenToggle.checked = includeOpen === null ? true : includeOpen !== 'false';
+    }
+
+    function renderTable(rows) {
+        const body = document.getElementById('feed-body');
+        body.innerHTML = '';
+        rows.forEach(row => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${row.decision_time || ''}</td>
+                <td>${row.entry_time || ''}</td>
+                <td>${row.exit_time || ''}</td>
+                <td>${row.account || ''}</td>
+                <td>${row.symbol || ''}</td>
+                <td>${row.signal || ''}</td>
+                <td>${row.size ?? ''}</td>
+                <td>${row.pnl !== null && row.pnl !== undefined ? formatNumber(row.pnl) : ''}</td>
+                <td>${row.ai_decision_id ?? ''}</td>
+                <td>${row.reason ? row.reason : ''}</td>
+                <td>${row.screenshot_url ? `<a href="${row.screenshot_url}" target="_blank" class="btn btn-sm btn-outline-primary">Open</a>` : ''}</td>
+                <td>${row.strategy || ''}</td>
+            `;
+            body.appendChild(tr);
+        });
+    }
+
+    function renderMetrics(payload) {
+        const metrics = payload.metrics || {};
+        const today = metrics.today || {};
+        const week = metrics.seven_day || {};
+        const openTotals = payload.open_totals || {};
+        const openPositions = payload.open_positions || [];
+
+        document.getElementById('metric-open-pnl').innerText = formatNumber(openTotals.unrealized);
+        const activePositions = openPositions.filter(p => p.has_position);
+        if (activePositions.length) {
+            const summary = activePositions.map(p => `${p.account}: ${p.side || '--'} ${p.size || 0} (${formatNumber(p.unrealized_pnl)})`).join(' | ');
+            document.getElementById('metric-open-detail').innerText = summary;
+        } else {
+            document.getElementById('metric-open-detail').innerText = 'No open positions';
+        }
+
+        document.getElementById('metric-today-net').innerText = formatNumber(today.net_pnl);
+        document.getElementById('metric-today-gross').innerText = `Gross: ${formatNumber(today.gross_pnl)} | Trades: ${today.trade_count || 0}`;
+        document.getElementById('metric-today-fees').innerText = formatNumber(today.fees);
+        const profitFactor = today.profit_factor !== null && today.profit_factor !== undefined ? today.profit_factor.toFixed(2) : '--';
+        const winRate = today.win_rate !== null && today.win_rate !== undefined ? today.win_rate.toFixed(1) + '%' : '--';
+        document.getElementById('metric-today-profit-factor').innerText = `PF: ${profitFactor} | Win%: ${winRate}`;
+
+        document.getElementById('metric-7d-net').innerText = formatNumber(week.net_pnl);
+        document.getElementById('metric-7d-win').innerText = `Win%: ${week.win_rate !== null && week.win_rate !== undefined ? week.win_rate.toFixed(1) + '%' : '--'}`;
+    }
+
+    function renderUpdatedAt(isoString) {
+        if (!isoString) return;
+        const date = new Date(isoString);
+        document.getElementById('updated-at').innerText = date.toLocaleString('en-US', { timeZone: 'America/Denver' });
+    }
+
+    async function fetchData() {
+        const params = new URLSearchParams();
+        params.set('account', accountSelect.value);
+        params.set('range', rangeSelect.value);
+        params.set('include_open', includeOpenToggle.checked);
+        const res = await fetch(`/dashboard/data?${params.toString()}`);
+        const payload = await res.json();
+        renderTable(payload.rows || []);
+        renderMetrics(payload);
+        renderUpdatedAt(payload.updated_at);
+    }
+
+    function resetTimer() {
+        refreshTimer = 15;
+        document.getElementById('refresh-timer').innerText = refreshTimer;
+    }
+
+    function startAutoRefresh() {
+        if (timerInterval) clearInterval(timerInterval);
+        timerInterval = setInterval(() => {
+            refreshTimer -= 1;
+            if (refreshTimer <= 0) {
+                fetchData();
+                resetTimer();
+            }
+            document.getElementById('refresh-timer').innerText = refreshTimer;
+        }, 1000);
+    }
+
+    function init() {
+        setFiltersFromPayload();
+        renderTable(initialPayload.rows || []);
+        renderMetrics(initialPayload);
+        renderUpdatedAt(initialPayload.updated_at);
+        resetTimer();
+        startAutoRefresh();
+    }
+
+    accountSelect.addEventListener('change', () => { resetTimer(); fetchData(); });
+    rangeSelect.addEventListener('change', () => { resetTimer(); fetchData(); });
+    includeOpenToggle.addEventListener('change', () => { resetTimer(); fetchData(); });
+    refreshBtn.addEventListener('click', () => { fetchData(); resetTimer(); });
+
+    init();
+</script>
+</body>
+</html>
