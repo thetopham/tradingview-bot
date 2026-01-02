@@ -79,24 +79,14 @@ def _collect_active_sessions() -> List[Dict[str, object]]:
     return sorted(sessions, key=_sort_key, reverse=True)
 
 
-def _normalize_url(value: object) -> str:
-    """Return a sanitized URL string with common newline artifacts removed."""
-
-    if not value:
-        return ""
-
-    text = value if isinstance(value, str) else str(value)
-    return text.strip().replace("\n", "").replace("/n", "")
-
-
 def _extract_first_url(value: object) -> str:
     """Return the first URL-like entry from nested url payloads."""
 
     if not value:
         return ""
 
-    if isinstance(value, str):
-        return _normalize_url(value)
+    if isinstance(value, str):      
+        return value.strip()
 
     if isinstance(value, dict):
         for candidate in value.values():
@@ -285,7 +275,6 @@ def _fetch_merged_feed(limit: int = 50) -> Tuple[List[Dict[str, object]], Option
                 row["entry_time"] = _format_ts(row.get("entry_time"))
                 row["exit_time"] = _format_ts(row.get("exit_time"))
                 row["decision_time"] = _format_ts(row.get("decision_time"))
-                row["screenshot_url"] = _normalize_url(row.get("screenshot_url"))
                 rows.append(row)
 
             return rows, None
