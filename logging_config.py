@@ -25,3 +25,7 @@ def setup_logging(log_file=None, log_level=None):
     root_logger.setLevel(getattr(logging, log_level))
     logging.getLogger('werkzeug').setLevel(logging.WARNING)
 
+    noisy_http_loggers = ["httpx", "httpcore", "supabase", "postgrest"]
+    for name in noisy_http_loggers:
+        logging.getLogger(name).setLevel(logging.WARNING)
+

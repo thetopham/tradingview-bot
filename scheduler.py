@@ -19,7 +19,7 @@ def start_scheduler(app):
             "strategy": "",
             "account": "beta",
             "signal": "",
-            "symbol": "CON.F.US.MES.M25",
+            "symbol": "CON.F.US.MES.H26",
             "size": 3,
             "alert": f"APScheduler 5m"
         }
@@ -30,7 +30,7 @@ def start_scheduler(app):
             logging.error(f"[APScheduler] HTTP POST failed: {e}")
     scheduler.add_job(
         cron_job,
-        CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=5, timezone=CT),
+        CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=0, timezone=CT),
         id='5m_job',
         replace_existing=True
     )

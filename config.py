@@ -17,6 +17,10 @@ def load_config():
         'SUPABASE_URL': os.getenv("SUPABASE_URL"),
         'SUPABASE_KEY': os.getenv("SUPABASE_KEY"),
         'WEBHOOK': os.getenv("WEBHOOK"),
+        # Risk params
+        'DAILY_PROFIT_TARGET': float(os.getenv("DAILY_PROFIT_TARGET", 99999.0)),
+        'MAX_DAILY_LOSS': float(os.getenv("MAX_DAILY_LOSS", -250.0)),
+        'MAX_CONSECUTIVE_LOSSES': int(os.getenv("MAX_CONSECUTIVE_LOSSES", 99999)),
     }
     # Build account map
     config['ACCOUNTS'] = {
@@ -26,7 +30,13 @@ def load_config():
     if not config['ACCOUNTS']:
         raise RuntimeError("No accounts loaded from .env. Add ACCOUNT_<NAME>=<ID>.")
     config['DEFAULT_ACCOUNT'] = next(iter(config['ACCOUNTS']))
-    config['OVERRIDE_CONTRACT_ID'] = os.getenv("OVERRIDE_CONTRACT_ID", "CON.F.US.MES.M25")
+    config['OVERRIDE_CONTRACT_ID'] = os.getenv("OVERRIDE_CONTRACT_ID", "CON.F.US.MES.H26")
+    config['STOP_LOSS_POINTS'] = float(os.getenv("STOP_LOSS_POINTS", 5.75))
+    config['TP_POINTS'] = (
+        [float(x) for x in os.getenv("TP_POINTS", "").split(",") if x.strip()]
+        or [2.5, 5.0]
+    )
+    config['TICKS_PER_POINT'] = float(os.getenv("TICKS_PER_POINT", 4))
     config['GET_FLAT_START'] = dtime(15, 7)
     config['GET_FLAT_END'] = dtime(17, 0)
     config['CT'] = pytz.timezone("America/Chicago")

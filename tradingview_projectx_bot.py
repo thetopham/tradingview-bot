@@ -10,12 +10,14 @@ from flask import Flask, request, jsonify
 from logging_config import setup_logging
 from config import load_config
 from api import (
-    flatten_contract, get_contract, ai_trade_decision, cancel_all_stops, search_pos 
+    flatten_contract, get_contract, ai_trade_decision, search_pos
     )
-from strategies import run_bracket, run_brackmod, run_pivot
+from position_manager import PositionManager
+from strategies import run_simple
 from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token
 from signalr_listener import launch_signalr_listener
+from dashboard import dashboard_bp
 from threading import Thread
 import threading
 from datetime import datetime
@@ -39,8 +41,10 @@ AI_ENDPOINTS = {
 }
 
 AUTH_LOCK = threading.Lock()
+POSITION_MANAGER = PositionManager(ACCOUNTS)
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder="templates", static_folder="static")
+app.register_blueprint(dashboard_bp)
 
 # --- Health Check Route (optional, but recommended for uptime monitoring) ---
 @app.route("/healthz")
@@ -59,7 +63,7 @@ def tv_webhook():
 
 def handle_webhook_logic(data):
     try:
-        strat = data.get("strategy", "bracket").lower()
+        strat = (data.get("strategy") or "simple").lower()
         acct  = (data.get("account") or DEFAULT_ACCOUNT).lower()
         sig   = data.get("signal", "").upper()
         sym   = data.get("symbol", "")
@@ -87,34 +91,70 @@ def handle_webhook_logic(data):
 
         # --- AI Overseer Routing ---
         if acct in AI_ENDPOINTS:
+            positions = search_pos(acct_id)
             ai_url = AI_ENDPOINTS[acct]
-            ai_decision = ai_trade_decision(acct, strat, sig, sym, size, alert, ai_url)
-            if ai_decision.get("signal", "").upper() not in ("BUY", "SELL"):
+
+            try:
+                position_context = POSITION_MANAGER.get_position_context_for_ai(acct_id, cid)
+            except Exception:
+                position_context = None
+
+            ai_decision = ai_trade_decision(
+                acct,
+                strat,
+                sig,
+                sym,
+                size,
+                alert,
+                ai_url,
+                positions=positions,
+                position_context=position_context,
+            )
+
+            ai_signal = ai_decision.get("signal", "").upper()
+            allowed_signals = {"BUY", "SELL", "HOLD", "FLAT"}
+
+            if ai_signal not in allowed_signals:
                 logging.info(f"AI blocked trade: {ai_decision.get('reason', 'No reason')}")
                 return
+
+            if ai_signal == "BUY":
+                logging.info(f"AI signaled BUY: {ai_decision.get('reason', 'No reason')}")
+
+            if ai_signal == "SELL":
+                logging.info(f"AI signaled SELL: {ai_decision.get('reason', 'No reason')}")
+
+            if ai_signal == "HOLD":
+                logging.info(f"AI signaled HOLD: {ai_decision.get('reason', 'No reason')}")
+                return
+
+            if ai_signal == "FLAT":
+                ai_sym = ai_decision.get("symbol", sym)
+                ai_cid = get_contract(ai_sym)
+                logging.info(f"AI signaled FLAT: {ai_decision.get('reason', 'No reason')}")
+                logging.info(f"AI flatten signal processed for {acct_id} {ai_cid}")
+                flatten_contract(acct_id, ai_cid, timeout=10)
+                return
+
             # Overwrite user values with AI's preferred decision
             strat = ai_decision.get("strategy", strat)
             sig = ai_decision.get("signal", sig)
             sym = ai_decision.get("symbol", sym)
-            size = ai_decision.get("size", size)
+            try:
+                size = int(ai_decision.get("size", size))
+            except Exception:
+                logging.warning("AI returned non-integer size=%r; keeping size=%s", ai_decision.get("size"), size)
             alert = ai_decision.get("alert", alert)
             ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
-
-        # Cancel all stops before every new entry (safety)
-        positions = search_pos(acct_id)
-        open_pos = [p for p in positions if p["contractId"] == cid and p.get("size", 0) != 0]
-        if not open_pos:
-            cancel_all_stops(acct_id, cid)
-
+            cid = get_contract(sym)
+            
+        
         # --- Strategy Dispatch ---
-        if strat == "bracket":
-            run_bracket(acct_id, sym, sig, size, alert, ai_decision_id)
-        elif strat == "brackmod":
-            run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id)
-        elif strat == "pivot":
-            run_pivot(acct_id, sym, sig, size, alert, ai_decision_id)
-        else:
-            logging.error(f"Unknown strategy '{strat}'")
+        if strat != "simple":
+            logging.error("Strategy '%s' is not implemented in this build (supported: simple)", strat)
+            return
+
+        run_simple(acct_id, sym, sig, size, alert, ai_decision_id)
     except Exception as e:
         import traceback
         logging.error(f"Exception in handle_webhook_logic: {e}\n{traceback.format_exc()}")

@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AI Trade Feed</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <style>
+        body { padding: 20px; background-color: #f8f9fa; }
+        .card-metric { min-height: 120px; }
+        .metric-value { font-size: 1.5rem; font-weight: 700; }
+        .table thead th { position: sticky; top: 0; background: #fff; z-index: 1; }
+        .refresh-note { font-size: 0.9rem; color: #6c757d; }
+        .filter-bar .form-select, .filter-bar .form-check-input { max-width: 200px; }
+    </style>
+</head>
+<body>
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <div>
+            <h1 class="h3 mb-0">AI Trade Feed</h1>
+            <div class="refresh-note" id="lastUpdated"></div>
+        </div>
+        <div class="refresh-note">Auto-refreshes every 15s</div>
+    </div>
+
+    <div class="row g-3 mb-3 filter-bar">
+        <div class="col-md-3">
+            <label class="form-label">Account</label>
+            <select id="accountFilter" class="form-select">
+                <option value="all" {% if default_account == 'all' %}selected{% endif %}>All</option>
+                {% for acct in accounts %}
+                <option value="{{ acct }}" {% if acct == default_account %}selected{% endif %}>{{ acct }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Range</label>
+            <select id="rangeFilter" class="form-select">
+                <option value="today" {% if default_range == 'today' %}selected{% endif %}>Today</option>
+                <option value="7d" {% if default_range == '7d' %}selected{% endif %}>Last 7d</option>
+                <option value="30d" {% if default_range == '30d' %}selected{% endif %}>Last 30d</option>
+            </select>
+        </div>
+        <div class="col-md-3 d-flex align-items-end">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="includeOpen" {% if default_include_open %}checked{% endif %}>
+                <label class="form-check-label" for="includeOpen">Include open positions</label>
+            </div>
+        </div>
+        <div class="col-md-3 d-flex align-items-end">
+            <button id="refreshBtn" class="btn btn-primary w-100">Refresh</button>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4" id="metricCards">
+        <div class="col-md-3">
+            <div class="card card-metric shadow-sm">
+                <div class="card-body">
+                    <div class="text-muted">Open Position PnL</div>
+                    <div class="metric-value" id="openPnl">-</div>
+                    <div class="small" id="openMeta"></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card card-metric shadow-sm">
+                <div class="card-body">
+                    <div class="text-muted">Today Realized (Net / Gross / Fees)</div>
+                    <div class="metric-value" id="todayNet">-</div>
+                    <div class="small" id="todayGross">-</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card card-metric shadow-sm">
+                <div class="card-body">
+                    <div class="text-muted">Today Trades</div>
+                    <div class="metric-value" id="todayTrades">-</div>
+                    <div class="small" id="todayQuality">-</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card card-metric shadow-sm">
+                <div class="card-body">
+                    <div class="text-muted">7D Performance</div>
+                    <div class="metric-value" id="weekNet">-</div>
+                    <div class="small" id="weekWin">-</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 class="card-title mb-0">Trades & Decisions</h5>
+                <div class="refresh-note" id="rowCount"></div>
+            </div>
+            <div class="table-responsive" style="max-height: 70vh;">
+                <table class="table table-striped table-sm align-middle" id="feedTable">
+                    <thead>
+                        <tr>
+                            <th>Decision Time</th>
+                            <th>Entry Time</th>
+                            <th>Exit Time</th>
+                            <th>Account</th>
+                            <th>Symbol</th>
+                            <th>Signal</th>
+                            <th>Size</th>
+                            <th>PnL</th>
+                            <th>Decision ID</th>
+                            <th>Reason</th>
+                            <th>Screenshot</th>
+                            <th>Strategy</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const initialPayload = {{ payload | tojson }};
+        const fmt = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'America/Denver',
+            year: 'numeric', month: 'short', day: 'numeric',
+            hour: 'numeric', minute: '2-digit', second: '2-digit'
+        });
+
+        function formatDate(value) {
+            if (!value) return '';
+            const dt = new Date(value);
+            return fmt.format(dt);
+        }
+
+        function formatNumber(num, decimals = 2) {
+            if (num === null || num === undefined || isNaN(num)) return '-';
+            return Number(num).toFixed(decimals);
+        }
+
+        function setText(id, value) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+        }
+
+        function renderMetrics(payload) {
+            const metrics = payload.metrics || {};
+            const open = metrics.open_positions || {};
+            const today = metrics.today || {};
+            const week = metrics.seven_day || {};
+            const streak = metrics.streak;
+
+            setText('openPnl', `$${formatNumber(open.unrealized_pnl)}`);
+            const openDetails = [];
+            if (open.side) openDetails.push(open.side);
+            if (open.size) openDetails.push(`size ${open.size}`);
+            if (open.duration_minutes) openDetails.push(`${formatNumber(open.duration_minutes, 1)} min`);
+            setText('openMeta', openDetails.join(' • ') || 'No open positions');
+
+            setText('todayNet', `$${formatNumber(today.net_pnl)} net`);
+            const gross = `$${formatNumber(today.gross_pnl)} gross / fees $${formatNumber(today.fees)}`;
+            setText('todayGross', gross);
+
+            const winRate = today.win_rate === null || today.win_rate === undefined ? '-' : `${(today.win_rate * 100).toFixed(1)}% win`;
+            const pf = today.profit_factor === null || today.profit_factor === undefined ? '-' : `PF ${formatNumber(today.profit_factor, 2)}`;
+            const avg = today.avg_trade === null || today.avg_trade === undefined ? '-' : `$${formatNumber(today.avg_trade)} avg`;
+            setText('todayTrades', `${today.trade_count || 0} trades`);
+            const streakText = streak ? `${streak.count} ${streak.type} streak` : '';
+            setText('todayQuality', [winRate, avg, pf, streakText].filter(Boolean).join(' • '));
+
+            setText('weekNet', `$${formatNumber(week.net_pnl)} net`);
+            const weekWin = week.win_rate === null || week.win_rate === undefined ? '-' : `${(week.win_rate * 100).toFixed(1)}% win`;
+            setText('weekWin', weekWin);
+        }
+
+        function renderTable(payload) {
+            const tbody = document.querySelector('#feedTable tbody');
+            tbody.innerHTML = '';
+            const rows = payload.rows || [];
+            setText('rowCount', `${rows.length} rows`);
+            rows.forEach(row => {
+                const tr = document.createElement('tr');
+                const cells = [
+                    formatDate(row.decision_time),
+                    formatDate(row.entry_time),
+                    formatDate(row.exit_time),
+                    row.account || '',
+                    row.symbol || '',
+                    row.signal || '',
+                    row.size || '',
+                    row.pnl !== null && row.pnl !== undefined ? `$${formatNumber(row.pnl)}` : '',
+                    row.ai_decision_id || '',
+                    row.reason || '',
+                    row.screenshot ? `<a class="btn btn-sm btn-outline-primary" href="${row.screenshot}" target="_blank">Open</a>` : '',
+                    row.strategy || ''
+                ];
+                cells.forEach(html => {
+                    const td = document.createElement('td');
+                    td.innerHTML = html;
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+        }
+
+        function render(payload) {
+            if (!payload) return;
+            renderMetrics(payload);
+            renderTable(payload);
+            setText('lastUpdated', `Last updated ${formatDate(payload.updated_at)}`);
+        }
+
+        async function fetchData() {
+            const account = document.getElementById('accountFilter').value;
+            const range = document.getElementById('rangeFilter').value;
+            const includeOpen = document.getElementById('includeOpen').checked;
+            const params = new URLSearchParams({ account, range, include_open: includeOpen });
+            try {
+                const resp = await fetch(`/dashboard/data?${params.toString()}`);
+                const data = await resp.json();
+                render(data);
+            } catch (err) {
+                console.error('Failed to load dashboard data', err);
+            }
+        }
+
+        document.getElementById('refreshBtn').addEventListener('click', fetchData);
+        document.getElementById('accountFilter').addEventListener('change', fetchData);
+        document.getElementById('rangeFilter').addEventListener('change', fetchData);
+        document.getElementById('includeOpen').addEventListener('change', fetchData);
+
+        render(initialPayload);
+        setInterval(fetchData, 15000);
+    </script>
+</body>
+</html>
