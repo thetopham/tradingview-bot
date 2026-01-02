@@ -87,6 +87,7 @@ def _extract_first_url(value: object) -> str:
 
     if isinstance(value, str):
         return value
+        return value.strip()
 
     if isinstance(value, dict):
         for candidate in value.values():
