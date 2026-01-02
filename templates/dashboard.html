@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Trade Feed Dashboard</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css" integrity="sha512-oHDEc8Xed4Z3fLHP+3Jl9+GkM1YAjh3Q5bd6R7w6znrWsgd/eNR2N5lxGVD8TzQdrF0zE5xCqN9n3VvQk26J0w==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <style>
+    body {
+      font-family: "Inter", system-ui, -apple-system, sans-serif;
+      background: #0b1221;
+      color: #e2e8f0;
+      padding: 24px;
+    }
+    h1 {
+      margin-top: 0;
+      color: #cbd5e1;
+      font-size: 24px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .card {
+      background: linear-gradient(135deg, #111827, #0f172a);
+      padding: 14px;
+      border-radius: 10px;
+      border: 1px solid #1e293b;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+    }
+    .metric-label {
+      text-transform: uppercase;
+      font-size: 12px;
+      color: #94a3b8;
+      letter-spacing: 0.08em;
+    }
+    .metric-value {
+      font-size: 22px;
+      font-weight: 700;
+      margin-top: 4px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #0f172a;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid #1e293b;
+    }
+    thead {
+      background: #111827;
+    }
+    th, td {
+      padding: 10px 12px;
+      text-align: left;
+      font-size: 13px;
+      border-bottom: 1px solid #1e293b;
+    }
+    th {
+      color: #94a3b8;
+      font-weight: 600;
+    }
+    tr:hover td {
+      background: #0b1328;
+    }
+    .pill {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .signal-buy { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+    .signal-sell { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+    .signal-hold { background: rgba(234, 179, 8, 0.15); color: #eab308; }
+    .signal-flat { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+    .pnl-positive { color: #34d399; }
+    .pnl-negative { color: #f87171; }
+    a { color: #93c5fd; }
+    .empty {
+      text-align: center;
+      padding: 20px;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+  <h1>AI Trade Feed Dashboard</h1>
+  <div class="grid" id="metric-grid">
+    <div class="card"><div class="metric-label">Current Open PnL</div><div class="metric-value" id="metric-open-pnl">--</div></div>
+    <div class="card"><div class="metric-label">Win Rate</div><div class="metric-value" id="metric-win-rate">--</div></div>
+    <div class="card"><div class="metric-label">Daily PnL</div><div class="metric-value" id="metric-daily-pnl">--</div></div>
+    <div class="card"><div class="metric-label">Open Positions</div><div class="metric-value" id="metric-open-positions">--</div></div>
+    <div class="card"><div class="metric-label">Trades Today</div><div class="metric-value" id="metric-trades-today">--</div></div>
+  </div>
+
+  <div class="card">
+    <table id="trades-table">
+      <thead>
+        <tr>
+          <th>Decision Time</th>
+          <th>Entry</th>
+          <th>Exit</th>
+          <th>Account</th>
+          <th>Symbol</th>
+          <th>Signal</th>
+          <th>Size</th>
+          <th>PnL</th>
+          <th>AI ID</th>
+          <th>Reason</th>
+          <th>Screenshot</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    function formatNumber(num, digits = 2) {
+      if (num === null || num === undefined || Number.isNaN(num)) return '--';
+      return Number(num).toFixed(digits);
+    }
+
+    function signalClass(signal) {
+      const key = (signal || '').toLowerCase();
+      return {
+        buy: 'signal-buy',
+        sell: 'signal-sell',
+        hold: 'signal-hold',
+        flat: 'signal-flat',
+      }[key] || 'signal-hold';
+    }
+
+    function setMetrics(metrics) {
+      document.getElementById('metric-open-pnl').textContent = formatNumber(metrics.current_open_pnl);
+      document.getElementById('metric-win-rate').textContent = `${formatNumber(metrics.win_rate, 1)}%`;
+      document.getElementById('metric-daily-pnl').textContent = formatNumber(metrics.daily_pnl);
+      document.getElementById('metric-open-positions').textContent = metrics.open_positions ?? '--';
+      document.getElementById('metric-trades-today').textContent = metrics.trades_today ?? '--';
+    }
+
+    function renderTrades(trades) {
+      const tbody = document.querySelector('#trades-table tbody');
+      tbody.innerHTML = '';
+      if (!trades || trades.length === 0) {
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 11;
+        cell.className = 'empty';
+        cell.textContent = 'No trades found.';
+        row.appendChild(cell);
+        tbody.appendChild(row);
+        return;
+      }
+
+      trades.forEach((trade) => {
+        const row = document.createElement('tr');
+        const cells = [
+          trade.decision_time || '--',
+          trade.entry_time || '--',
+          trade.exit_time || '--',
+          trade.account || '--',
+          trade.symbol || '--',
+          trade.signal || '--',
+          trade.size ?? '--',
+          trade.pnl,
+          trade.ai_decision_id ?? '--',
+          trade.reason || '--',
+          trade.screenshot_url ? `<a href="${trade.screenshot_url}" target="_blank">Open</a>` : '--',
+        ];
+
+        cells.forEach((value, idx) => {
+          const cell = document.createElement('td');
+          if (idx === 5) {
+            const badge = document.createElement('span');
+            badge.textContent = value;
+            badge.className = `pill ${signalClass(value)}`;
+            cell.appendChild(badge);
+          } else if (idx === 7) {
+            const pnlNum = Number(value);
+            cell.textContent = formatNumber(pnlNum);
+            cell.className = pnlNum >= 0 ? 'pnl-positive' : 'pnl-negative';
+          } else if (idx === 10 && trade.screenshot_url) {
+            cell.innerHTML = value;
+          } else {
+            cell.textContent = value;
+          }
+          row.appendChild(cell);
+        });
+        tbody.appendChild(row);
+      });
+    }
+
+    async function loadData() {
+      try {
+        const res = await fetch('/dashboard/data');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        setMetrics(data.metrics || {});
+        renderTrades(data.trades || []);
+      } catch (err) {
+        console.error('Failed to load dashboard data', err);
+      }
+    }
+
+    loadData();
+    setInterval(loadData, 30000);
+  </script>
+</body>
+</html>
