@@ -12,7 +12,7 @@ from api import search_pos, search_open, search_trades, get_contract
 from config import load_config
 
 config = load_config()
-CT = config['CT']
+MT = config['MT']
 
 class PositionManager:
     """
@@ -244,7 +244,7 @@ class PositionManager:
         Get account-wide state including daily P&L and risk metrics
         """
         # Get all trades from today
-        today_start = datetime.now(CT).replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = datetime.now(MT).replace(hour=0, minute=0, second=0, microsecond=0)
         trades = search_trades(acct_id, today_start)
         
         # Calculate daily P&L (gross before fees)

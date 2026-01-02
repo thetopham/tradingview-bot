@@ -16,7 +16,7 @@ config = load_config()
 STOP_LOSS_POINTS = config.get('STOP_LOSS_POINTS', 5.75)
 TP_POINTS = config.get('TP_POINTS', [2.5, 5.0])
 TICKS_PER_POINT = config.get('TICKS_PER_POINT', 4)
-CT = config['CT']
+MT = config['MT']
 ACCOUNT_NAME_BY_ID = {v: k for k, v in config.get('ACCOUNTS', {}).items()}
 
 
@@ -27,7 +27,7 @@ def _compute_entry_fill(acct_id: int, oid: int) -> float | None:
     """Find a recent fill price for order id `oid` with a short wait/poll."""
     price = None
     for _ in range(12):
-        trades = [t for t in search_trades(acct_id, datetime.now(CT) - timedelta(minutes=5)) if t.get("orderId") == oid]
+        trades = [t for t in search_trades(acct_id, datetime.now(MT) - timedelta(minutes=5)) if t.get("orderId") == oid]
         tot = sum(t.get("size", 0) for t in trades)
         if tot:
             price = sum(t["price"] * t["size"] for t in trades) / tot
@@ -60,7 +60,7 @@ def run_simple(acct_id: int, sym: str, sig: str, size: int, alert: str, ai_decis
             logging.error("run_simple: unable to flatten opposing position; aborting entry")
             return
 
-    entry_time = datetime.now(CT)
+    entry_time = datetime.now(MT)
     entry = place_market(acct_id, cid, side, size)
     fill_price = _compute_entry_fill(acct_id, entry.get("orderId")) or entry.get("fillPrice")
 
@@ -109,11 +109,11 @@ def run_bracket(acct_id, sym, sig, size, alert, ai_decision_id=None):
 
     ent = place_market(acct_id, cid, side, size)
     oid = ent["orderId"]
-    entry_time = datetime.now(CT)
+    entry_time = datetime.now(MT)
 
     price = None
     for _ in range(12):
-        trades = [t for t in search_trades(acct_id, datetime.now(CT)-timedelta(minutes=5)) if t["orderId"]==oid]
+        trades = [t for t in search_trades(acct_id, datetime.now(MT)-timedelta(minutes=5)) if t["orderId"]==oid]
         tot = sum(t["size"] for t in trades)
         if tot:
             price = sum(t["price"]*t["size"] for t in trades)/tot
@@ -168,7 +168,7 @@ def run_brackmod(acct_id, sym, sig, size, alert, ai_decision_id=None):
         success = flatten_contract(acct_id, cid, timeout=10)
         if not success:
             return  # Could not flatten contract
-    entry_time = datetime.now(CT)
+    entry_time = datetime.now(MT)
     stop_loss_ticks = points_to_ticks(STOP_LOSS_POINTS)
     tp_points = (TP_POINTS or [2.5, 5.0])[:2]
     tp_ticks = [points_to_ticks(p) for p in tp_points]
@@ -218,7 +218,7 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
     pos = [p for p in search_pos(acct_id) if p["contractId"] == cid]
     net_pos = sum(p["size"] if p["type"] == 1 else -p["size"] for p in pos)
     target = size if sig == "BUY" else -size
-    entry_time = datetime.now(CT)
+    entry_time = datetime.now(MT)
     trade_log = []
     oid = None
 
@@ -262,7 +262,7 @@ def run_pivot(acct_id, sym, sig, size, alert, ai_decision_id=None):
         trade_log.append(ent)
         oid = ent.get("orderId")
 
-    trades = [t for t in search_trades(acct_id, datetime.now(CT) - timedelta(minutes=5))
+    trades = [t for t in search_trades(acct_id, datetime.now(MT) - timedelta(minutes=5))
               if t["contractId"] == cid]
     entry_price = trades[-1]["price"] if trades else None
     if entry_price is not None:

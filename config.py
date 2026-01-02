@@ -42,6 +42,6 @@ def load_config():
     config['GET_FLAT_START'] = dtime(14, 5)  # 2:05pm MT
     config['GET_FLAT_END'] = dtime(16, 0)    # 4:00pm MT
     config['WEEKEND_MARKET_OPEN'] = dtime(16, 0)  # Sunday futures reopen (4:00pm MT)
-    config['CT'] = mountain
+    config['MT'] = mountain
     return config
 

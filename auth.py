@@ -4,7 +4,6 @@ import time
 import threading
 import logging
 from datetime import datetime
-import pytz
 import requests
 from config import load_config
 
@@ -16,7 +15,7 @@ USER_NAME = config['USER_NAME']
 API_KEY = config['API_KEY']
 GET_FLAT_START = config['GET_FLAT_START']
 GET_FLAT_END = config['GET_FLAT_END']
-CT = pytz.timezone("America/Denver")  # Mountain Time
+MT = config['MT']
 WEEKEND_MARKET_OPEN = config['WEEKEND_MARKET_OPEN']
 
 
@@ -26,11 +25,11 @@ _token_expiry = 0
 auth_lock = threading.Lock()
 
 def in_get_flat(now=None):
-    now = now or datetime.now(CT)
+    now = now or datetime.now(MT)
     if now.tzinfo:
-        now = now.astimezone(CT)
+        now = now.astimezone(MT)
     else:
-        now = CT.localize(now)
+        now = MT.localize(now)
 
     t = now.timetz().replace(tzinfo=None)
     weekday = now.weekday()  # Monday=0, Sunday=6
