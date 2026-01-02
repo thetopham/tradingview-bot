@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
+from dateutil import parser as date_parser
 from flask import Blueprint, jsonify, render_template
 import pytz
 
@@ -31,10 +32,14 @@ def _format_ts(ts: Optional[object]) -> str:
             return datetime.fromtimestamp(float(ts), DASHBOARD_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
 
         if isinstance(ts, str):
+            dt = None
             try:
                 dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
             except ValueError:
-                return ts
+                try:
+                    dt = date_parser.parse(ts)
+                except (ValueError, OverflowError, TypeError):
+                    return ts
 
             if dt.tzinfo is None:
                 dt = pytz.UTC.localize(dt)
@@ -47,6 +52,30 @@ def _format_ts(ts: Optional[object]) -> str:
         logging.exception("Failed to format timestamp %s", ts)
 
     return str(ts)
+
+
+def _to_timestamp(value: object) -> float:
+    """Convert assorted timestamp inputs into a sortable epoch value."""
+
+    try:
+        if isinstance(value, datetime):
+            dt = value if value.tzinfo else pytz.UTC.localize(value)
+            return dt.timestamp()
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                try:
+                    return date_parser.parse(value).timestamp()
+                except (ValueError, OverflowError, TypeError):
+                    return 0.0
+    except Exception:
+        logging.debug("Failed to coerce timestamp %s", value, exc_info=True)
+        return 0.0
+
+    return 0.0
 
 
 def _collect_active_sessions() -> List[Dict[str, object]]:
@@ -285,20 +314,8 @@ def _fetch_merged_feed(limit: int = 50) -> Tuple[List[Dict[str, object]], Option
                 .execute()
             )
 
-            def _sortable(value: object) -> float:
-                if isinstance(value, datetime):
-                    return value.timestamp()
-                if isinstance(value, (int, float)):
-                    return float(value)
-                if isinstance(value, str):
-                    try:
-                        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-                    except ValueError:
-                        return 0.0
-                return 0.0
-
             for row in res.data or []:
-                sort_key = _sortable(row.get("decision_time"))
+                sort_key = _to_timestamp(row.get("decision_time") or row.get("entry_time") or row.get("exit_time"))
                 rows.append({**row, "_sort_key": sort_key})
 
             rows.sort(
@@ -336,18 +353,6 @@ def _merge_trades_and_decisions(
         row.get("ai_decision_id"): row for row in ai_decisions if row.get("ai_decision_id")
     }
 
-    def _sortable(ts: object) -> float:
-        if isinstance(ts, datetime):
-            return ts.timestamp()
-        if isinstance(ts, (int, float)):
-            return float(ts)
-        if isinstance(ts, str):
-            try:
-                return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
-            except ValueError:
-                return 0.0
-        return 0.0
-
     merged: List[Dict[str, object]] = []
     seen_ids = set()
 
@@ -369,7 +374,7 @@ def _merge_trades_and_decisions(
                 "reason": decision.get("reason") or trade.get("comment") or "",
                 "screenshot_url": decision.get("screenshot_url"),
                 "strategy": decision.get("strategy") or trade.get("strategy"),
-                "_sort_key": _sortable(trade.get("entry_time")),
+                "_sort_key": _to_timestamp(trade.get("entry_time")),
             }
         )
 
@@ -395,7 +400,7 @@ def _merge_trades_and_decisions(
                 "reason": decision.get("reason") or "",
                 "screenshot_url": decision.get("screenshot_url"),
                 "strategy": decision.get("strategy"),
-                "_sort_key": _sortable(decision.get("timestamp")),
+                "_sort_key": _to_timestamp(decision.get("timestamp")),
             }
         )
 
@@ -434,3 +439,4 @@ def dashboard_view():
 @dashboard_bp.route("/dashboard/data")
 def dashboard_data():
     return jsonify(_dashboard_payload())
+
