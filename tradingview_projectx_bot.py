@@ -133,6 +133,7 @@ def handle_webhook_logic(data):
                 ai_cid = get_contract(ai_sym)
                 flatten_contract(acct_id, ai_cid, timeout=10)
                 logging.info(f"AI flatten signal processed for {acct_id} {ai_cid}")
+                logging.info(f"AI signaled FLAT: {ai_decision.get('reason', 'No reason')}")
                 return
 
             # Overwrite user values with AI's preferred decision
