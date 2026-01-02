@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Trades Dashboard</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f172a;
+      --panel: #111827;
+      --muted: #9ca3af;
+      --accent: #22d3ee;
+      --success: #4ade80;
+      --danger: #f87171;
+      --warning: #fbbf24;
+      --border: #1f2937;
+    }
+    body {
+      background: var(--bg);
+      color: #e5e7eb;
+      font-family: "Inter", system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      padding: 24px 24px 12px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    p.subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      padding: 0 24px 18px;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+    }
+    .metric .label {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .metric .value {
+      font-size: 20px;
+      font-weight: 700;
+    }
+    .metric .value.positive { color: var(--success); }
+    .metric .value.negative { color: var(--danger); }
+    .metric .value.neutral { color: #e5e7eb; }
+    .table-container {
+      padding: 0 24px 32px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.25);
+    }
+    thead {
+      background: #0b1221;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 14px;
+    }
+    th { color: var(--muted); font-weight: 600; }
+    tr:hover td { background: rgba(34, 211, 238, 0.04); }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .pill.buy { background: rgba(74, 222, 128, 0.15); color: var(--success); }
+    .pill.sell { background: rgba(248, 113, 113, 0.15); color: var(--danger); }
+    .pill.hold, .pill.flat { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
+    .pnl { font-weight: 700; }
+    .muted { color: var(--muted); }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .empty-state { text-align: center; padding: 40px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AI Trades (Merged)</h1>
+    <p class="subtitle">Decision feed + outcomes ordered by most recent AI decision.</p>
+  </header>
+
+  <section class="metrics" id="metrics"></section>
+
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>Decision Time</th>
+          <th>Entry</th>
+          <th>Exit</th>
+          <th>Account</th>
+          <th>Symbol</th>
+          <th>Signal</th>
+          <th>Size</th>
+          <th>PNL</th>
+          <th>AI ID</th>
+          <th>Reason</th>
+          <th>Screenshot</th>
+        </tr>
+      </thead>
+      <tbody id="trade-rows">
+        <tr><td colspan="11" class="empty-state">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    const metricsEl = document.getElementById('metrics');
+    const rowsEl = document.getElementById('trade-rows');
+
+    function formatDate(value) {
+      if (!value) return '';
+      try {
+        const dt = new Date(value);
+        return dt.toLocaleString();
+      } catch (_) {
+        return value;
+      }
+    }
+
+    function formatNumber(value) {
+      return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 });
+    }
+
+    function pnlClass(value) {
+      if (value > 0) return 'positive';
+      if (value < 0) return 'negative';
+      return 'neutral';
+    }
+
+    function renderMetrics(metrics) {
+      metricsEl.innerHTML = '';
+      const items = [
+        { label: 'Daily PnL', value: metrics.daily_pnl, formatter: v => `$${formatNumber(v)}` },
+        { label: 'Open Position PnL', value: metrics.open_pnl, formatter: v => `$${formatNumber(v)}` },
+        { label: 'Win %', value: metrics.win_rate, formatter: v => `${formatNumber(v)}%` },
+        { label: 'Open Positions', value: metrics.open_positions },
+        { label: 'Total Trades', value: metrics.total_trades },
+        { label: 'Last Updated', value: new Date(metrics.last_updated).toLocaleTimeString() },
+      ];
+
+      items.forEach(({ label, value, formatter }) => {
+        const div = document.createElement('div');
+        div.className = 'metric';
+        const val = formatter ? formatter(value) : value;
+        div.innerHTML = `
+          <div class="label">${label}</div>
+          <div class="value ${pnlClass(Number(value))}">${val}</div>
+        `;
+        metricsEl.appendChild(div);
+      });
+    }
+
+    function renderTrades(trades) {
+      if (!trades.length) {
+        rowsEl.innerHTML = '<tr><td colspan="11" class="empty-state">No trades found</td></tr>';
+        return;
+      }
+
+      rowsEl.innerHTML = '';
+      trades.forEach((trade) => {
+        const tr = document.createElement('tr');
+        const signalClass = (trade.signal || '').toLowerCase();
+        tr.innerHTML = `
+          <td>${formatDate(trade.decision_time)}</td>
+          <td>${formatDate(trade.entry_time)}</td>
+          <td>${formatDate(trade.exit_time)}</td>
+          <td class="muted">${trade.account || ''}</td>
+          <td>${trade.symbol || ''}</td>
+          <td><span class="pill ${signalClass}">${trade.signal || ''}</span></td>
+          <td>${trade.size ?? ''}</td>
+          <td class="pnl ${pnlClass(Number(trade.pnl))}">$${formatNumber(trade.pnl)}</td>
+          <td class="muted">${trade.ai_decision_id ?? ''}</td>
+          <td>${trade.reason || ''}</td>
+          <td>${trade.screenshot_url ? `<a href="${trade.screenshot_url}" target="_blank">Open</a>` : ''}</td>
+        `;
+        rowsEl.appendChild(tr);
+      });
+    }
+
+    async function loadData() {
+      try {
+        const res = await fetch('/api/ai-trades');
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        renderMetrics(data.metrics);
+        renderTrades(data.trades);
+      } catch (err) {
+        rowsEl.innerHTML = `<tr><td colspan="11" class="empty-state">${err.message}</td></tr>`;
+      }
+    }
+
+    loadData();
+    setInterval(loadData, 30000);
+  </script>
+</body>
+</html>
