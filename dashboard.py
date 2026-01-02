@@ -259,7 +259,7 @@ def _fetch_merged_feed(limit: int = 50) -> Tuple[List[Dict[str, object]], Option
         return rows, str(e)
 
     last_error: Optional[Exception] = None
-    for feed_name in ("ai_trade_feed"):
+    for feed_name in ("ai_trade_feed",):
         try:
             res = (
                 supabase.table(feed_name)
