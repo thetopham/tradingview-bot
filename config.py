@@ -37,8 +37,10 @@ def load_config():
         or [2.5, 5.0]
     )
     config['TICKS_PER_POINT'] = float(os.getenv("TICKS_PER_POINT", 4))
-    config['GET_FLAT_START'] = dtime(15, 7)
-    config['GET_FLAT_END'] = dtime(17, 0)
+    config['GET_FLAT_TZ'] = pytz.timezone("America/Denver")
+    config['GET_FLAT_START'] = dtime(14, 5)
+    config['GET_FLAT_END'] = dtime(16, 0)
+    config['GET_FLAT_WEEKEND_END'] = dtime(16, 0)
     config['CT'] = pytz.timezone("America/Chicago")
     return config
 
