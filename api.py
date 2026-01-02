@@ -3,11 +3,10 @@ import requests
 import logging
 import json
 import time
-import pytz
 from typing import Dict, List, Optional, Tuple
 
 from datetime import datetime, timezone
-from auth import ensure_token, get_token, session
+from auth import ensure_token, get_token, in_get_flat, session
 from config import load_config
 from dateutil import parser
 from supabase import create_client
@@ -19,7 +18,7 @@ OVERRIDE_CONTRACT_ID = config['OVERRIDE_CONTRACT_ID']
 PX_BASE = config['PX_BASE']
 SUPABASE_URL = config['SUPABASE_URL']
 SUPABASE_KEY = config['SUPABASE_KEY']
-CT = pytz.timezone("America/Chicago")
+CT = config['CT']
 MES = "MES"
 
 _PRICE_CACHE: Dict[str, Optional[Tuple[float, str]]] = {
@@ -459,6 +458,23 @@ def _compute_simple_position_context(
 def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=None, position_context=None):
     position_summary = _summarize_positions(positions or [])
     simple_position_context = position_context or _compute_simple_position_context(positions or [], sym)
+
+    now = datetime.now(CT)
+    if in_get_flat(now):
+        logging.info(
+            "In get-flat window (%s–%s %s); skipping AI decision call.",
+            config['GET_FLAT_START'].strftime("%H:%M"),
+            config['GET_FLAT_END'].strftime("%H:%M"),
+            now.tzname(),
+        )
+        return {
+            "strategy": strat,
+            "signal": "HOLD",
+            "account": account,
+            "symbol": sym,
+            "reason": "In get-flat window; trade blocked before AI call.",
+        }
+
     payload = {
         "account": account,
         "strategy": strat,
