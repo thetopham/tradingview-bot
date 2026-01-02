@@ -387,55 +387,18 @@ def _merge_trades_and_decisions(
 
 def _dashboard_payload() -> Dict[str, object]:
     merged_feed, merged_error = _fetch_merged_feed()
-    trade_rows, trade_error = _fetch_trade_results()
-    ai_decisions, ai_error = _fetch_ai_decisions()
     active_sessions = _collect_active_sessions()
-
-    ai_ids = [row.get("ai_decision_id") for row in trade_rows + active_sessions]
-    decision_lookup = {row.get("ai_decision_id"): row for row in ai_decisions if row.get("ai_decision_id")}
-    missing_ids = [i for i in ai_ids if i not in decision_lookup]
-    ai_reasons, reason_error = _fetch_ai_reasons(missing_ids)
-
-    trade_lookup = {row.get("ai_decision_id"): row for row in trade_rows if row.get("ai_decision_id")}
-
-    for row in trade_rows:
-        decision = decision_lookup.get(row.get("ai_decision_id")) or {}
-        reason_details = ai_reasons.get(row.get("ai_decision_id"), {})
-        row["entry_time"] = _format_ts(row.get("entry_time"))
-        row["exit_time"] = _format_ts(row.get("exit_time"))
-        row["reason"] = decision.get("reason") or reason_details.get("reason") or row.get("comment")
-        row["screenshot_url"] = decision.get("screenshot_url") or reason_details.get("screenshot_url")
-
-    for session in active_sessions:
-        decision = decision_lookup.get(session.get("ai_decision_id")) or {}
-        reason_details = ai_reasons.get(session.get("ai_decision_id"), {})
-        session["reason"] = decision.get("reason") or reason_details.get("reason")
-        session["screenshot_url"] = decision.get("screenshot_url") or reason_details.get("screenshot_url")
-
-    for decision in ai_decisions:
-        ai_id = decision.get("ai_decision_id")
-        result = trade_lookup.get(ai_id) or {}
-        reason_details = ai_reasons.get(ai_id, {})
-        decision["total_pnl"] = result.get("total_pnl")
-        decision["result_entry_time"] = _format_ts(result.get("entry_time"))
-        decision["result_exit_time"] = _format_ts(result.get("exit_time"))
-        decision["reason"] = decision.get("reason") or reason_details.get("reason")
-        decision["screenshot_url"] = decision.get("screenshot_url") or reason_details.get("screenshot_url")
-
-    if not merged_feed:
-        merged_feed = _merge_trades_and_decisions(trade_rows, ai_decisions)
-        merged_error = merged_error or trade_error or ai_error or reason_error
 
     return {
         "updated_at": datetime.now(CT).isoformat(),
         "active_sessions": active_sessions,
-        "trade_results": trade_rows,
-        "ai_decisions": ai_decisions,
+        "trade_results": [],
+        "ai_decisions": [],
         "merged_trades": merged_feed,
         "merged_error": merged_error,
-        "trade_results_error": trade_error,
-        "ai_decision_error": ai_error,
-        "ai_reason_error": reason_error,
+        "trade_results_error": None,
+        "ai_decision_error": None,
+        "ai_reason_error": None,
     }
 
 
