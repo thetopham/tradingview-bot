@@ -1,0 +1,155 @@
+:root {
+    --bg: #0f172a;
+    --card: #111827;
+    --border: #1f2937;
+    --text: #e5e7eb;
+    --muted: #9ca3af;
+    --accent: #38bdf8;
+    --success: #22c55e;
+    --danger: #ef4444;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+    line-height: 1.5;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 18px;
+}
+
+h1 {
+    margin: 4px 0 0;
+    font-size: 26px;
+}
+
+h2 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 11px;
+    color: var(--muted);
+    margin: 0;
+}
+
+.timestamp {
+    color: var(--muted);
+    font-size: 14px;
+}
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+}
+
+.card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    padding: 14px;
+    border-radius: 10px;
+}
+
+.card .label {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.card .value {
+    margin: 6px 0 0;
+    font-size: 24px;
+    font-weight: 700;
+}
+
+.card .sub {
+    margin: 2px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.table-card {
+    margin-top: 18px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+}
+
+.table-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 6px;
+}
+
+.muted { color: var(--muted); }
+
+.table-scroll {
+    overflow-x: auto;
+}
+
+.table-scroll table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 960px;
+}
+
+th, td {
+    text-align: left;
+    padding: 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+}
+
+th {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.02em;
+}
+
+td {
+    font-size: 14px;
+}
+
+.reason {
+    max-width: 360px;
+}
+
+.pill {
+    background: rgba(56, 189, 248, 0.12);
+    color: var(--accent);
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+}
+
+.pnl-win { color: var(--success); }
+.pnl-loss { color: var(--danger); }
+
+a {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+@media (max-width: 720px) {
+    body { padding: 12px; }
+    .table-scroll table { min-width: 720px; }
+}

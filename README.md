@@ -18,7 +18,7 @@ This repo runs a lightweight execution + observability layer for an “AI day tr
 - `strategies.py` – execution strategies (currently `simple`)
 - `signalr_listener.py` – listens to broker events; logs results when a position closes
 - `api.py` – ProjectX REST calls + Supabase logging helpers
-- `dashboard.py` + `dashboard.html` – UI and API endpoint for merged feed
+- `dashboard.py` + `templates/dashboard.html` – UI and API endpoint for merged feed
 
 ## Local setup
 
@@ -63,6 +63,12 @@ python tradingview_projectx_bot.py
 Then open:
 
 - Dashboard: `http://localhost:<TV_PORT>/dashboard`
+
+### Dashboard data
+
+- Pulls from the `ai_trade_feed` Supabase table, ordered by `ai_decision_id` (desc) / `decision_time`.
+- Displays entry, exit, account, symbol, signal, size, PnL (net/total), AI id, reason, and screenshot link.
+- Live metrics include open position count/PnL, daily PnL, closed trade win %, and win/loss totals.
 
 
 ```bash

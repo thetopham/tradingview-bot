@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Trade Feed Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+</head>
+<body>
+    <header>
+        <div>
+            <p class="eyebrow">AI Trades (Merged)</p>
+            <h1>AI Trade Feed Dashboard</h1>
+        </div>
+        <div class="timestamp">Updated <span id="last-updated">–</span></div>
+    </header>
+
+    <section id="metrics" class="metrics-grid">
+        <div class="card">
+            <p class="label">Open positions</p>
+            <p class="value" id="open-positions">0</p>
+            <p class="sub" id="open-pnl">Open PnL: $0.00</p>
+        </div>
+        <div class="card">
+            <p class="label">Daily PnL</p>
+            <p class="value" id="daily-pnl">$0.00</p>
+        </div>
+        <div class="card">
+            <p class="label">Win rate</p>
+            <p class="value" id="win-rate">–</p>
+            <p class="sub" id="win-loss">Wins: 0 · Losses: 0</p>
+        </div>
+        <div class="card">
+            <p class="label">Closed trades</p>
+            <p class="value" id="closed-trades">0</p>
+        </div>
+    </section>
+
+    <section class="table-card">
+        <div class="table-head">
+            <h2>Latest AI Decisions</h2>
+            <p class="muted">Sorted by ai_decision_id (desc)</p>
+        </div>
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Decision Time</th>
+                        <th>Entry</th>
+                        <th>Exit</th>
+                        <th>Account</th>
+                        <th>Symbol</th>
+                        <th>Signal</th>
+                        <th>Size</th>
+                        <th>PnL</th>
+                        <th>AI ID</th>
+                        <th>Reason</th>
+                        <th>Screenshot</th>
+                    </tr>
+                </thead>
+                <tbody id="trades-body">
+                    <tr><td colspan="11" class="muted">Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <script>
+        const tradesBody = document.getElementById('trades-body');
+        const lastUpdated = document.getElementById('last-updated');
+
+        const formatMoney = (val) => {
+            if (val === null || val === undefined) return '—';
+            const num = Number(val);
+            if (Number.isNaN(num)) return '—';
+            return `$${num.toFixed(2)}`;
+        };
+
+        const formatDate = (value) => {
+            if (!value) return '—';
+            try {
+                const date = new Date(value);
+                return date.toLocaleString();
+            } catch (e) {
+                return value;
+            }
+        };
+
+        const renderMetrics = (metrics) => {
+            document.getElementById('open-positions').textContent = metrics.open_positions ?? 0;
+            document.getElementById('open-pnl').textContent = `Open PnL: ${formatMoney(metrics.open_pnl)}`;
+            document.getElementById('daily-pnl').textContent = formatMoney(metrics.daily_pnl);
+            document.getElementById('win-rate').textContent = metrics.win_rate !== null && metrics.win_rate !== undefined
+                ? `${metrics.win_rate.toFixed(1)}%`
+                : '—';
+            document.getElementById('win-loss').textContent = `Wins: ${metrics.wins ?? 0} · Losses: ${metrics.losses ?? 0}`;
+            document.getElementById('closed-trades').textContent = metrics.closed_trades ?? 0;
+        };
+
+        const renderTrades = (trades) => {
+            tradesBody.innerHTML = '';
+            if (!trades.length) {
+                tradesBody.innerHTML = '<tr><td colspan="11" class="muted">No trades found</td></tr>';
+                return;
+            }
+
+            trades.forEach(trade => {
+                const row = document.createElement('tr');
+                const pnl = trade.net_pnl ?? trade.total_pnl;
+                const pnlClass = pnl > 0 ? 'pnl-win' : pnl < 0 ? 'pnl-loss' : '';
+                row.innerHTML = `
+                    <td>${formatDate(trade.decision_time)}</td>
+                    <td>${formatDate(trade.entry_time)}</td>
+                    <td>${formatDate(trade.exit_time)}</td>
+                    <td>${trade.account || '—'}</td>
+                    <td>${trade.symbol || '—'}</td>
+                    <td><span class="pill">${trade.signal || '—'}</span></td>
+                    <td>${trade.size ?? '—'}</td>
+                    <td class="${pnlClass}">${formatMoney(pnl)}</td>
+                    <td>${trade.ai_decision_id ?? '—'}</td>
+                    <td class="reason">${trade.reason || '—'}</td>
+                    <td>${trade.screenshot_url ? `<a href="${trade.screenshot_url}" target="_blank">Open</a>` : '—'}</td>
+                `;
+                tradesBody.appendChild(row);
+            });
+        };
+
+        async function loadDashboard() {
+            try {
+                const response = await fetch('/dashboard/data');
+                const data = await response.json();
+                if (data.error) {
+                    tradesBody.innerHTML = `<tr><td colspan="11" class="muted">${data.error}</td></tr>`;
+                    return;
+                }
+                renderMetrics(data.metrics || {});
+                renderTrades(data.trades || []);
+                lastUpdated.textContent = new Date().toLocaleTimeString();
+            } catch (err) {
+                tradesBody.innerHTML = `<tr><td colspan="11" class="muted">${err.message}</td></tr>`;
+            }
+        }
+
+        loadDashboard();
+        setInterval(loadDashboard, 30000);
+    </script>
+</body>
+</html>

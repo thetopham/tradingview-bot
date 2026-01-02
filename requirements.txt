@@ -6,3 +6,5 @@ pytz
 gunicorn
 python-dateutil
 signalrcore
+
+supabase
