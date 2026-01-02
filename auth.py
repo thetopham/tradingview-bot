@@ -16,7 +16,8 @@ USER_NAME = config['USER_NAME']
 API_KEY = config['API_KEY']
 GET_FLAT_START = config['GET_FLAT_START']
 GET_FLAT_END = config['GET_FLAT_END']
-CT = pytz.timezone("America/Chicago")  # Or load from config if you want
+CT = pytz.timezone("America/Denver")  # Mountain Time
+WEEKEND_MARKET_OPEN = config['WEEKEND_MARKET_OPEN']
 
 
 # ─── Auth State ───────────────────────────────────────
@@ -26,8 +27,31 @@ auth_lock = threading.Lock()
 
 def in_get_flat(now=None):
     now = now or datetime.now(CT)
-    t = now.timetz() if hasattr(now, "timetz") else now
-    return GET_FLAT_START <= t <= GET_FLAT_END
+    if now.tzinfo:
+        now = now.astimezone(CT)
+    else:
+        now = CT.localize(now)
+
+    t = now.timetz().replace(tzinfo=None)
+    weekday = now.weekday()  # Monday=0, Sunday=6
+
+    # Monday–Thursday: respect daily flatten window
+    if weekday < 4:
+        return GET_FLAT_START <= t <= GET_FLAT_END
+
+    # Friday: block starting at the window start, then stay flat for the weekend
+    if weekday == 4:
+        return t >= GET_FLAT_START
+
+    # Saturday: always flat
+    if weekday == 5:
+        return True
+
+    # Sunday: flat until futures market re-opens
+    if weekday == 6:
+        return t < WEEKEND_MARKET_OPEN
+
+    return False
 
 def authenticate():
     global _token, _token_expiry
