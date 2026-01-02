@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Trade Feed</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --positive: #22c55e;
+      --negative: #ef4444;
+      --border: #334155;
+      --card: #0b1220;
+    }
+
+    body {
+      font-family: "Inter", system-ui, -apple-system, sans-serif;
+      margin: 0;
+      background: var(--bg);
+      color: #e2e8f0;
+      padding: 24px;
+    }
+
+    h1 {
+      margin: 0 0 16px 0;
+      letter-spacing: -0.02em;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .card {
+      background: linear-gradient(145deg, var(--panel), var(--card));
+      padding: 14px 16px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+    }
+
+    .card h3 {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .card .value {
+      margin-top: 6px;
+      font-size: 24px;
+      font-weight: 700;
+      color: #e5e7eb;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2);
+    }
+
+    thead {
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    th, td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      font-size: 14px;
+    }
+
+    th {
+      color: var(--muted);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+
+    .pill.buy { background: rgba(34, 197, 94, 0.16); color: #34d399; }
+    .pill.sell { background: rgba(239, 68, 68, 0.16); color: #f87171; }
+    .pill.hold { background: rgba(148, 163, 184, 0.16); color: var(--muted); }
+    .pill.flat { background: rgba(56, 189, 248, 0.16); color: #67e8f9; }
+
+    .pnl-pos { color: var(--positive); }
+    .pnl-neg { color: var(--negative); }
+    .muted { color: var(--muted); }
+
+    .screenshot-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .screenshot-link:hover { text-decoration: underline; }
+
+    .error {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      padding: 12px;
+      border-radius: 10px;
+      margin-bottom: 16px;
+      color: #fecdd3;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    button.refresh {
+      background: var(--accent);
+      border: none;
+      color: #0b1220;
+      font-weight: 700;
+      padding: 10px 14px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: transform 0.1s ease, box-shadow 0.2s ease;
+      box-shadow: 0 4px 16px rgba(56, 189, 248, 0.35);
+    }
+
+    button.refresh:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 24px rgba(56, 189, 248, 0.5);
+    }
+
+    @media (max-width: 900px) {
+      th, td { font-size: 12px; }
+      .card .value { font-size: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <div>
+      <h1>AI Trade Feed</h1>
+      <div class="muted">Live view from <code>ai_trade_feed</code></div>
+    </div>
+    <button class="refresh" onclick="loadFeed()">Refresh</button>
+  </div>
+
+  <div id="error" class="error" style="display:none;"></div>
+
+  <div class="grid" id="metric-grid">
+    <div class="card">
+      <h3>Open Positions</h3>
+      <div class="value" id="open-count">0</div>
+    </div>
+    <div class="card">
+      <h3>Open PnL</h3>
+      <div class="value" id="open-pnl">0</div>
+    </div>
+    <div class="card">
+      <h3>Win Rate</h3>
+      <div class="value" id="win-rate">0%</div>
+    </div>
+    <div class="card">
+      <h3>Daily PnL</h3>
+      <div class="value" id="daily-pnl">0</div>
+    </div>
+    <div class="card">
+      <h3>Closed Trades</h3>
+      <div class="value" id="closed-trades">0</div>
+    </div>
+    <div class="card">
+      <h3>Total Trades</h3>
+      <div class="value" id="total-trades">0</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Entry</th>
+        <th>Exit</th>
+        <th>Account</th>
+        <th>Symbol</th>
+        <th>Signal</th>
+        <th>Size</th>
+        <th>PnL</th>
+        <th>AI ID</th>
+        <th>Reason</th>
+        <th>Screenshot</th>
+      </tr>
+    </thead>
+    <tbody id="feed-body"></tbody>
+  </table>
+
+  <script>
+    const fmtDate = (value) => {
+      if (!value) return '—';
+      const d = new Date(value);
+      if (isNaN(d)) return value;
+      return d.toLocaleString();
+    };
+
+    const fmtNumber = (value) => {
+      if (value === null || value === undefined) return '—';
+      const num = Number(value);
+      if (Number.isNaN(num)) return value;
+      return num.toFixed(2);
+    };
+
+    const signalPill = (signalRaw) => {
+      const signal = (signalRaw || '').toString().toLowerCase();
+      const cls = `pill ${signal}`;
+      const label = signal ? signal.toUpperCase() : '—';
+      return `<span class="${cls}">${label}</span>`;
+    };
+
+    function renderMetrics(metrics = {}) {
+      const { open_positions, open_pnl, win_rate, daily_pnl, closed_trades, total_trades } = metrics;
+      document.getElementById('open-count').textContent = open_positions ?? 0;
+      document.getElementById('open-pnl').textContent = fmtNumber(open_pnl);
+      document.getElementById('win-rate').textContent = `${fmtNumber(win_rate)}%`;
+      document.getElementById('daily-pnl').textContent = fmtNumber(daily_pnl);
+      document.getElementById('closed-trades').textContent = closed_trades ?? 0;
+      document.getElementById('total-trades').textContent = total_trades ?? 0;
+    }
+
+    function renderRows(feed = []) {
+      const tbody = document.getElementById('feed-body');
+      tbody.innerHTML = '';
+
+      if (!feed.length) {
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 10;
+        cell.className = 'muted';
+        cell.textContent = 'No trades yet';
+        row.appendChild(cell);
+        tbody.appendChild(row);
+        return;
+      }
+
+      for (const item of feed) {
+        const tr = document.createElement('tr');
+        const entry = item.entry_time || item.entry || item.created_at;
+        const exit = item.exit_time || item.exit;
+        const size = item.size ?? item.qty ?? item.quantity;
+        const pnl = item.pnl ?? item.profit_loss ?? item.pl;
+        const aiId = item.ai_decision_id || item.ai_id || item.session_id;
+        const reason = item.reason || item.notes || '—';
+        const screenshot = item.screenshot || item.screenshot_url || item.chart_url;
+
+        tr.innerHTML = `
+          <td>${fmtDate(entry)}</td>
+          <td>${fmtDate(exit)}</td>
+          <td>${item.account || item.account_name || '—'}</td>
+          <td>${item.symbol || item.contract || '—'}</td>
+          <td>${signalPill(item.signal)}</td>
+          <td>${size ?? '—'}</td>
+          <td class="${Number(pnl) >= 0 ? 'pnl-pos' : 'pnl-neg'}">${fmtNumber(pnl)}</td>
+          <td>${aiId || '—'}</td>
+          <td>${reason}</td>
+          <td>${screenshot ? `<a class="screenshot-link" href="${screenshot}" target="_blank" rel="noreferrer">View</a>` : '—'}</td>
+        `;
+
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function loadFeed() {
+      try {
+        const res = await fetch('/api/dashboard/feed');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Unable to load feed');
+        renderMetrics(data.metrics || {});
+        renderRows(data.feed || []);
+        document.getElementById('error').style.display = 'none';
+      } catch (err) {
+        const el = document.getElementById('error');
+        el.textContent = err.message;
+        el.style.display = 'block';
+      }
+    }
+
+    loadFeed();
+    setInterval(loadFeed, 15000);
+  </script>
+</body>
+</html>
