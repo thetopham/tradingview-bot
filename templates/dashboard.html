@@ -281,6 +281,29 @@
     </section>
 
     <div class="grid">
+        <section class="card">
+            <h2>Open Positions</h2>
+            <div id="open-error" class="error" style="display:none"></div>
+            <div class="table-wrapper">
+                <table id="open-positions">
+                    <thead>
+                        <tr>
+                            <th>Entry Time</th>
+                            <th>Account</th>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Size</th>
+                            <th>Entry</th>
+                            <th>Last</th>
+                            <th>PnL</th>
+                            <th>Price Source</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="meta" id="open-empty">Loading…</div>
+        </section>
         <section class="card" style="grid-column: 1 / -1;">
             <h2>AI Trades (Merged)</h2>
             <div id="trade-error" class="error" style="display:none"></div>
@@ -315,6 +338,9 @@
         const mergedEmpty = document.getElementById('merged-empty');
         const tradeError = document.getElementById('trade-error');
         const aiError = document.getElementById('ai-error');
+        const openBody = document.querySelector('#open-positions tbody');
+        const openEmpty = document.getElementById('open-empty');
+        const openError = document.getElementById('open-error');
         const reasonError = document.createElement('div');
         reasonError.className = 'error';
         reasonError.style.display = 'none';
@@ -334,6 +360,12 @@
         function pill(label, type) {
             const cls = (type || '').toLowerCase();
             return `<span class="pill ${cls}">${label || ''}</span>`;
+        }
+
+        function formatPrice(value) {
+            const num = Number(value);
+            if (Number.isNaN(num)) return value ?? '';
+            return num.toFixed(2);
         }
 
         function updateRefreshTimer() {
@@ -445,15 +477,48 @@
             });
         }
 
+        function renderPositions(positions = []) {
+            openBody.innerHTML = '';
+            if (!positions || positions.length === 0) {
+                openEmpty.textContent = 'No open positions';
+                return;
+            }
+            openEmpty.textContent = '';
+
+            positions.forEach((pos) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="muted">${pos.entry_time || ''}</td>
+                    <td>${pos.account || ''}</td>
+                    <td>${pos.symbol || ''}</td>
+                    <td>${pos.side ? pill(pos.side, pos.side) : ''}</td>
+                    <td>${pos.size ?? ''}</td>
+                    <td>${formatPrice(pos.entry_price)}</td>
+                    <td>${formatPrice(pos.current_price)}</td>
+                    <td>${formatPnL(pos.pnl)}</td>
+                    <td class="muted">${pos.price_source || ''}</td>
+                `;
+                openBody.appendChild(row);
+            });
+        }
+
         async function refresh() {
             try {
                 const response = await fetch('/dashboard/data');
                 const data = await response.json();
                 updatedEl.textContent = new Date(data.updated_at).toLocaleString();
+                renderPositions(data.open_positions || []);
                 renderMerged(data.merged_trades || []);
                 renderSummary(data.merged_trades || [], data.active_sessions || []);
                 lastRefresh = Date.now();
                 updateRefreshTimer();
+
+                if (data.open_positions_error) {
+                    openError.style.display = 'block';
+                    openError.textContent = `Position lookup error: ${data.open_positions_error}`;
+                } else {
+                    openError.style.display = 'none';
+                }
 
                 if (data.merged_error) {
                     tradeError.style.display = 'block';
