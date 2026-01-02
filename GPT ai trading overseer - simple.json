@@ -12,8 +12,8 @@
       "name": "Sticky Note5",
       "type": "n8n-nodes-base.stickyNote",
       "position": [
-        144,
-        224
+        160,
+        -608
       ],
       "typeVersion": 1
     },
@@ -27,8 +27,8 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
-        944,
-        368
+        -368,
+        352
       ],
       "id": "fa1359c1-8f9a-4979-8011-db9067e996f5",
       "name": "Webhook",
@@ -43,8 +43,8 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.2,
       "position": [
-        3408,
-        192
+        3136,
+        352
       ],
       "id": "94e9896f-955f-4e65-97aa-37722681c102",
       "name": "Respond to Webhook"
@@ -62,8 +62,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.2,
       "position": [
-        2048,
-        672
+        2144,
+        544
       ],
       "id": "ad7e154a-6d64-4011-be46-18dec95ab657",
       "name": "OpenAI Chat Model1",
@@ -79,12 +79,11 @@
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        944,
-        544
+        -368,
+        528
       ],
       "id": "746ee08e-9c28-433a-aa12-cd20319990a2",
-      "name": "When clicking ‘Test workflow’",
-      "disabled": true
+      "name": "When clicking ‘Test workflow’"
     },
     {
       "parameters": {
@@ -94,8 +93,8 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        2944,
-        192
+        2656,
+        352
       ],
       "id": "ee39e37d-c09e-4291-97f0-7262e9d49d4d",
       "name": "Supabase",
@@ -113,8 +112,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2608,
-        192
+        2480,
+        352
       ],
       "id": "c8f2a171-6de3-4906-a414-242ff83aaf9d",
       "name": "Code"
@@ -126,8 +125,8 @@
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.1,
       "position": [
-        944,
-        160
+        -368,
+        144
       ],
       "id": "89fd63f8-48ab-48fb-b109-2c5e63dc07fc",
       "name": "When Executed by Another Workflow"
@@ -149,8 +148,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        3200,
-        192
+        2960,
+        352
       ],
       "id": "75872dfd-37a9-4cb0-9632-7d14f6d04959",
       "name": "Edit Fields"
@@ -180,7 +179,7 @@
         "resource": "object",
         "operation": "create",
         "bucketName": "tradingview-chart",
-        "objectName": "=charts/{{ $json.id }}/{{ $json.timeframe }}.jpg",
+        "objectName": "=charts/{{ $json.ai_decision_id }}/5m.jpg",
         "createData": {},
         "createQuery": {},
         "encryptionHeaders": {},
@@ -190,8 +189,8 @@
       "type": "n8n-nodes-base.googleCloudStorage",
       "typeVersion": 1,
       "position": [
-        3888,
-        464
+        3184,
+        544
       ],
       "id": "7571dc64-0c5f-4c7a-8302-947041485796",
       "retryOnFail": true,
@@ -274,19 +273,21 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        2944,
-        480
+        2720,
+        816
       ],
       "id": "17bf2546-b831-4f62-81b7-7e81ba4eee5e",
       "name": "Edit Fields1"
     },
     {
-      "parameters": {},
+      "parameters": {
+        "mode": "chooseBranch"
+      },
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.1,
       "position": [
-        3200,
-        464
+        3056,
+        800
       ],
       "id": "77866880-23de-4530-a9c9-c59a12bef111",
       "name": "Merge"
@@ -299,8 +300,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3648,
-        464
+        2960,
+        544
       ],
       "id": "4f23b4bd-da64-44b7-a14b-125b79289bc7",
       "name": "HTTP Request"
@@ -313,7 +314,7 @@
       "typeVersion": 2,
       "position": [
         3408,
-        672
+        832
       ],
       "id": "11267e1d-0331-4134-bb67-c6b897cbf865",
       "name": "Code1"
@@ -353,8 +354,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        4080,
-        464
+        3424,
+        544
       ],
       "id": "e501095e-8b96-42d6-8d09-5e2bb8e12cb7",
       "name": "Edit Fields2"
@@ -366,8 +367,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4288,
-        464
+        3648,
+        272
       ],
       "id": "46ccc21b-b921-4cc6-ae30-5a4390b22f8b",
       "name": "Code2"
@@ -382,7 +383,7 @@
           "fieldValues": [
             {
               "fieldId": "urls",
-              "fieldValue": "={{ JSON.stringify($json.urls) }}\n"
+              "fieldValue": "={{ $json.url }}\n"
             }
           ]
         }
@@ -390,8 +391,8 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        4480,
-        464
+        3664,
+        544
       ],
       "id": "098e7c66-cddc-420b-866a-bf56b56a3271",
       "name": "Supabase1",
@@ -410,8 +411,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4288,
-        672
+        3664,
+        704
       ],
       "id": "db09c68c-064d-45a5-bcda-babb55122790",
       "name": "Code3"
@@ -442,8 +443,8 @@
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        4480,
-        672
+        3840,
+        704
       ],
       "id": "ab80bdb0-ddb8-4398-871e-fb9011fa7625",
       "name": "updates chart_analysis urls",
@@ -458,7 +459,7 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "=buy, sell, hold, flat? \n\ncurrent position data: \nhas position={{ $('Webhook').item.json.body.position_context.current_position.has_position }}\ncontracts={{ $('Webhook').item.json.body.position_context.current_position.size }}\nside={{ $('Webhook').item.json.body.position_context.current_position.side }}\npnl=${{ $('Webhook').item.json.body.position_context.current_position.unrealized_pnl }}\nSL=$-30\nTP=$60\nduration_mins={{ $('Webhook').item.json.body.position_context.current_position.duration_minutes }}\n\n**Respond with valid JSON only** (no extra text):\n{\n  \"timestamp\":\"{{ $now }}\"\n  \"strategy\": \"simple\",\n  \"signal\": \"BUY|SELL|HOLD|FLAT\",\n  \"symbol\": \"CON.F.US.MES.H26\",\n  \"account\": \"{{ $('Webhook').item.json.body.account }}\",\n  \"size\": \"1\",\n  \"reason\": \"<reasoning>\",\n  \"urls\": \"{{ $json.url }}\"\n  \n}\n",
+        "text": "=You are the trading overseer for MES (5-minute loop).\n\nYou ONLY decide:\n1) signal: BUY | SELL | HOLD | FLAT\n2) reason: plain English, no fluff\n3) size: 1 | 2 | 3\n\nDefinitions:\n- BUY/SELL = enter or reverse position\n- HOLD = no action\n- FLAT = flatten current position (exit)\n\nRe-occuring process:\n- This process runs every 5 minutes.\n- Your decision should assume you will be asked again in ~5 minutes.\n- If uncertain, prefer HOLD and reassess next run.\n- If you include a “future self” note, keep it short and relevant for the next 1–5 runs (5–25 minutes).\n\nRisk/Bracket (informational):\nSL = -$30 \nTP = +$60 \n(Topstep changes point distance with size; risk stays ~$30) Use larger size only if tighter sl/tp fits current volatility/structure.\nSize meaning: choose bracket tightness (TP/SL distance), not leverage.\n\n\nCHART LEGEND (5m):\n- EMA 9 (Close) = BLUE\n- EMA 21 (Close) = YELLOW\n- VWAP (Session) = RED\n- MACD (12,26,9) = histogram + lines in MACD pane\n- ATR (14, RMA) = red line in ATR pane\n\nDATAFEED + DERIVED (5m numeric, source of truth):\n{{ JSON.stringify($('5m derived snapshot').item.json, null, 2) }}\nIf screenshot and numeric disagree, trust numeric values.\n\n\nCURRENT POSITION (source of truth):\nhas_position={{ $('Webhook').item.json.body.position_context.current_position.has_position }}\nside={{ $('Webhook').item.json.body.position_context.current_position.side || 'none' }}\ncontracts={{ $('Webhook').item.json.body.position_context.current_position.size }}\nunrealized_pnl=${{ $('Webhook').item.json.body.position_context.current_position.unrealized_pnl }}\nduration_mins={{ $('Webhook').item.json.body.position_context.current_position.duration_minutes }}\n\nLAST 5 AI DECISIONS (most recent first):\nprevious: ai_decision_id, timestamp, signal, reason\n{{ (($('Aggregate').item.json.data) || []).map(d => `${d.ai_decision_id} ${d.timestamp} ${d.signal}: ${d.reason}`).join('\\n') || \"None\" }}\n\nReason format (required):\n- 1: current thesis (why this signal).\n- 2: Invalidation: <what would make this wrong in the next 5–25 mins>.\n\nOUTPUT REQUIREMENTS:\n- Return ONLY valid JSON \n- strategy must be \"simple\".\n\nRETURN ONLY THIS JSON:\n{\n  \"timestamp\":\"{{ $now }}\",\n  \"strategy\":\"simple\",\n  \"signal\":\"BUY|SELL|HOLD|FLAT\",\n  \"symbol\":\"CON.F.US.MES.H26\",\n  \"account\":\"{{ $('Webhook').item.json.body.account }}\",\n  \"size\": 1,\n  \"reason\":\"<reasoning>\",\n  \"urls\":\"{{ $('HTTP Request1').item.json.url }}\"\n}\n",
         "messages": {
           "messageValues": [
             {
@@ -472,7 +473,7 @@
       "typeVersion": 1.6,
       "position": [
         2144,
-        368
+        352
       ],
       "id": "da7c90e7-6b11-4978-92ec-cc9f0e64f840",
       "name": "Basic LLM Chain",
@@ -486,8 +487,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1840,
-        368
+        1984,
+        352
       ],
       "id": "2b27f5fd-bd1a-4787-b133-705a7c9a997b",
       "name": "HTTP Request1"
@@ -520,7 +521,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://api.chart-img.com/v2/tradingview/layout-chart/storage/1LucwVmQ",
+        "url": "https://api.chart-img.com/v2/tradingview/layout-chart/storage/cLDFUbRS",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
@@ -567,8 +568,8 @@
       "name": "Tradingview Chart",
       "type": "n8n-nodes-base.httpRequest",
       "position": [
-        1584,
-        368
+        1792,
+        352
       ],
       "typeVersion": 4.2,
       "retryOnFail": true,
@@ -578,6 +579,254 @@
           "name": "chart-img"
         }
       }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "ai_trading_log",
+        "limit": 5,
+        "filterType": "string",
+        "filterString": "=account=eq.beta&order=ai_decision_id.desc&limit=5\n"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        352
+      ],
+      "id": "e7b217ad-5123-4c2e-bb02-3101b215a26e",
+      "name": "Get many rows",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        176,
+        352
+      ],
+      "id": "9930b255-5fba-4ece-a0bc-5e9cc0223772",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a91f16c2-6718-4c9a-b64e-14605fbf446a",
+              "name": "ai_decision_id",
+              "value": "={{ $json.ai_decision_id }}",
+              "type": "number"
+            },
+            {
+              "id": "27962e82-7e85-47ec-8768-7d9e9ad684fa",
+              "name": "signal",
+              "value": "={{ $json.signal }}",
+              "type": "string"
+            },
+            {
+              "id": "89685755-83de-4be6-9fbc-6e6a2f4aac88",
+              "name": "reason",
+              "value": "={{ $json.reason }}",
+              "type": "string"
+            },
+            {
+              "id": "111a91a0-86b9-4d6c-8386-2d29b295e6a5",
+              "name": "timestamp",
+              "value": "={{ $json.timestamp }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        16,
+        352
+      ],
+      "id": "8c79faf6-0cbb-407a-8204-4bc45375d4ad",
+      "name": "Edit Fields3"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "73f4aee5-ed19-4135-ae40-09abfacbee78",
+              "name": "ts",
+              "value": "={{ $json.ts }}",
+              "type": "string"
+            },
+            {
+              "id": "1af74867-1166-4b37-b647-abc0a1154626",
+              "name": "c",
+              "value": "={{ $json.c }}",
+              "type": "number"
+            },
+            {
+              "id": "b62fbeca-7d27-4d75-9b3a-64184730ab74",
+              "name": "ema9",
+              "value": "={{ $json.ema9 }}",
+              "type": "number"
+            },
+            {
+              "id": "bff37745-d7e3-4f4e-87fe-9504a570a2fd",
+              "name": "ema21",
+              "value": "={{ $json.ema21 }}",
+              "type": "number"
+            },
+            {
+              "id": "3e78929e-5833-454e-96bb-12b5d08b7891",
+              "name": "vwap",
+              "value": "={{ $json.vwap }}",
+              "type": "number"
+            },
+            {
+              "id": "8637b963-9891-4fc6-b92a-ad86833a72f7",
+              "name": "atr",
+              "value": "={{ $json.atr }}",
+              "type": "number"
+            },
+            {
+              "id": "c8d10b8a-d8f6-48cf-b2a3-08c4918d2ddf",
+              "name": "macd_hist",
+              "value": "={{ $json.macd_hist }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1376,
+        352
+      ],
+      "id": "7a22a42b-6883-4403-b9ef-0215a042827d",
+      "name": "Latest 5m Snapshot"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "tv_datafeed_5m",
+        "limit": 1,
+        "filterType": "string",
+        "filterString": "=symbol=eq.MES&order=ts.desc&limit=1\n"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        736,
+        416
+      ],
+      "id": "a4e1b1d1-ebfd-439c-b622-008661f97297",
+      "name": "Get datafeed_5m",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Expect the most recent CLOSED 5m bar (align to 5-minute boundary)\nconst now = new Date();\nconst ms = now.getTime();\nconst fiveMin = 5 * 60 * 1000;\n\n// use the previous completed bar close time\nconst expected = new Date(Math.floor(ms / fiveMin) * fiveMin);\n\nreturn [{ json: { expected_ts: expected.toISOString() } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        352
+      ],
+      "id": "78ddf5ba-e1c5-48e0-85b0-1b193684c4af",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "amount": 2
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        512,
+        352
+      ],
+      "id": "aa6f0810-ed18-40b9-adb7-2407fef3b207",
+      "name": "Wait",
+      "webhookId": "7affd6ff-3e8e-4199-aea4-fa5b58556aac"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "30820a48-c378-4033-b7b3-06a42eec2d86",
+              "leftValue": "={{ $json.ts }}",
+              "rightValue": "={{ $json.expected_ts }}\n",
+              "operator": {
+                "type": "dateTime",
+                "operation": "afterOrEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1168,
+        368
+      ],
+      "id": "02232943-9c26-4d0b-bf4a-ce57f805391f",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        960,
+        368
+      ],
+      "id": "d14d9936-c274-459c-9059-186f80d8a1d9",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $input.first().json;\n\nconst c = Number(row.c);\nconst vwap = Number(row.vwap);\nconst ema21 = Number(row.ema21);\nconst atr = Number(row.atr);\n\nconst c_minus_vwap_pts = c - vwap;\nconst c_minus_ema21_pts = c - ema21;\n\n// TP and SL distances in points by Topstep size mapping\nconst tp_pts_size1 = 12;\nconst tp_pts_size2 = 6;\nconst tp_pts_size3 = 4;\nconst sl_pts_size1 = 6;\nconst sl_pts_size2 = 3;\nconst sl_pts_size3 = 2;\n\nconst tp_to_atr_size1 = atr ? tp_pts_size1 / atr : null;\nconst sl_to_atr_size1 = atr ? sl_pts_size1 / atr : null;\nconst tp_to_atr_size2 = atr ? tp_pts_size2 / atr : null;\nconst sl_to_atr_size2 = atr ? sl_pts_size2 / atr : null;\nconst tp_to_atr_size3 = atr ? tp_pts_size3 / atr : null;\nconst sl_to_atr_size3 = atr ? sl_pts_size3 / atr : null;\n\n// Round helper (2 decimals)\nconst r = (x) => (x == null ? null : Math.round(x * 100) / 100);\n\nreturn [{\n  json: {\n    ...row,\n    c_minus_vwap_pts: r(c_minus_vwap_pts),\n    c_minus_ema21_pts: r(c_minus_ema21_pts),\n    tp_to_atr_size1: r(tp_to_atr_size1),\n    sl_to_atr_size1: r(sl_to_atr_size1),\n    tp_to_atr_size2: r(tp_to_atr_size2),\n    sl_to_atr_size2: r(sl_to_atr_size2),\n    tp_to_atr_size3: r(tp_to_atr_size3),\n    sl_to_atr_size3: r(sl_to_atr_size3),\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        352
+      ],
+      "id": "05a46c2e-4ace-42e2-bf45-a576585ac31d",
+      "name": "5m derived snapshot"
     }
   ],
   "pinData": {
@@ -587,13 +836,13 @@
           "headers": {
             "host": "n8n.thetopham.com",
             "user-agent": "python-requests/2.32.5",
-            "content-length": "1033",
+            "content-length": "1059",
             "accept": "*/*",
             "accept-encoding": "gzip, br",
             "cdn-loop": "cloudflare; loops=1",
             "cf-connecting-ip": "71.218.241.177",
             "cf-ipcountry": "US",
-            "cf-ray": "9b688700dd721f3c-DEN",
+            "cf-ray": "9b77f2c8dccde777-DEN",
             "cf-visitor": "{\"scheme\":\"https\"}",
             "cf-warp-tag-id": "ab76dbd7-011c-42ec-9501-c562736f8c45",
             "connection": "keep-alive",
@@ -605,57 +854,57 @@
           "query": {},
           "body": {
             "account": "beta",
-            "strategy": "",
+            "strategy": "simple",
             "signal": "",
             "symbol": "CON.F.US.MES.M25",
             "size": 3,
             "alert": "APScheduler 5m",
             "positions": [
               {
-                "id": 505193604,
+                "id": 506539640,
                 "accountId": 11065802,
                 "contractId": "CON.F.US.MES.H26",
-                "creationTimestamp": "2025-12-31T08:35:28.679427+00:00",
-                "type": 2,
-                "size": 2,
-                "averagePrice": 6923.75
+                "creationTimestamp": "2026-01-02T05:10:44.961142+00:00",
+                "type": 1,
+                "size": 1,
+                "averagePrice": 6922.25
               }
             ],
             "position_summary": [
               {
                 "contract": "CON.F.US.MES.H26",
-                "side": "SHORT",
-                "size": 2,
-                "avg_price": 6923.75,
-                "pnl": -2
+                "side": "LONG",
+                "size": 1,
+                "avg_price": 6922.25,
+                "pnl": 0.25
               }
             ],
             "position_context": {
               "current_position": {
                 "has_position": true,
-                "size": 2,
-                "side": "SHORT",
-                "entry_price": 6923.75,
-                "current_price": 6924.75,
-                "current_pnl": -10,
-                "unrealized_pnl": -10,
+                "size": 1,
+                "side": "LONG",
+                "entry_price": 6922.25,
+                "current_price": 6922.5,
+                "current_pnl": 1.25,
+                "unrealized_pnl": 1.25,
                 "realized_pnl": 0,
-                "duration_minutes": 14.608193466666668,
+                "duration_minutes": 34.336861533333334,
                 "stop_count": 1,
                 "target_count": 1
               },
               "account_metrics": {
-                "daily_pnl": 26.67,
-                "win_rate": 0.25,
-                "consecutive_losses": 0,
+                "daily_pnl": 18.25,
+                "win_rate": 0.17391304347826086,
+                "consecutive_losses": 1,
                 "open_positions": 1,
                 "risk_level": "low",
                 "can_trade": true
               },
               "risk_limits": {
-                "max_daily_loss": -500,
-                "profit_target": 500,
-                "max_consecutive_losses": 3,
+                "max_daily_loss": -250,
+                "profit_target": 99999999,
+                "max_consecutive_losses": 999999,
                 "consecutive_loss_guard_enabled": true
               },
               "warnings": [],
@@ -676,7 +925,7 @@
       "main": [
         [
           {
-            "node": "Tradingview Chart",
+            "node": "Get many rows",
             "type": "main",
             "index": 0
           }
@@ -703,7 +952,7 @@
       "main": [
         [
           {
-            "node": "Tradingview Chart",
+            "node": "Get many rows",
             "type": "main",
             "index": 0
           }
@@ -717,11 +966,6 @@
             "node": "Supabase",
             "type": "main",
             "index": 0
-          },
-          {
-            "node": "Edit Fields1",
-            "type": "main",
-            "index": 0
           }
         ]
       ]
@@ -730,7 +974,7 @@
       "main": [
         [
           {
-            "node": "Tradingview Chart",
+            "node": "Get many rows",
             "type": "main",
             "index": 0
           }
@@ -746,7 +990,7 @@
             "index": 0
           },
           {
-            "node": "Merge",
+            "node": "HTTP Request",
             "type": "main",
             "index": 0
           }
@@ -782,13 +1026,7 @@
     },
     "Merge": {
       "main": [
-        [
-          {
-            "node": "HTTP Request",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     },
     "Code1": {
@@ -822,12 +1060,12 @@
       "main": [
         [
           {
-            "node": "Code2",
+            "node": "Code3",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Code3",
+            "node": "Supabase1",
             "type": "main",
             "index": 0
           }
@@ -836,13 +1074,7 @@
     },
     "Code2": {
       "main": [
-        [
-          {
-            "node": "Supabase1",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     },
     "Supabase1": {
@@ -898,6 +1130,128 @@
           }
         ]
       ]
+    },
+    "Get many rows": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields3": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Latest 5m Snapshot": {
+      "main": [
+        [
+          {
+            "node": "5m derived snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get datafeed_5m": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get datafeed_5m",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Latest 5m Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5m derived snapshot": {
+      "main": [
+        [
+          {
+            "node": "Tradingview Chart",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": true,
@@ -905,7 +1259,7 @@
     "callerPolicy": "workflowsFromSameOwner",
     "executionOrder": "v1"
   },
-  "versionId": "13b20a3f-8297-4937-a5de-ce8294db402e",
+  "versionId": "6ef5a91e-622a-4192-b632-243ef247be61",
   "meta": {
     "templateId": "2569",
     "templateCredsSetupCompleted": true,
