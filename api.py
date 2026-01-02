@@ -18,7 +18,7 @@ OVERRIDE_CONTRACT_ID = config['OVERRIDE_CONTRACT_ID']
 PX_BASE = config['PX_BASE']
 SUPABASE_URL = config['SUPABASE_URL']
 SUPABASE_KEY = config['SUPABASE_KEY']
-CT = config['CT']
+MT = config['MT']
 MES = "MES"
 
 _PRICE_CACHE: Dict[str, Optional[Tuple[float, str]]] = {
@@ -304,7 +304,7 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
             except Exception as e:
                 logging.debug("Could not get chart price: %s", e)
 
-            now = datetime.now(CT)
+            now = datetime.now(MT)
             is_market_closed = (
                 now.weekday() == 5 or
                 (now.weekday() == 6 and now.hour < 17) or
@@ -459,7 +459,7 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=N
     position_summary = _summarize_positions(positions or [])
     simple_position_context = position_context or _compute_simple_position_context(positions or [], sym)
 
-    now = datetime.now(CT)
+    now = datetime.now(MT)
     if in_get_flat(now):
         logging.info(
             "In get-flat window (%s–%s %s); skipping AI decision call.",
@@ -526,7 +526,7 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
     """Persist closed-trade results to Supabase with best-effort correlation.
 
     Key behaviors:
-    - Normalizes timestamps (entry/exit) to tz-aware Chicago time for storage.
+    - Normalizes timestamps (entry/exit) to tz-aware Mountain Time for storage.
     - Queries ProjectX trades in a bounded window around the position lifecycle.
     - Retries briefly to avoid race conditions where fills/PnL arrive after the position-close event.
     - Uses trace_id (preferred) or ai_decision_id+entry_time window as an idempotency key to update instead of duplicating rows.
@@ -552,18 +552,18 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         return str(acct_id)
 
     def _normalize_entry_time(value) -> datetime:
-        """Normalize entry_time to a tz-aware Chicago datetime."""
+        """Normalize entry_time to a tz-aware Mountain Time datetime."""
         try:
             if isinstance(value, (float, int)):
-                return datetime.fromtimestamp(value, CT)
+                return datetime.fromtimestamp(value, MT)
 
             if isinstance(value, str):
-                return parser.isoparse(value).astimezone(CT)
+                return parser.isoparse(value).astimezone(MT)
 
             if getattr(value, "tzinfo", None) is None:
-                return CT.localize(value)
+                return MT.localize(value)
 
-            return value.astimezone(CT)
+            return value.astimezone(MT)
         except Exception as exc:
             logging.error(
                 "[log_trade_results_to_supabase] entry_time conversion error: %r (%s): %s",
@@ -571,7 +571,7 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
                 type(value),
                 exc,
             )
-            return datetime.now(CT)
+            return datetime.now(MT)
 
     def _parse_trade_ts(trade: dict) -> datetime | None:
         raw = (
@@ -608,7 +608,7 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
     # Normalize context
     # ---------------------------------------------------------------------
     entry_dt = _normalize_entry_time(entry_time)
-    exit_guess = datetime.now(CT)
+    exit_guess = datetime.now(MT)
 
     # Query window (buffered to handle slight clock skew + partial fills)
     start_dt = entry_dt - timedelta(minutes=5)
@@ -806,7 +806,7 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
 
     # Choose exit_time as the last observed trade timestamp (fallback to now)
     trade_times = [ts for ts in (_parse_trade_ts(t) for t in relevant_trades) if ts is not None]
-    exit_dt = max(trade_times).astimezone(CT) if trade_times else exit_guess
+    exit_dt = max(trade_times).astimezone(MT) if trade_times else exit_guess
 
     # Compute gross PnL (sum only the trade records that report profitAndLoss)
     pnl_values: list[float] = []

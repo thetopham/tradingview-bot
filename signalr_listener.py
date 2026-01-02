@@ -10,7 +10,7 @@ from signalrcore.hub_connection_builder import HubConnectionBuilder
 
 from api import ACCOUNTS, search_pos, log_trade_results_to_supabase
 
-CT = pytz.timezone("America/Chicago")
+MT = pytz.timezone("America/Denver")
 USER_HUB_URL_BASE = "wss://rtc.topstepx.com/hubs/user?access_token={}"
 
 orders_state = {}
@@ -133,7 +133,7 @@ def reconstruct_trade_metadata_on_startup():
                         "symbol": cid,
                         "trades": None,
                         "regime": "unknown",
-                        "comment": f"Metadata reconstructed on {datetime.now(CT).strftime('%Y-%m-%d %H:%M:%S')}",
+                        "comment": f"Metadata reconstructed on {datetime.now(MT).strftime('%Y-%m-%d %H:%M:%S')}",
                         "session_id": session_id,
                         "trace_id": trace_id,
                     }
@@ -318,7 +318,7 @@ class SignalRTradingListener(threading.Thread):
         logging.info(f"SignalR event: {args}")
 
     def handle_close(self):
-        close_time = datetime.now(CT)
+        close_time = datetime.now(MT)
         logging.warning(f"SignalR connection closed at {close_time}")
 
         if close_time.minute >= 25 and close_time.minute <= 30:
@@ -421,9 +421,9 @@ def on_position_update(args):
                 if isinstance(meta_entry_time, str):
                     meta_time = parser.isoparse(meta_entry_time)
                 else:
-                    meta_time = datetime.fromtimestamp(meta_entry_time, CT)
+                    meta_time = datetime.fromtimestamp(meta_entry_time, MT)
 
-                current_time = parser.isoparse(entry_time) if entry_time else datetime.now(CT)
+                current_time = parser.isoparse(entry_time) if entry_time else datetime.now(MT)
 
                 time_diff = abs((current_time - meta_time).total_seconds())
 
@@ -467,7 +467,7 @@ def on_position_update(args):
                 "symbol": contract_id,
                 "trades": None,
                 "regime": "unknown",
-                "comment": f"Metadata created on position update at {datetime.now(CT).strftime('%Y-%m-%d %H:%M:%S')}",
+                "comment": f"Metadata created on position update at {datetime.now(MT).strftime('%Y-%m-%d %H:%M:%S')}",
                 "session_id": session_id,
                 "trace_id": _build_trace_id(entry_time, None, session_id=session_id),
             }
@@ -526,7 +526,7 @@ def on_position_update(args):
                 "trace_id": trace_id,
             }
 
-            entry_time = last_position.get("creationTimestamp", datetime.now(CT) - timedelta(hours=1))
+            entry_time = last_position.get("creationTimestamp", datetime.now(MT) - timedelta(hours=1))
 
             log_trade_results_to_supabase(
                 acct_id=account_id,

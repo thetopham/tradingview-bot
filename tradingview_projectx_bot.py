@@ -31,7 +31,7 @@ TV_PORT         = config['TV_PORT']
 WEBHOOK_SECRET  = config['WEBHOOK_SECRET']
 ACCOUNTS        = config['ACCOUNTS']
 DEFAULT_ACCOUNT = config['DEFAULT_ACCOUNT']
-LOCAL_TZ        = config['CT']
+LOCAL_TZ        = config['MT']
 GET_FLAT_START  = config['GET_FLAT_START']
 GET_FLAT_END    = config['GET_FLAT_END']
 

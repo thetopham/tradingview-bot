@@ -8,7 +8,7 @@ from api import flatten_contract, search_pos
 
 config = load_config()
 WEBHOOK_SECRET = config['WEBHOOK_SECRET']
-LOCAL_TZ = config['CT']
+LOCAL_TZ = config['MT']
 TV_PORT = config['TV_PORT']
 ACCOUNTS = config['ACCOUNTS']
 
