@@ -25,6 +25,7 @@ _token_expiry = 0
 auth_lock = threading.Lock()
 
 def in_get_flat(now=None):
+    """Return True when trading should be paused (all times Mountain)."""
     now = now or datetime.now(MT)
     if now.tzinfo:
         now = now.astimezone(MT)
@@ -46,7 +47,7 @@ def in_get_flat(now=None):
     if weekday == 5:
         return True
 
-    # Sunday: flat until futures market re-opens
+    # Sunday: flat until futures market re-opens (3:00pm MT)
     if weekday == 6:
         return t < WEEKEND_MARKET_OPEN
 

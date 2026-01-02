@@ -90,6 +90,12 @@ Three source tables exist:
   - Ensure the bot can query ProjectX trades (`/api/Trade/search`)
 - The AI workflow should output **valid JSON only** to avoid parser issues in n8n.
 
+### Trading hours (Mountain Time)
+
+- Daily flatten window: **2:05pm–4:00pm MT (Mon–Fri)**
+- Markets are closed/flat all day **Saturday**
+- **Sunday reopen: 3:00pm MT**
+
 ## Safety
 
 This code executes real orders. Use a sim account first and add risk controls before trading live.
