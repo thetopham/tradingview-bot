@@ -93,3 +93,7 @@ Three source tables exist:
 ## Safety
 
 This code executes real orders. Use a sim account first and add risk controls before trading live.
+
+## Full deployment runbook
+
+See [`docs/PROJECT_DOCUMENTATION.md`](docs/PROJECT_DOCUMENTATION.md) for the complete production checklist, including required subscriptions (TopstepX Combine, TradingView + CME data, Supabase, chart-img), environment variables, and example `systemd` units/timers.
