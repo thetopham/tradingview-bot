@@ -20,6 +20,8 @@ SUPABASE_URL = config['SUPABASE_URL']
 SUPABASE_KEY = config['SUPABASE_KEY']
 MT = config['MT']
 MES = "MES"
+GET_FLAT_START = dtime(14, 5)  # 2:05pm MT
+GET_FLAT_END = dtime(16, 0) #4:00pm MT 
 
 _PRICE_CACHE: Dict[str, Optional[Tuple[float, str]]] = {
     "symbol": None,
