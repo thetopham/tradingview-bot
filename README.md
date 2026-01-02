@@ -43,7 +43,7 @@ Required:
 
 Accounts:
 
-- `ACCOUNT_beta=11065802` (example)
+- `ACCOUNT_beta=topstep-account-number-goes-here` (example)
 - `ACCOUNT_epsilon=...`
 
 AI endpoint:
@@ -75,10 +75,11 @@ sudo journalctl -u tradingview_bot.service -f
 
 ## Supabase schema
 
-Two source tables exist:
+Three source tables exist:
 
 - `ai_trading_log` – AI decisions (account, symbol, signal, size, reason, urls)
 - `trade_results` – realized results on close (entry/exit/pnl, raw_trades, trace/session ids)
+- 'ai_trade_feed' - pulls data from ai_trading_log with ai hypothesis and entry data and pnl results from trade_results then displays on dashboard
 
 
 
