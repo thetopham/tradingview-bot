@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Trades Dashboard</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-muted: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #38bdf8;
+      --danger: #f87171;
+      --success: #4ade80;
+    }
+    body {
+      margin: 0;
+      font-family: "Inter", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 32px;
+    }
+    h1 {
+      margin: 0 0 24px;
+      font-weight: 700;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--panel-muted);
+      border-radius: 10px;
+      padding: 16px;
+    }
+    .card .label {
+      font-size: 14px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .card .value {
+      font-size: 24px;
+      font-weight: 700;
+    }
+    .table-wrapper {
+      background: var(--panel);
+      border: 1px solid var(--panel-muted);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    thead {
+      background: var(--panel-muted);
+      text-align: left;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    th, td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--panel-muted);
+    }
+    tbody tr:hover {
+      background: rgba(56, 189, 248, 0.04);
+    }
+    .pill {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-weight: 600;
+      font-size: 12px;
+      color: #0f172a;
+    }
+    .pill-buy { background: var(--success); }
+    .pill-sell { background: var(--danger); }
+    .pill-hold { background: #fbbf24; }
+    .pill-flat { background: #c084fc; }
+    a { color: var(--accent); }
+    .muted { color: var(--muted); }
+    .right { text-align: right; }
+  </style>
+</head>
+<body>
+  <h1>AI Trades Dashboard</h1>
+  <div class="cards">
+    <div class="card">
+      <div class="label">Open Position PnL</div>
+      <div class="value" id="open-pnl">--</div>
+    </div>
+    <div class="card">
+      <div class="label">Daily PnL</div>
+      <div class="value" id="daily-pnl">--</div>
+    </div>
+    <div class="card">
+      <div class="label">Win %</div>
+      <div class="value" id="win-rate">--</div>
+    </div>
+    <div class="card">
+      <div class="label">Closed Trades</div>
+      <div class="value" id="closed-trades">--</div>
+    </div>
+  </div>
+
+  <div class="table-wrapper">
+    <table id="trades-table">
+      <thead>
+        <tr>
+          <th>AI ID</th>
+          <th>Decision Time</th>
+          <th>Entry</th>
+          <th>Exit</th>
+          <th>Account</th>
+          <th>Symbol</th>
+          <th>Signal</th>
+          <th class="right">Size</th>
+          <th class="right">PnL</th>
+          <th>Reason</th>
+          <th>Screenshot</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    const fmtCurrency = (value) => {
+      const num = Number(value || 0);
+      const formatter = new Intl.NumberFormat('en-US', {
+        style: 'currency', currency: 'USD', minimumFractionDigits: 2,
+      });
+      return formatter.format(num);
+    };
+
+    const fmtDate = (value) => {
+      if (!value) return '—';
+      try {
+        return new Date(value).toLocaleString();
+      } catch (e) {
+        return value;
+      }
+    };
+
+    const signalPill = (signal) => {
+      const s = (signal || '').toUpperCase();
+      const map = {
+        'BUY': 'pill-buy',
+        'SELL': 'pill-sell',
+        'HOLD': 'pill-hold',
+        'FLAT': 'pill-flat',
+      };
+      const cls = map[s] || 'pill-hold';
+      return `<span class="pill ${cls}">${s || 'N/A'}</span>`;
+    };
+
+    const loadData = async () => {
+      const res = await fetch('/dashboard/data');
+      const payload = await res.json();
+      const { trades = [], metrics = {} } = payload;
+
+      document.getElementById('open-pnl').textContent = fmtCurrency(metrics.open_pnl);
+      document.getElementById('daily-pnl').textContent = fmtCurrency(metrics.daily_pnl);
+      document.getElementById('win-rate').textContent = `${metrics.win_rate ?? 0}%`;
+      document.getElementById('closed-trades').textContent = metrics.closed_trades ?? 0;
+
+      const tbody = document.querySelector('#trades-table tbody');
+      tbody.innerHTML = '';
+
+      trades.forEach((t) => {
+        const tr = document.createElement('tr');
+        const screenshotLink = t.screenshot_url ? `<a href="${t.screenshot_url}" target="_blank">Open</a>` : '<span class="muted">N/A</span>';
+        tr.innerHTML = `
+          <td>${t.ai_decision_id ?? '—'}</td>
+          <td>${fmtDate(t.decision_time)}</td>
+          <td>${fmtDate(t.entry_time)}</td>
+          <td>${fmtDate(t.exit_time)}</td>
+          <td>${t.account || '—'}</td>
+          <td>${t.symbol || '—'}</td>
+          <td>${signalPill(t.signal)}</td>
+          <td class="right">${t.size ?? '—'}</td>
+          <td class="right">${fmtCurrency(t.net_pnl ?? t.total_pnl)}</td>
+          <td>${t.reason || '<span class="muted">—</span>'}</td>
+          <td>${screenshotLink}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    };
+
+    loadData();
+    setInterval(loadData, 30000);
+  </script>
+</body>
+</html>
