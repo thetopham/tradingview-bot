@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Trade Feed Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #0f172a; color: #e2e8f0; }
+        h1 { margin-bottom: 10px; }
+        .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+        select, button, input[type="checkbox"] { padding: 6px 8px; border-radius: 6px; border: 1px solid #1f2937; background: #1e293b; color: #e2e8f0; }
+        .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 16px; }
+        .card { background: #111827; border: 1px solid #1f2937; padding: 12px; border-radius: 10px; }
+        .card h3 { margin: 0 0 6px 0; font-size: 16px; color: #a5b4fc; }
+        .card .value { font-size: 20px; font-weight: bold; }
+        .table-container { overflow-x: auto; border: 1px solid #1f2937; border-radius: 10px; background: #0b1220; }
+        table { width: 100%; border-collapse: collapse; color: #e2e8f0; }
+        th, td { padding: 8px 10px; border-bottom: 1px solid #1f2937; text-align: left; }
+        th { background: #111827; position: sticky; top: 0; }
+        tr:nth-child(even) { background: #0f172a; }
+        .pill { padding: 4px 8px; border-radius: 999px; font-weight: bold; font-size: 12px; }
+        .pill.win { background: rgba(34,197,94,0.2); color: #22c55e; }
+        .pill.loss { background: rgba(239,68,68,0.2); color: #ef4444; }
+        .pill.neutral { background: rgba(148,163,184,0.2); color: #94a3b8; }
+        .refresh { font-size: 12px; color: #94a3b8; }
+        .btn { padding: 6px 10px; border-radius: 6px; border: none; background: #2563eb; color: white; cursor: pointer; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .toggle { display: flex; align-items: center; gap: 6px; }
+        .errors { color: #f87171; margin-top: 8px; }
+    </style>
+</head>
+<body>
+    <h1>AI Trade Feed</h1>
+    <div class="controls">
+        <label>Account:
+            <select id="accountFilter">
+                <option value="all">All</option>
+                {% for acct in accounts %}
+                <option value="{{ acct }}">{{ acct }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>Range:
+            <select id="rangeFilter">
+                <option value="today">Today</option>
+                <option value="7d" selected>7 days</option>
+                <option value="30d">30 days</option>
+            </select>
+        </label>
+        <label class="toggle">
+            <input type="checkbox" id="includeOpen" checked /> Include open trades
+        </label>
+        <button id="refreshBtn" class="btn">Refresh</button>
+        <span class="refresh">Updated: <span id="updatedAt">-</span> (refreshing in <span id="countdown">15</span>s)</span>
+    </div>
+
+    <div class="cards" id="metrics">
+        <div class="card">
+            <h3>Open Position PnL</h3>
+            <div class="value" id="openPnl">-</div>
+            <div id="openDetails" style="font-size:12px;color:#94a3b8"></div>
+        </div>
+        <div class="card">
+            <h3>Today Net / Gross</h3>
+            <div class="value" id="todayNet">-</div>
+            <div style="font-size:12px;color:#94a3b8">Gross: <span id="todayGross">-</span> | Fees: <span id="todayFees">-</span></div>
+        </div>
+        <div class="card">
+            <h3>Today Trades</h3>
+            <div class="value" id="todayTrades">-</div>
+            <div style="font-size:12px;color:#94a3b8">Win %: <span id="todayWin">-</span> | Avg: <span id="todayAvg">-</span> | PF: <span id="todayPf">-</span></div>
+        </div>
+        <div class="card">
+            <h3>7D Net PnL</h3>
+            <div class="value" id="sevenNet">-</div>
+            <div style="font-size:12px;color:#94a3b8">Win %: <span id="sevenWin">-</span></div>
+        </div>
+        <div class="card">
+            <h3>Streak (Today)</h3>
+            <div class="value" id="streak">-</div>
+            <div style="font-size:12px;color:#94a3b8">Consecutive results</div>
+        </div>
+    </div>
+
+    <div class="table-container">
+        <table id="feedTable">
+            <thead>
+                <tr>
+                    <th>Decision Time</th>
+                    <th>Entry Time</th>
+                    <th>Exit Time</th>
+                    <th>Account</th>
+                    <th>Symbol</th>
+                    <th>Signal</th>
+                    <th>Size</th>
+                    <th>PnL</th>
+                    <th>AI Decision ID</th>
+                    <th>Reason</th>
+                    <th>Screenshot</th>
+                    <th>Strategy</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+    <div class="errors" id="errors"></div>
+
+    <script>
+        const accountSelect = document.getElementById('accountFilter');
+        const rangeSelect = document.getElementById('rangeFilter');
+        const includeOpen = document.getElementById('includeOpen');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const updatedAt = document.getElementById('updatedAt');
+        const countdownEl = document.getElementById('countdown');
+        const errorsEl = document.getElementById('errors');
+        let timer = null;
+        let countdown = 15;
+
+        function formatNumber(value) {
+            if (value === null || value === undefined || isNaN(value)) return '-';
+            return Number(value).toFixed(2);
+        }
+
+        function formatTs(ts) {
+            if (!ts) return '';
+            const date = new Date(ts);
+            return date.toLocaleString('en-US', { timeZone: 'America/Denver' });
+        }
+
+        function fetchData() {
+            const params = new URLSearchParams({
+                account: accountSelect.value,
+                range: rangeSelect.value,
+                include_open: includeOpen.checked
+            });
+            fetch(`/dashboard/data?${params.toString()}`)
+                .then(r => r.json())
+                .then(data => {
+                    renderData(data);
+                    updatedAt.textContent = formatTs(data.updated_at);
+                    errorsEl.textContent = data.errors ? JSON.stringify(data.errors) : '';
+                })
+                .catch(err => {
+                    errorsEl.textContent = 'Error loading data: ' + err;
+                });
+        }
+
+        function renderData(data) {
+            const rows = data.rows || [];
+            const tbody = document.querySelector('#feedTable tbody');
+            tbody.innerHTML = '';
+            rows.forEach(row => {
+                const tr = document.createElement('tr');
+                const cells = [
+                    formatTs(row.decision_time),
+                    formatTs(row.entry_time),
+                    formatTs(row.exit_time),
+                    row.account || '',
+                    row.symbol || '',
+                    row.signal || '',
+                    row.size ?? '',
+                    row.pnl !== null && row.pnl !== undefined ? formatNumber(row.pnl) : '',
+                    row.ai_decision_id || '',
+                    row.reason_text || '',
+                    row.screenshot_url ? `<a class="btn" href="${row.screenshot_url}" target="_blank">Open</a>` : '',
+                    row.strategy || ''
+                ];
+                cells.forEach(html => {
+                    const td = document.createElement('td');
+                    td.innerHTML = html;
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+
+            const metrics = data.metrics || {};
+            const today = metrics.today || {};
+            const seven = metrics.seven_day || {};
+            const streak = metrics.streak || {};
+            document.getElementById('todayNet').textContent = formatNumber(today.net_pnl);
+            document.getElementById('todayGross').textContent = formatNumber(today.gross_pnl);
+            document.getElementById('todayFees').textContent = formatNumber(today.fees);
+            document.getElementById('todayTrades').textContent = today.trade_count ?? '-';
+            document.getElementById('todayWin').textContent = today.win_rate !== undefined ? formatNumber(today.win_rate) + '%' : '-';
+            document.getElementById('todayAvg').textContent = formatNumber(today.avg_trade);
+            document.getElementById('todayPf').textContent = today.profit_factor !== null && today.profit_factor !== undefined ? formatNumber(today.profit_factor) : '-';
+            document.getElementById('sevenNet').textContent = formatNumber(seven.net_pnl);
+            document.getElementById('sevenWin').textContent = seven.win_rate !== undefined ? formatNumber(seven.win_rate) + '%' : '-';
+            document.getElementById('streak').textContent = streak.type ? `${streak.streak} ${streak.type}` : '-';
+
+            const openPositions = data.open_positions || {};
+            document.getElementById('openPnl').textContent = formatNumber(openPositions.total_unrealized);
+            const details = (openPositions.positions || []).map(p => {
+                if (!p.has_position) return `${p.account}: flat`;
+                const duration = p.duration_minutes ? `${p.duration_minutes.toFixed(1)}m` : '';
+                return `${p.account}: ${p.side || ''} ${p.size || ''} (${duration})`;
+            }).join(' | ');
+            document.getElementById('openDetails').textContent = details || 'No open positions';
+        }
+
+        function startTimer() {
+            if (timer) clearInterval(timer);
+            countdown = 15;
+            countdownEl.textContent = countdown;
+            timer = setInterval(() => {
+                countdown -= 1;
+                if (countdown <= 0) {
+                    fetchData();
+                    countdown = 15;
+                }
+                countdownEl.textContent = countdown;
+            }, 1000);
+        }
+
+        refreshBtn.addEventListener('click', () => { fetchData(); countdown = 15; countdownEl.textContent = countdown; });
+        accountSelect.addEventListener('change', fetchData);
+        rangeSelect.addEventListener('change', fetchData);
+        includeOpen.addEventListener('change', fetchData);
+
+        fetchData();
+        startTimer();
+    </script>
+</body>
+</html>
