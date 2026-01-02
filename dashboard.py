@@ -208,7 +208,21 @@ def _fetch_ai_reasons(ids: List[object]) -> Tuple[Dict[object, Dict[str, object]
     """Lookup AI decision details (reason, screenshot) for provided ids."""
 
     reasons: Dict[object, Dict[str, object]] = {}
-    cleaned_ids = [i for i in ids if i not in (None, "", [])]
+    cleaned_ids = []
+    for raw_id in ids:
+        if raw_id in (None, "", []):
+            continue
+
+        # Supabase column is a bigint; skip non-numeric identifiers that would
+        # cause the query to fail (e.g., "RESTART_...").
+        try:
+            numeric_id = int(raw_id)
+        except (TypeError, ValueError):
+            logging.debug("Skipping non-numeric ai_decision_id: %s", raw_id)
+            continue
+
+        cleaned_ids.append(numeric_id)
+
     if not cleaned_ids:
         return reasons, None
 
