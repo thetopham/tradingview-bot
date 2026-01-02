@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 from flask import Blueprint, jsonify, render_template
 import pytz
 
-from api import get_supabase_client
+from api import get_supabase_client, get_current_market_price, search_pos
 from config import load_config
 from signalr_listener import trade_meta
 
@@ -18,6 +18,7 @@ config = load_config()
 CT = config["CT"]
 ACCOUNT_NAME_BY_ID = {v: k for k, v in config["ACCOUNTS"].items()}
 DASHBOARD_TZ = pytz.timezone("America/Denver")
+CONTRACT_MULTIPLIER = 5  # Default multiplier for MES contracts
 
 
 def _format_ts(ts: Optional[object]) -> str:
@@ -77,6 +78,70 @@ def _collect_active_sessions() -> List[Dict[str, object]]:
         return raw if isinstance(raw, str) else str(raw)
 
     return sorted(sessions, key=_sort_key, reverse=True)
+
+
+def _calculate_unrealized_pnl(entry_price: Optional[float], current_price: Optional[float], size: float, side: str,
+                              contract_symbol: str) -> Optional[float]:
+    if entry_price is None or current_price is None:
+        return None
+
+    multiplier = CONTRACT_MULTIPLIER if str(contract_symbol or "").upper().startswith("MES") else 1
+
+    if side == "LONG":
+        return (current_price - entry_price) * size * multiplier
+    if side == "SHORT":
+        return (entry_price - current_price) * size * multiplier
+
+    return None
+
+
+def _collect_open_positions() -> Tuple[List[Dict[str, object]], Optional[str]]:
+    positions: List[Dict[str, object]] = []
+    errors: List[str] = []
+
+    for account_name, acct_id in config.get("ACCOUNTS", {}).items():
+        try:
+            open_positions = search_pos(acct_id)
+        except Exception as exc:  # pragma: no cover - network/API failure
+            logging.error("Failed to fetch positions for %s: %s", account_name, exc)
+            errors.append(f"{account_name}: {exc}")
+            continue
+
+        for pos in open_positions:
+            size = pos.get("size") or 0
+            if not size:
+                continue
+
+            side_code = pos.get("type")
+            side = "LONG" if side_code == 1 else "SHORT" if side_code == 2 else ""
+            entry_price = pos.get("averagePrice") or pos.get("avgPrice") or pos.get("entryPrice")
+            contract_symbol = pos.get("contractSymbol") or pos.get("contractId") or ""
+            creation_ts = pos.get("creationTimestamp")
+
+            try:
+                current_price, price_source = get_current_market_price(symbol=contract_symbol or "MES", max_age_seconds=600)
+            except Exception as exc:  # pragma: no cover - Supabase/network failures
+                logging.error("Failed to fetch current price for %s: %s", contract_symbol, exc)
+                current_price, price_source = None, None
+
+            pnl = _calculate_unrealized_pnl(entry_price, current_price, size, side, contract_symbol)
+
+            positions.append(
+                {
+                    "account": account_name,
+                    "symbol": contract_symbol,
+                    "side": side,
+                    "size": size,
+                    "entry_price": entry_price,
+                    "current_price": current_price,
+                    "price_source": price_source,
+                    "unrealized_pnl": pnl,
+                    "entry_time": _format_ts(creation_ts),
+                }
+            )
+
+    positions.sort(key=lambda p: p.get("entry_time", ""), reverse=True)
+    return positions, "; ".join(errors) if errors else None
 
 
 def _extract_first_url(value: object) -> str:
@@ -388,10 +453,12 @@ def _merge_trades_and_decisions(
 def _dashboard_payload() -> Dict[str, object]:
     merged_feed, merged_error = _fetch_merged_feed()
     active_sessions = _collect_active_sessions()
+    open_positions, positions_error = _collect_open_positions()
 
     return {
         "updated_at": datetime.now(CT).isoformat(),
         "active_sessions": active_sessions,
+        "open_positions": open_positions,
         "trade_results": [],
         "ai_decisions": [],
         "merged_trades": merged_feed,
@@ -399,6 +466,7 @@ def _dashboard_payload() -> Dict[str, object]:
         "trade_results_error": None,
         "ai_decision_error": None,
         "ai_reason_error": None,
+        "positions_error": positions_error,
     }
 
 
@@ -413,3 +481,9 @@ def dashboard_view():
 @dashboard_bp.route("/dashboard/data")
 def dashboard_data():
     return jsonify(_dashboard_payload())
+
+
+@dashboard_bp.route("/dashboard/positions")
+def dashboard_positions():
+    positions, error = _collect_open_positions()
+    return jsonify({"positions": positions, "error": error})

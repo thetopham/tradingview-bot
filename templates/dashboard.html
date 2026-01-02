@@ -282,6 +282,29 @@
 
     <div class="grid">
         <section class="card" style="grid-column: 1 / -1;">
+            <h2>Open Positions</h2>
+            <div id="positions-error" class="error" style="display:none"></div>
+            <div class="table-wrapper">
+                <table id="open-positions">
+                    <thead>
+                        <tr>
+                            <th>Account</th>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Size</th>
+                            <th>Entry</th>
+                            <th>Current</th>
+                            <th>PnL</th>
+                            <th>Entry Time</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="meta" id="positions-empty">Loading…</div>
+        </section>
+
+        <section class="card" style="grid-column: 1 / -1;">
             <h2>AI Trades (Merged)</h2>
             <div id="trade-error" class="error" style="display:none"></div>
             <div id="ai-error" class="error" style="display:none"></div>
@@ -315,6 +338,9 @@
         const mergedEmpty = document.getElementById('merged-empty');
         const tradeError = document.getElementById('trade-error');
         const aiError = document.getElementById('ai-error');
+        const positionsBody = document.querySelector('#open-positions tbody');
+        const positionsEmpty = document.getElementById('positions-empty');
+        const positionsError = document.getElementById('positions-error');
         const reasonError = document.createElement('div');
         reasonError.className = 'error';
         reasonError.style.display = 'none';
@@ -418,6 +444,30 @@
             return returnRawHtml ? formatted : formatted;
         }
 
+        function renderPositions(positions) {
+            positionsBody.innerHTML = '';
+            if (!positions || positions.length === 0) {
+                positionsEmpty.textContent = 'No open positions';
+                return;
+            }
+            positionsEmpty.textContent = '';
+
+            positions.forEach((p) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${p.account || ''}</td>
+                    <td>${p.symbol || ''}</td>
+                    <td>${pill(p.side, p.side)}</td>
+                    <td>${p.size ?? ''}</td>
+                    <td>${p.entry_price != null ? Number(p.entry_price).toFixed(2) : ''}</td>
+                    <td>${p.current_price != null ? Number(p.current_price).toFixed(2) : ''}</td>
+                    <td>${p.unrealized_pnl != null ? formatPnL(p.unrealized_pnl) : ''}</td>
+                    <td class="muted">${p.entry_time || ''}</td>
+                `;
+                positionsBody.appendChild(row);
+            });
+        }
+
         function renderMerged(trades) {
             mergedBody.innerHTML = '';
             if (!trades || trades.length === 0) {
@@ -451,9 +501,17 @@
                 const data = await response.json();
                 updatedEl.textContent = new Date(data.updated_at).toLocaleString();
                 renderMerged(data.merged_trades || []);
+                renderPositions(data.open_positions || []);
                 renderSummary(data.merged_trades || [], data.active_sessions || []);
                 lastRefresh = Date.now();
                 updateRefreshTimer();
+
+                if (data.positions_error) {
+                    positionsError.style.display = 'block';
+                    positionsError.textContent = `Position lookup error: ${data.positions_error}`;
+                } else {
+                    positionsError.style.display = 'none';
+                }
 
                 if (data.merged_error) {
                     tradeError.style.display = 'block';
