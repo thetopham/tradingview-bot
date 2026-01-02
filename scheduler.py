@@ -60,7 +60,7 @@ def start_scheduler(app):
 
     scheduler.add_job(
         flatten_all_open_positions,
-        CronTrigger(day_of_week='mon-fri', hour=14, minute=7, timezone=LOCAL_TZ),
+        CronTrigger(day_of_week='mon-fri', hour=14, minute=5, timezone=LOCAL_TZ),
         id='force_flat_job',
         replace_existing=True,
     )
