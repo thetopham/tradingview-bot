@@ -11,7 +11,7 @@ WEBHOOK_SECRET = config['WEBHOOK_SECRET']
 CT = pytz.timezone("America/Chicago")
 TV_PORT = config['TV_PORT']
 
-def start_scheduler(app):
+def start_scheduler(app, *, flatten_callback=None, flatten_timezone=None):
     scheduler = BackgroundScheduler()
     def cron_job():
         data = {
@@ -34,8 +34,25 @@ def start_scheduler(app):
         id='5m_job',
         replace_existing=True
     )
+
+    if flatten_callback:
+        scheduler.add_job(
+            flatten_callback,
+            CronTrigger(
+                day_of_week='mon-fri',
+                hour=14,
+                minute=7,
+                second=0,
+                timezone=flatten_timezone or CT,
+            ),
+            id='daily_flatten',
+            replace_existing=True
+        )
     scheduler.start()
-    logging.info("[APScheduler] Scheduler started with 5m job.")
+    logging.info(
+        "[APScheduler] Scheduler started with 5m job%s.",
+        " and daily flatten" if flatten_callback else ""
+    )
     return scheduler
 
     return scheduler

@@ -34,6 +34,7 @@ DEFAULT_ACCOUNT = config['DEFAULT_ACCOUNT']
 CT              = config['CT']
 GET_FLAT_START  = config['GET_FLAT_START']
 GET_FLAT_END    = config['GET_FLAT_END']
+GET_FLAT_TZ     = config['GET_FLAT_TZ']
 
 AI_ENDPOINTS = {
     "epsilon": config['N8N_AI_URL'],
@@ -45,6 +46,21 @@ POSITION_MANAGER = PositionManager(ACCOUNTS)
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.register_blueprint(dashboard_bp)
+
+
+def flatten_all_open_positions():
+    for acct_name, acct_id in ACCOUNTS.items():
+        positions = search_pos(acct_id)
+        if not positions:
+            continue
+        logging.info("Scheduled flatten triggered at 2:07 MT for account %s", acct_name)
+        seen_contracts = set()
+        for pos in positions:
+            cid = pos.get("contractId") or pos.get("contractSymbol")
+            if not cid or cid in seen_contracts:
+                continue
+            flatten_contract(acct_id, cid, timeout=10)
+            seen_contracts.add(cid)
 
 # --- Health Check Route (optional, but recommended for uptime monitoring) ---
 @app.route("/healthz")
@@ -168,7 +184,11 @@ if __name__ == "__main__":
             authenticate=authenticate,
             auth_lock=AUTH_LOCK
         ) 
-        scheduler = start_scheduler(app)
+        scheduler = start_scheduler(
+            app,
+            flatten_callback=flatten_all_open_positions,
+            flatten_timezone=GET_FLAT_TZ,
+        )
         app.logger.info("Starting server.")
         app.run(host="0.0.0.0", port=TV_PORT, threaded=True)
     except Exception as e:

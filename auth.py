@@ -16,6 +16,8 @@ USER_NAME = config['USER_NAME']
 API_KEY = config['API_KEY']
 GET_FLAT_START = config['GET_FLAT_START']
 GET_FLAT_END = config['GET_FLAT_END']
+GET_FLAT_SUNDAY_REOPEN = config['GET_FLAT_SUNDAY_REOPEN']
+GET_FLAT_TZ = config['GET_FLAT_TZ']
 CT = pytz.timezone("America/Chicago")  # Or load from config if you want
 
 
@@ -25,9 +27,28 @@ _token_expiry = 0
 auth_lock = threading.Lock()
 
 def in_get_flat(now=None):
-    now = now or datetime.now(CT)
+    now = now or datetime.now(GET_FLAT_TZ)
+    if now.tzinfo is None:
+        now = GET_FLAT_TZ.localize(now)
+    else:
+        now = now.astimezone(GET_FLAT_TZ)
+
     t = now.timetz() if hasattr(now, "timetz") else now
-    return GET_FLAT_START <= t <= GET_FLAT_END
+    weekday = now.weekday()  # Monday=0, Sunday=6
+
+    # Friday afternoon through Sunday before futures reopen
+    if weekday == 4 and t >= GET_FLAT_START:
+        return True
+    if weekday == 5:
+        return True
+    if weekday == 6 and t < GET_FLAT_SUNDAY_REOPEN:
+        return True
+
+    # Monday–Thursday daily window
+    if weekday in {0, 1, 2, 3} and GET_FLAT_START <= t <= GET_FLAT_END:
+        return True
+
+    return False
 
 def authenticate():
     global _token, _token_expiry
