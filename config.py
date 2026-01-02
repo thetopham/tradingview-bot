@@ -37,8 +37,11 @@ def load_config():
         or [2.5, 5.0]
     )
     config['TICKS_PER_POINT'] = float(os.getenv("TICKS_PER_POINT", 4))
-    config['GET_FLAT_START'] = dtime(15, 7)
-    config['GET_FLAT_END'] = dtime(17, 0)
-    config['CT'] = pytz.timezone("America/Chicago")
+    mountain = pytz.timezone("America/Denver")
+
+    config['GET_FLAT_START'] = dtime(14, 5)  # 2:05pm MT
+    config['GET_FLAT_END'] = dtime(16, 0)    # 4:00pm MT
+    config['WEEKEND_MARKET_OPEN'] = dtime(16, 0)  # Sunday futures reopen (4:00pm MT)
+    config['CT'] = mountain
     return config
 

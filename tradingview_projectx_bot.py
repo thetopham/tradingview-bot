@@ -31,7 +31,7 @@ TV_PORT         = config['TV_PORT']
 WEBHOOK_SECRET  = config['WEBHOOK_SECRET']
 ACCOUNTS        = config['ACCOUNTS']
 DEFAULT_ACCOUNT = config['DEFAULT_ACCOUNT']
-CT              = config['CT']
+LOCAL_TZ        = config['CT']
 GET_FLAT_START  = config['GET_FLAT_START']
 GET_FLAT_END    = config['GET_FLAT_END']
 
@@ -49,7 +49,7 @@ app.register_blueprint(dashboard_bp)
 # --- Health Check Route (optional, but recommended for uptime monitoring) ---
 @app.route("/healthz")
 def healthz():
-    return jsonify(status="ok", time=str(datetime.now(CT)))
+    return jsonify(status="ok", time=str(datetime.now(LOCAL_TZ)))
 
 @app.route("/webhook", methods=["POST"])
 def tv_webhook():
@@ -84,7 +84,7 @@ def handle_webhook_logic(data):
             logging.info(f"Manual flatten signal processed for {acct_id} {cid}")
             return
 
-        now = datetime.now(CT)
+        now = datetime.now(LOCAL_TZ)
         if in_get_flat(now):
             logging.info("In get-flat window, no trades processed")
             return
