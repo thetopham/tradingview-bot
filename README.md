@@ -19,6 +19,7 @@ This repo runs a lightweight execution + observability layer for an “AI day tr
 - `signalr_listener.py` – listens to broker events; logs results when a position closes
 - `api.py` – ProjectX REST calls + Supabase logging helpers
 - `dashboard.py` + `dashboard.html` – UI and API endpoint for merged feed
+- `docs/PROJECT_DOCUMENTATION.md` – full deployment, subscription, and systemd guidance
 
 ## Local setup
 
