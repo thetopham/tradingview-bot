@@ -67,7 +67,3 @@ def start_scheduler(app):
     scheduler.start()
     logging.info("[APScheduler] Scheduler started with 5m job.")
     return scheduler
-
-    return scheduler
-
-
