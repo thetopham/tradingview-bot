@@ -64,14 +64,7 @@ Then open:
 
 - Dashboard: `http://localhost:<TV_PORT>/dashboard`
 
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable tradingview_bot.service
-sudo systemctl start tradingview_bot.service
-sudo systemctl status tradingview_bot.service
-sudo journalctl -u tradingview_bot.service -f
-```
+For production deployments (subscriptions, environment variables, systemd units, timers, and cron alternatives), see the detailed [Project Setup and Operations Guide](docs/PROJECT_SETUP.md).
 
 ## Supabase schema
 
