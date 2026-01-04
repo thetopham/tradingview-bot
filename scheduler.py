@@ -11,6 +11,8 @@ WEBHOOK_SECRET = config['WEBHOOK_SECRET']
 LOCAL_TZ = config['MT']
 TV_PORT = config['TV_PORT']
 ACCOUNTS = config['ACCOUNTS']
+OVERRIDE_CONTRACT_ID = config['OVERRIDE_CONTRACT_ID']
+N8N_CHART_FETCH_URL = config.get('N8N_CHART_FETCH_URL')
 
 def start_scheduler(app):
     scheduler = BackgroundScheduler()
@@ -36,25 +38,68 @@ def start_scheduler(app):
                 logging.info("[APScheduler] Flattening %s for account %s", cid, acct_name)
                 flatten_contract(acct_id, cid, timeout=10)
 
-    def cron_job():
-        data = {
+    def chart_prefetch_job():
+        if not N8N_CHART_FETCH_URL:
+            logging.warning("[APScheduler] N8N_CHART_FETCH_URL not configured; skipping chart prefetch")
+            return
+        payload = {
+            "symbol": "MES",
+            "timeframe": "5m",
+            "source": "scheduler",
             "secret": WEBHOOK_SECRET,
-            "strategy": "",
-            "account": "beta",
-            "signal": "",
-            "symbol": "CON.F.US.MES.H26",
-            "size": 3,
-            "alert": f"APScheduler 5m"
         }
         try:
-            response = requests.post(f'http://localhost:{TV_PORT}/webhook', json=data)
-            logging.info(f"[APScheduler] HTTP POST call: {response.status_code} {response.text}")
-        except Exception as e:
-            logging.error(f"[APScheduler] HTTP POST failed: {e}")
+            resp = requests.post(N8N_CHART_FETCH_URL, json=payload, timeout=30)
+            snippet = resp.text[:120]
+            logging.info("[APScheduler] Chart prefetch status=%s body=%s", resp.status_code, snippet)
+        except Exception as exc:
+            logging.error("[APScheduler] Chart prefetch failed: %s", exc)
+
+    def overseer_job():
+        symbol = OVERRIDE_CONTRACT_ID or "CON.F.US.MES.H26"
+        target_accounts = [acct for acct in ("alpha", "beta", "gamma") if acct in ACCOUNTS]
+
+        if not target_accounts:
+            logging.warning("[APScheduler] No target accounts configured for overseer job")
+            return
+
+        for acct in target_accounts:
+            data = {
+                "secret": WEBHOOK_SECRET,
+                "strategy": "",
+                "account": acct,
+                "signal": "",
+                "symbol": symbol,
+                "size": 3,
+                "alert": "APScheduler 5m overseer",
+            }
+            try:
+                response = requests.post(
+                    f'http://localhost:{TV_PORT}/webhook',
+                    json=data,
+                    timeout=10,
+                )
+                snippet = response.text[:120]
+                logging.info(
+                    "[APScheduler] Overseer call account=%s status=%s body=%s",
+                    acct,
+                    response.status_code,
+                    snippet,
+                )
+            except Exception as exc:
+                logging.error("[APScheduler] Overseer call failed for %s: %s", acct, exc)
+
     scheduler.add_job(
-        cron_job,
+        chart_prefetch_job,
         CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=0, timezone=LOCAL_TZ),
-        id='5m_job',
+        id='chart_prefetch_job',
+        replace_existing=True
+    )
+
+    scheduler.add_job(
+        overseer_job,
+        CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=15, timezone=LOCAL_TZ),
+        id='overseer_job',
         replace_existing=True
     )
 
@@ -65,5 +110,5 @@ def start_scheduler(app):
         replace_existing=True,
     )
     scheduler.start()
-    logging.info("[APScheduler] Scheduler started with 5m job.")
+    logging.info("[APScheduler] Scheduler started with chart prefetch and overseer jobs.")
     return scheduler
