@@ -46,6 +46,17 @@ Accounts:
 - `ACCOUNT_beta=topstep-account-number-goes-here` (example)
 - `ACCOUNT_epsilon=...`
 
+### Account names and AI/n8n routing
+
+- Accounts are configured via `ACCOUNT_<NAME>=<id>` environment variables (for example, `ACCOUNT_BETA=123456`).
+- The bot lowercases those suffixes (`beta`, `epsilon`, etc.) and uses them as account keys when routing webhook payloads.
+- By default, both `beta` and `epsilon` use the main AI endpoint `N8N_AI_URL`.
+- Optional overseer test URLs (`N8N_OVERSEER_URL_TEST1` … `N8N_OVERSEER_URL_TEST5`) let you direct specific accounts to alternate n8n workflows.
+  - **TEST1 is reserved for the `beta` account.**
+  - **TEST2 is reserved for the `alpha` account.**
+  - TEST3/TEST4/TEST5 map to `gamma`/`delta`/`epsilon` respectively.
+- Each webhook run collects account positions and position context, sends them to the configured n8n flow, and follows the returned JSON signal (`BUY`/`SELL`/`HOLD`/`FLAT`) before executing the `simple` strategy.
+
 AI endpoint:
 
 - `N8N_AI_URL=https://.../webhook/simple` (example)

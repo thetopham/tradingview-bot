@@ -41,8 +41,8 @@ AI_ENDPOINTS = {
 }
 
 AI_TEST_ENDPOINTS = {
-    "alpha": config.get("N8N_OVERSEER_URL_TEST1") or config['N8N_AI_URL'],
-    "beta": config.get("N8N_OVERSEER_URL_TEST2") or config['N8N_AI_URL'],
+    "beta": config.get("N8N_OVERSEER_URL_TEST1") or config['N8N_AI_URL'],
+    "alpha": config.get("N8N_OVERSEER_URL_TEST2") or config['N8N_AI_URL'],
     "gamma": config.get("N8N_OVERSEER_URL_TEST3") or config['N8N_AI_URL'],
     "delta": config.get("N8N_OVERSEER_URL_TEST4") or config['N8N_AI_URL'],
     "epsilon": config.get("N8N_OVERSEER_URL_TEST5") or config['N8N_AI_URL'],
@@ -108,9 +108,9 @@ def handle_webhook_logic(data):
                 position_context = None
 
             route_label = "default"
-            if acct == "alpha":
+            if acct == "beta":
                 route_label = "TEST1"
-            elif acct == "beta":
+            elif acct == "alpha":
                 route_label = "TEST2"
             elif acct == "gamma":
                 route_label = "TEST3"
