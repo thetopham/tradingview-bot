@@ -12,7 +12,11 @@ LOCAL_TZ = config['MT']
 TV_PORT = config['TV_PORT']
 ACCOUNTS = config['ACCOUNTS']
 OVERRIDE_CONTRACT_ID = config['OVERRIDE_CONTRACT_ID']
-N8N_CHART_FETCH_URL = config.get('N8N_CHART_FETCH_URL')
+N8N_CHART_ENDPOINTS = {
+    "5m": config.get('N8N_5MCHART_FETCH_URL') or config.get('N8N_CHART_FETCH_URL'),
+    "15m": config.get('N8N_15MCHART_FETCH_URL'),
+    "30m": config.get('N8N_30MCHART_FETCH_URL'),
+}
 
 def start_scheduler(app):
     scheduler = BackgroundScheduler()
@@ -39,21 +43,29 @@ def start_scheduler(app):
                 flatten_contract(acct_id, cid, timeout=10)
 
     def chart_prefetch_job():
-        if not N8N_CHART_FETCH_URL:
-            logging.warning("[APScheduler] N8N_CHART_FETCH_URL not configured; skipping chart prefetch")
+        configured = {tf: url for tf, url in N8N_CHART_ENDPOINTS.items() if url}
+        if not configured:
+            logging.warning("[APScheduler] N8N chart fetch URLs not configured; skipping chart prefetch")
             return
-        payload = {
-            "symbol": "MES",
-            "timeframe": "5m",
-            "source": "scheduler",
-            "secret": WEBHOOK_SECRET,
-        }
-        try:
-            resp = requests.post(N8N_CHART_FETCH_URL, json=payload, timeout=30)
-            snippet = resp.text[:120]
-            logging.info("[APScheduler] Chart prefetch status=%s body=%s", resp.status_code, snippet)
-        except Exception as exc:
-            logging.error("[APScheduler] Chart prefetch failed: %s", exc)
+
+        for timeframe, url in configured.items():
+            payload = {
+                "symbol": "MES",
+                "timeframe": timeframe,
+                "source": "scheduler",
+                "secret": WEBHOOK_SECRET,
+            }
+            try:
+                resp = requests.post(url, json=payload, timeout=30)
+                snippet = resp.text[:120]
+                logging.info(
+                    "[APScheduler] Chart prefetch timeframe=%s status=%s body=%s",
+                    timeframe,
+                    resp.status_code,
+                    snippet,
+                )
+            except Exception as exc:
+                logging.error("[APScheduler] Chart prefetch failed for %s: %s", timeframe, exc)
 
     def overseer_job():
         symbol = OVERRIDE_CONTRACT_ID or "CON.F.US.MES.H26"
