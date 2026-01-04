@@ -108,6 +108,38 @@ def start_scheduler(app):
             except Exception as exc:
                 logging.error("[APScheduler] Overseer call failed for %s: %s", acct, exc)
 
+    def run_n8n_flow(account: str, timeframe: str, url: str):
+        if not url:
+            logging.warning(
+                "[APScheduler] n8n flow for %s (%s) not configured; skipping",
+                account,
+                timeframe,
+            )
+            return
+
+        payload = {
+            "symbol": "MES",
+            "timeframe": timeframe,
+            "source": f"scheduler-{account}",
+            "secret": WEBHOOK_SECRET,
+            "account": account,
+        }
+
+        try:
+            resp = requests.post(url, json=payload, timeout=30)
+            snippet = resp.text[:120]
+            logging.info(
+                "[APScheduler] n8n flow account=%s timeframe=%s status=%s body=%s",
+                account,
+                timeframe,
+                resp.status_code,
+                snippet,
+            )
+        except Exception as exc:
+            logging.error(
+                "[APScheduler] n8n flow failed for %s (%s): %s", account, timeframe, exc
+            )
+
     scheduler.add_job(
         chart_prefetch_job,
         CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=0, timezone=LOCAL_TZ),
@@ -130,6 +162,22 @@ def start_scheduler(app):
         id='chart_prefetch_job_30m',
         args=[{"30m"}],
         replace_existing=True
+    )
+
+    scheduler.add_job(
+        run_n8n_flow,
+        CronTrigger(minute='0,15,30,45', second=20, timezone=LOCAL_TZ),
+        id='n8n_delta_flow_15m',
+        args=["delta", "15m", N8N_CHART_ENDPOINTS.get("15m")],
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        run_n8n_flow,
+        CronTrigger(minute='0,30', second=25, timezone=LOCAL_TZ),
+        id='n8n_epsilon_flow_30m',
+        args=["epsilon", "30m", N8N_CHART_ENDPOINTS.get("30m")],
+        replace_existing=True,
     )
 
     scheduler.add_job(
