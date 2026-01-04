@@ -42,10 +42,17 @@ def start_scheduler(app):
                 logging.info("[APScheduler] Flattening %s for account %s", cid, acct_name)
                 flatten_contract(acct_id, cid, timeout=10)
 
-    def chart_prefetch_job():
-        configured = {tf: url for tf, url in N8N_CHART_ENDPOINTS.items() if url}
+    def chart_prefetch_job(timeframes):
+        configured = {
+            tf: url
+            for tf, url in N8N_CHART_ENDPOINTS.items()
+            if url and tf in timeframes
+        }
         if not configured:
-            logging.warning("[APScheduler] N8N chart fetch URLs not configured; skipping chart prefetch")
+            logging.warning(
+                "[APScheduler] N8N chart fetch URLs not configured for %s; skipping chart prefetch",
+                ",".join(sorted(timeframes)),
+            )
             return
 
         for timeframe, url in configured.items():
@@ -104,7 +111,24 @@ def start_scheduler(app):
     scheduler.add_job(
         chart_prefetch_job,
         CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=0, timezone=LOCAL_TZ),
-        id='chart_prefetch_job',
+        id='chart_prefetch_job_5m',
+        args=[{"5m"}],
+        replace_existing=True
+    )
+
+    scheduler.add_job(
+        chart_prefetch_job,
+        CronTrigger(minute='0,15,30,45', second=5, timezone=LOCAL_TZ),
+        id='chart_prefetch_job_15m',
+        args=[{"15m"}],
+        replace_existing=True
+    )
+
+    scheduler.add_job(
+        chart_prefetch_job,
+        CronTrigger(minute='0,30', second=10, timezone=LOCAL_TZ),
+        id='chart_prefetch_job_30m',
+        args=[{"30m"}],
         replace_existing=True
     )
 
