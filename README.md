@@ -49,6 +49,8 @@ Accounts:
 AI endpoint:
 
 - `N8N_AI_URL=https://.../webhook/simple` (example)
+- Optional per-timeframe chart prefetch URLs: `N8N_5MCHART_FETCH_URL`, `N8N_15MCHART_FETCH_URL`, `N8N_30MCHART_FETCH_URL`
+- Optional overseer test URLs: `N8N_OVERSEER_URL_TEST1` … `N8N_OVERSEER_URL_TEST5`
 
 Optional:
 

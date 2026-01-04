@@ -44,6 +44,8 @@ AI_TEST_ENDPOINTS = {
     "alpha": config.get("N8N_OVERSEER_URL_TEST1") or config['N8N_AI_URL'],
     "beta": config.get("N8N_OVERSEER_URL_TEST2") or config['N8N_AI_URL'],
     "gamma": config.get("N8N_OVERSEER_URL_TEST3") or config['N8N_AI_URL'],
+    "delta": config.get("N8N_OVERSEER_URL_TEST4") or config['N8N_AI_URL'],
+    "epsilon": config.get("N8N_OVERSEER_URL_TEST5") or config['N8N_AI_URL'],
 }
 
 AUTH_LOCK = threading.Lock()
@@ -112,6 +114,10 @@ def handle_webhook_logic(data):
                 route_label = "TEST2"
             elif acct == "gamma":
                 route_label = "TEST3"
+            elif acct == "delta":
+                route_label = "TEST4"
+            elif acct == "epsilon":
+                route_label = "TEST5"
 
             safe_url = ai_url.split("?")[0] if ai_url else "unset"
             logging.info("[AI ROUTE] account=%s -> %s url=%s", acct, route_label, safe_url)
