@@ -40,6 +40,12 @@ AI_ENDPOINTS = {
     "beta": config['N8N_AI_URL'],
 }
 
+AI_TEST_ENDPOINTS = {
+    "alpha": config.get("N8N_OVERSEER_URL_TEST1") or config['N8N_AI_URL'],
+    "beta": config.get("N8N_OVERSEER_URL_TEST2") or config['N8N_AI_URL'],
+    "gamma": config.get("N8N_OVERSEER_URL_TEST3") or config['N8N_AI_URL'],
+}
+
 AUTH_LOCK = threading.Lock()
 POSITION_MANAGER = PositionManager(ACCOUNTS)
 
@@ -90,14 +96,25 @@ def handle_webhook_logic(data):
             return
 
         # --- AI Overseer Routing ---
-        if acct in AI_ENDPOINTS:
+        ai_url = AI_TEST_ENDPOINTS.get(acct) or AI_ENDPOINTS.get(acct) or config.get('N8N_AI_URL')
+        if ai_url:
             positions = search_pos(acct_id)
-            ai_url = AI_ENDPOINTS[acct]
 
             try:
                 position_context = POSITION_MANAGER.get_position_context_for_ai(acct_id, cid)
             except Exception:
                 position_context = None
+
+            route_label = "default"
+            if acct == "alpha":
+                route_label = "TEST1"
+            elif acct == "beta":
+                route_label = "TEST2"
+            elif acct == "gamma":
+                route_label = "TEST3"
+
+            safe_url = ai_url.split("?")[0] if ai_url else "unset"
+            logging.info("[AI ROUTE] account=%s -> %s url=%s", acct, route_label, safe_url)
 
             ai_decision = ai_trade_decision(
                 acct,
