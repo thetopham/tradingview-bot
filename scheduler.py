@@ -150,7 +150,7 @@ def start_scheduler(app):
 
     scheduler.add_job(
         chart_prefetch_job,
-        CronTrigger(minute='0,15,30,45', second=5, timezone=LOCAL_TZ),
+        CronTrigger(minute='0,15,30,45', second=0, timezone=LOCAL_TZ),
         id='chart_prefetch_job_15m',
         args=[{"15m"}],
         replace_existing=True
@@ -158,7 +158,7 @@ def start_scheduler(app):
 
     scheduler.add_job(
         chart_prefetch_job,
-        CronTrigger(minute='0,30', second=10, timezone=LOCAL_TZ),
+        CronTrigger(minute='0,30', second=0, timezone=LOCAL_TZ),
         id='chart_prefetch_job_30m',
         args=[{"30m"}],
         replace_existing=True
@@ -166,7 +166,7 @@ def start_scheduler(app):
 
     scheduler.add_job(
         run_n8n_flow,
-        CronTrigger(minute='0,15,30,45', second=20, timezone=LOCAL_TZ),
+        CronTrigger(minute='0,15,30,45', second=15, timezone=LOCAL_TZ),
         id='n8n_delta_flow_15m',
         args=["delta", "15m", N8N_CHART_ENDPOINTS.get("15m")],
         replace_existing=True,
@@ -174,7 +174,7 @@ def start_scheduler(app):
 
     scheduler.add_job(
         run_n8n_flow,
-        CronTrigger(minute='0,30', second=25, timezone=LOCAL_TZ),
+        CronTrigger(minute='0,30', second=15, timezone=LOCAL_TZ),
         id='n8n_epsilon_flow_30m',
         args=["epsilon", "30m", N8N_CHART_ENDPOINTS.get("30m")],
         replace_existing=True,
