@@ -96,7 +96,7 @@ def handle_webhook_logic(data):
             return
 
         # --- AI Overseer Routing ---
-        ai_url = AI_TEST_ENDPOINTS.get(acct) or AI_ENDPOINTS.get(acct) or config.get('N8N_AI_URL')
+        ai_url = AI_TEST_ENDPOINTS.get(acct) or AI_ENDPOINTS.get(acct)
         if ai_url:
             positions = search_pos(acct_id)
 
