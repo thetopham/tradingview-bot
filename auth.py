@@ -47,7 +47,7 @@ def in_get_flat(now=None):
     if weekday == 5:
         return True
 
-    # Sunday: flat until futures market re-opens (3:00pm MT)
+    # Sunday: flat until futures market re-opens (4:00pm MT)
     if weekday == 6:
         return t < WEEKEND_MARKET_OPEN
 

@@ -94,7 +94,7 @@ Three source tables exist:
 
 - Daily flatten window: **2:05pm–4:00pm MT (Mon–Fri)**
 - Markets are closed/flat all day **Saturday**
-- **Sunday reopen: 3:00pm MT**
+- **Sunday reopen: 4:00pm MT**
 
 ## Safety
 
