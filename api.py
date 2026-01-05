@@ -206,10 +206,11 @@ def _summarize_positions(positions, timeframe: str = "1m"):
 
         if current_price is None or avg_price is None:
             pnl = None
-        elif side == "LONG":
-            pnl = (current_price - avg_price) * size
+        contract_multiplier = 5 # MES = $5/pt/contract
+        if side == "LONG":
+            pnl = (current_price - avg_price) * size * contract_multiplier
         elif side == "SHORT":
-            pnl = (avg_price - current_price) * size
+            pnl = (avg_price - current_price) * size * contract_multiplier
         else:
             pnl = None
 
