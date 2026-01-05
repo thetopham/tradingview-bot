@@ -146,6 +146,108 @@ def search_trades(acct_id, since):
     trades = post("/api/Trade/search", {"accountId": acct_id, "startTimestamp": since.isoformat()}).get("trades", [])
     return trades
 
+
+def _search_accounts(only_active: bool = True) -> Optional[List[Dict]]:
+    """Query the Account/search endpoint for account snapshots."""
+
+    try:
+        result = post("/api/Account/search", {"onlyActiveAccounts": bool(only_active)})
+    except Exception as exc:  # noqa: BLE001 - tolerant probe
+        logging.debug("Account search failed (only_active=%s): %s", only_active, exc)
+        return None
+
+    if isinstance(result, dict) and isinstance(result.get("accounts"), list):
+        return result.get("accounts")
+    if isinstance(result, list):
+        return result
+    return None
+
+
+def get_account_overview(acct_id: int) -> Optional[Dict[str, Optional[float]]]:
+    """Return the latest overview record for an account (balance, canTrade)."""
+
+    accounts = _search_accounts(only_active=True) or _search_accounts(only_active=False) or []
+    for row in accounts:
+        if not isinstance(row, dict):
+            continue
+        try:
+            row_id = int(row.get("id"))
+        except Exception:
+            continue
+        if row_id != acct_id:
+            continue
+        overview = {
+            "balance": None,
+            "canTrade": row.get("canTrade"),
+            "isVisible": row.get("isVisible"),
+            "name": row.get("name"),
+        }
+        balance_value = row.get("balance")
+        try:
+            if balance_value is not None:
+                overview["balance"] = float(balance_value)
+        except (TypeError, ValueError):
+            logging.debug("Account %s balance not numeric: %r", acct_id, balance_value)
+        return overview
+    return None
+
+
+def get_account_balance(acct_id: int) -> Optional[float]:
+    """Return the latest account balance for the given account.
+
+    The Topstep API surface isn't fully documented in this repo, so we try a few
+    likely endpoints and field names, returning the first balance-like field we
+    find. All errors are swallowed so callers can gracefully fall back to cached
+    values.
+    """
+
+    overview = get_account_overview(acct_id)
+    if overview and overview.get("balance") is not None:
+        return float(overview["balance"])
+
+    candidate_endpoints: list[tuple[str, dict]] = [
+        ("/api/Account/getBalance", {"accountId": acct_id}),
+        ("/api/Account/get", {"id": acct_id}),
+    ]
+
+    balance_keys = (
+        "accountBalance",
+        "balance",
+        "availableBalance",
+        "cashBalance",
+        "equity",
+        "netLiq",
+    )
+
+    for path, payload in candidate_endpoints:
+        try:
+            data = post(path, payload)
+        except Exception as exc:  # noqa: BLE001 - best-effort probing of endpoints
+            logging.debug("Balance query failed for %s (%s): %s", path, payload, exc)
+            continue
+
+        if isinstance(data, dict):
+            for key in balance_keys:
+                if key in data and data.get(key) is not None:
+                    try:
+                        return float(data.get(key))
+                    except (TypeError, ValueError):
+                        continue
+
+        if isinstance(data, list):
+            for row in data:
+                if not isinstance(row, dict):
+                    continue
+                for key in balance_keys:
+                    if key in row and row.get(key) is not None:
+                        try:
+                            return float(row.get(key))
+                        except (TypeError, ValueError):
+                            continue
+
+    logging.warning("Account balance unavailable for acct_id=%s after probing %s endpoints", acct_id, len(candidate_endpoints))
+    return None
+
 def flatten_contract(acct_id, cid, timeout=10):
     logging.info("Flattening contract %s for acct %s", cid, acct_id)
     end = time.time() + timeout
