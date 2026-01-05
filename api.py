@@ -827,6 +827,88 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
     # Net = gross - fees
     net_pnl = gross_pnl - fees_total
 
+    def _to_float(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _vwap(trades: list[dict]) -> float | None:
+        numer = 0.0
+        denom = 0.0
+        for t in trades:
+            price = _to_float(t.get("price"))
+            size = _to_float(t.get("size"))
+            if price is None or size is None or size <= 0:
+                continue
+            numer += price * size
+            denom += size
+        return numer / denom if denom > 0 else None
+
+    def _derive_entry_exit_prices(trades: list[dict], meta_ctx: dict):
+        entry_trades: list[dict] = []
+        exit_trades: list[dict] = []
+        initial_sign: int | None = None
+        pos = 0.0
+
+        for t in trades:
+            delta = _signed_qty(t)
+            if delta == 0:
+                continue
+
+            sign = 1 if delta > 0 else -1
+            if initial_sign is None:
+                initial_sign = sign
+
+            if abs(pos) < 1e-9:
+                bucket = "entry" if sign == initial_sign else "exit"
+            else:
+                prospective = pos + delta
+                if sign == initial_sign and abs(prospective) > abs(pos):
+                    bucket = "entry"
+                else:
+                    bucket = "exit"
+
+            if bucket == "entry":
+                entry_trades.append(t)
+            else:
+                exit_trades.append(t)
+
+            pos += delta
+
+        entry_vwap = _vwap(entry_trades)
+        exit_vwap = _vwap(exit_trades)
+
+        entry_price_source = None
+        exit_price_source = None
+
+        entry_price = entry_vwap
+        if entry_price is not None:
+            entry_price_source = "fills_entry_vwap"
+        else:
+            meta_entry = _to_float(meta_ctx.get("entry_price")) if meta_ctx else None
+            if meta_entry is not None:
+                entry_price = meta_entry
+                entry_price_source = "meta_entry_price"
+            else:
+                first_price = _to_float(trades[0].get("price")) if trades else None
+                if first_price is not None:
+                    entry_price = first_price
+                    entry_price_source = "first_trade_price"
+
+        exit_price = exit_vwap
+        if exit_price is not None:
+            exit_price_source = "fills_exit_vwap"
+        else:
+            last_price = _to_float(trades[-1].get("price")) if trades else None
+            if last_price is not None:
+                exit_price = last_price
+                exit_price_source = "last_trade_price"
+
+        return entry_price, exit_price, entry_price_source, exit_price_source
+
+    entry_price, exit_price, entry_price_source, exit_price_source = _derive_entry_exit_prices(relevant_trades, meta)
+
 
     trade_ids = [t.get("id") for t in relevant_trades if t.get("id") is not None]
     duration_sec = int(max((exit_dt - entry_dt).total_seconds(), 0))
@@ -938,6 +1020,10 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         "trade_ids": trade_ids if trade_ids else [],
         "trace_id": trace_id,
         "session_id": meta.get("session_id"),
+        "entry_price": entry_price,
+        "exit_price": exit_price,
+        "entry_price_source": entry_price_source,
+        "exit_price_source": exit_price_source,
     }
 
     # ---------------------------------------------------------------------
@@ -983,6 +1069,10 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
                 "trade_ids": payload["trade_ids"],
                 "order_id": payload["order_id"],
                 "comment": payload["comment"],
+                "entry_price": payload.get("entry_price"),
+                "exit_price": payload.get("exit_price"),
+                "entry_price_source": payload.get("entry_price_source"),
+                "exit_price_source": payload.get("exit_price_source"),
             }
             if payload.get("ai_decision_id") is not None and existing.get("ai_decision_id") in (None, ""):
                 updates["ai_decision_id"] = payload["ai_decision_id"]

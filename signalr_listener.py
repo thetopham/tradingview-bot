@@ -50,6 +50,7 @@ def track_trade(
     tp_ids=None,
     trades=None,
     regime=None,
+    entry_price: float | None = None,
 ):
     """Enhanced trade tracking with session ID to prevent mixing trades"""
 
@@ -74,6 +75,9 @@ def track_trade(
         "regime": regime,
         "trace_id": _build_trace_id(entry_time, ai_decision_id, order_id=order_id, session_id=session_id),
     }
+
+    if entry_price is not None:
+        meta["entry_price"] = entry_price
 
     logging.info(
         f"[track_trade] New session {session_id} - AI decision {ai_decision_id}, "
@@ -376,7 +380,7 @@ def on_order_update(args):
 
     orders_state.setdefault(account_id, {})[order_data.get("id")] = order_data
 
-    
+
 
     if status == 2:
         meta = trade_meta.setdefault((account_id, contract_id), {})
@@ -384,6 +388,20 @@ def on_order_update(args):
             meta["entry_time"] = order_data.get("creationTimestamp") or time.time()
         if "order_id" not in meta or not meta["order_id"]:
             meta["order_id"] = order_data.get("id")
+
+        if meta.get("entry_price") is None:
+            def _coerce_float(val):
+                try:
+                    return float(val)
+                except (TypeError, ValueError):
+                    return None
+
+            for key in ("averageFillPrice", "avgFillPrice", "fillPrice"):
+                if key in order_data:
+                    cand = _coerce_float(order_data.get(key))
+                    if cand is not None:
+                        meta["entry_price"] = cand
+                        break
         logging.info(f"Order filled: {order_data}")
         logging.info(f"[on_order_update] meta after update: {meta}")
 
