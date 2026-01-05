@@ -446,7 +446,11 @@ class PositionManager:
         trailing_dd = self._compute_trailing_drawdown(account_balance, equity_state)
 
         can_trade = self._can_trade(daily_pnl, consecutive_losses) and provider_can_trade
-        if trailing_dd["risk_state"] == "red" or trailing_dd.get("trailing_dd_remaining_usd", 0) <= 0:
+
+        trailing_dd_remaining = trailing_dd.get("trailing_dd_remaining_usd")
+        if trailing_dd["risk_state"] == "red" or (
+            trailing_dd_remaining is not None and trailing_dd_remaining <= 0
+        ):
             can_trade = False
 
         return {
