@@ -3,9 +3,11 @@
 Simplified position context provider for AI trading decisions
 """
 
+import json
 import logging
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from api import search_pos, search_open, search_trades, get_contract
@@ -23,6 +25,14 @@ class PositionManager:
         self.accounts = accounts
         self.logger = logging.getLogger(__name__)
         self._account_state_cache: Dict[int, Tuple[float, Dict]] = {}
+        self._equity_state_path = Path("./account_equity_state.json")
+        self._equity_state = self._load_equity_state()
+
+        # Trailing drawdown parameters
+        self.trailing_max_loss_usd = 2000.0
+        self.trailing_loss_limit_usd = -self.trailing_max_loss_usd
+        self.trail_guard_floor_usd = 48000.0
+        self.trail_activation_threshold_usd = 50000.0
         
         # Risk parameters (for context only)
         self.max_daily_loss = config.get('MAX_DAILY_LOSS', -500.0)
@@ -34,6 +44,32 @@ class PositionManager:
         else:
             self.max_consecutive_losses = raw_max_consecutive_losses
         self.consecutive_loss_guard_enabled = self.max_consecutive_losses is not None
+
+    # ------------------------------------------------------------------
+    # Equity state persistence
+    # ------------------------------------------------------------------
+    def _load_equity_state(self) -> Dict[str, Dict]:
+        if not self._equity_state_path.exists():
+            return {}
+
+        try:
+            with self._equity_state_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+        except Exception as exc:  # noqa: BLE001 - tolerant restore
+            self.logger.warning("Failed to load equity state from %s: %s", self._equity_state_path, exc)
+        return {}
+
+    def _save_equity_state(self) -> None:
+        try:
+            self._equity_state_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = self._equity_state_path.with_suffix(self._equity_state_path.suffix + ".tmp")
+            with tmp_path.open("w", encoding="utf-8") as f:
+                json.dump(self._equity_state, f, ensure_ascii=False)
+            tmp_path.replace(self._equity_state_path)
+        except Exception as exc:  # noqa: BLE001 - log-only persistence errors
+            self.logger.error("Failed to persist equity state to %s: %s", self._equity_state_path, exc)
 
     def get_position_state_light(
         self, acct_id: int, cid: str, *, current_price: Optional[float] = None
@@ -243,6 +279,9 @@ class PositionManager:
         """
         Get account-wide state including daily P&L and risk metrics
         """
+        account_balance = self._get_current_account_balance(acct_id)
+        trailing_state = self._compute_trailing_drawdown(acct_id, account_balance)
+
         # Get all trades from today
         today_start = datetime.now(MT).replace(hour=0, minute=0, second=0, microsecond=0)
         trades = search_trades(acct_id, today_start)
@@ -277,19 +316,27 @@ class PositionManager:
         # Get all open positions
         all_positions = search_pos(acct_id)
         open_position_count = len([p for p in all_positions if p.get("size", 0) > 0])
-        
+
+        trailing_can_trade = not trailing_state.get("below_balance_floor") and not trailing_state.get(
+            "trailing_violation"
+        )
+        combined_can_trade = trailing_can_trade and self._can_trade(daily_pnl, consecutive_losses)
+
         return {
             'daily_pnl': daily_pnl,
             'gross_pnl': gross_pnl,
             'daily_fees': fees_paid,
+            'account_balance_usd': account_balance,
+            'realized_pnl_today_usd': gross_pnl,
             'trade_count': len(trades),
             'winning_trades': len(winning_trades),
             'losing_trades': len(losing_trades),
             'win_rate': len(winning_trades) / len(trades) if trades else 0,
             'consecutive_losses': consecutive_losses,
             'open_positions': open_position_count,
-            'can_trade': self._can_trade(daily_pnl, consecutive_losses),
-            'risk_level': self._assess_account_risk(daily_pnl, consecutive_losses, open_position_count)
+            'can_trade': combined_can_trade,
+            'risk_level': self._assess_account_risk(daily_pnl, consecutive_losses, open_position_count),
+            'trailing_drawdown': trailing_state,
         }
 
     def get_account_state_cached(self, acct_id: int, max_age_seconds: int = 300) -> Dict:
@@ -361,6 +408,98 @@ class PositionManager:
             return "medium"
         else:
             return "low"
+
+    # ------------------------------------------------------------------
+    # Account balance + trailing drawdown helpers
+    # ------------------------------------------------------------------
+    def _get_current_account_balance(self, acct_id: int) -> Optional[float]:
+        try:
+            from api import get_account_balance
+
+            balance = get_account_balance(acct_id)
+            if balance is None:
+                return None
+            return float(balance)
+        except Exception as exc:  # noqa: BLE001 - external call should never raise
+            self.logger.warning("Account balance lookup failed for %s: %s", acct_id, exc)
+            return None
+
+    def _update_equity_tracking(self, acct_id: int, balance: Optional[float]) -> Dict[str, Optional[float]]:
+        key = str(acct_id)
+        record = self._equity_state.setdefault(
+            key,
+            {
+                "session_start_equity_usd": None,
+                "equity_peak_usd": None,
+                "last_balance_usd": None,
+                "last_balance_ts": None,
+            },
+        )
+
+        now_ts = time.time()
+        if balance is not None:
+            record["last_balance_usd"] = balance
+            record["last_balance_ts"] = now_ts
+            if record.get("session_start_equity_usd") is None:
+                record["session_start_equity_usd"] = balance
+            if record.get("equity_peak_usd") is None:
+                record["equity_peak_usd"] = balance
+            else:
+                record["equity_peak_usd"] = max(record["equity_peak_usd"], balance)
+            self._save_equity_state()
+        elif record.get("session_start_equity_usd") is None:
+            # Provide a conservative default if we have no history at all
+            record["session_start_equity_usd"] = self.trail_activation_threshold_usd
+            record["equity_peak_usd"] = self.trail_activation_threshold_usd
+
+        return record
+
+    def _compute_trailing_drawdown(self, acct_id: int, balance: Optional[float]) -> Dict[str, Optional[float]]:
+        record = self._update_equity_tracking(acct_id, balance)
+
+        current_equity = (
+            balance
+            if balance is not None
+            else record.get("last_balance_usd") or record.get("session_start_equity_usd")
+        )
+        session_start = record.get("session_start_equity_usd")
+        equity_peak = record.get("equity_peak_usd") or current_equity
+
+        if equity_peak is not None and self.trail_activation_threshold_usd:
+            equity_peak = max(equity_peak, self.trail_activation_threshold_usd)
+
+        trailing_dd_used_usd = 0.0
+        if equity_peak is not None and current_equity is not None:
+            trailing_dd_used_usd = max(0.0, equity_peak - current_equity)
+
+        trailing_dd_remaining_usd = max(0.0, self.trailing_max_loss_usd - trailing_dd_used_usd)
+        trailing_dd_used_pct = (
+            trailing_dd_used_usd / self.trailing_max_loss_usd if self.trailing_max_loss_usd else 0.0
+        )
+
+        if trailing_dd_used_pct < 0.50:
+            risk_state = "green"
+        elif trailing_dd_used_pct < 0.75:
+            risk_state = "yellow"
+        else:
+            risk_state = "red"
+
+        below_floor = current_equity is not None and current_equity < self.trail_guard_floor_usd
+        trailing_violation = trailing_dd_used_usd >= self.trailing_max_loss_usd
+
+        return {
+            "account_balance_usd": current_equity,
+            "session_start_equity_usd": session_start,
+            "equity_peak_usd": equity_peak,
+            "trailing_max_loss_usd": self.trailing_max_loss_usd,
+            "trailing_loss_limit_usd": self.trailing_loss_limit_usd,
+            "trailing_dd_used_usd": trailing_dd_used_usd,
+            "trailing_dd_remaining_usd": trailing_dd_remaining_usd,
+            "trailing_dd_used_pct": trailing_dd_used_pct,
+            "risk_state": risk_state,
+            "below_balance_floor": below_floor,
+            "trailing_violation": trailing_violation,
+        }
     
     def get_position_context_for_ai(self, acct_id: int, cid: str) -> Dict:
         """
@@ -368,7 +507,10 @@ class PositionManager:
         """
         position_state = self.get_position_state(acct_id, cid)
         account_state = self.get_account_state(acct_id)
-    
+        trailing = account_state.get('trailing_drawdown', {}) or {}
+
+        topstep_can_trade = not trailing.get('trailing_violation') and not trailing.get('below_balance_floor')
+
         context = {
             'current_position': {
                 'has_position': position_state['has_position'],
@@ -385,26 +527,60 @@ class PositionManager:
             },
             'account_metrics': {
                 'daily_pnl': account_state['daily_pnl'],
+                'realized_pnl_today_usd': account_state.get('realized_pnl_today_usd'),
+                'account_balance_usd': account_state.get('account_balance_usd'),
                 'win_rate': account_state['win_rate'],
                 'consecutive_losses': account_state['consecutive_losses'],
                 'open_positions': account_state['open_positions'],
                 'risk_level': account_state['risk_level'],
-                'can_trade': account_state['can_trade']
+                'can_trade': account_state['can_trade'],
+                'trailing_dd_used_usd': trailing.get('trailing_dd_used_usd'),
+                'trailing_dd_remaining_usd': trailing.get('trailing_dd_remaining_usd'),
+                'trailing_dd_used_pct': trailing.get('trailing_dd_used_pct'),
+                'trailing_risk_state': trailing.get('risk_state'),
+                'trailing_can_trade': topstep_can_trade,
             },
             'risk_limits': {
                 'max_daily_loss': self.max_daily_loss,
                 'profit_target': self.profit_target,
                 'max_consecutive_losses': self.max_consecutive_losses,
-                'consecutive_loss_guard_enabled': self.consecutive_loss_guard_enabled
+                'consecutive_loss_guard_enabled': self.consecutive_loss_guard_enabled,
+                'trailing_max_loss_usd': self.trailing_max_loss_usd,
+                'trailing_loss_limit_usd': self.trailing_loss_limit_usd,
+            },
+            'topstep': {
+                'account_size_usd': trailing.get('account_balance_usd'),
+                'account_balance_usd': trailing.get('account_balance_usd'),
+                'session_start_equity_usd': trailing.get('session_start_equity_usd'),
+                'equity_peak_usd': trailing.get('equity_peak_usd'),
+                'trailing_max_loss_usd': self.trailing_max_loss_usd,
+                'trailing_loss_limit_usd': self.trailing_loss_limit_usd,
+                'trailing_dd_used_usd': trailing.get('trailing_dd_used_usd'),
+                'trailing_dd_remaining_usd': trailing.get('trailing_dd_remaining_usd'),
+                'trailing_dd_used_pct': trailing.get('trailing_dd_used_pct'),
+                'risk_state': trailing.get('risk_state'),
+                'dd_soft_50_pct': 0.50,
+                'dd_soft_75_pct': 0.75,
+                'below_balance_floor': trailing.get('below_balance_floor'),
+                'trailing_violation': trailing.get('trailing_violation'),
             }
         }
     
         # Add specific warnings for AI consideration
         warnings = []
-        
+
         if account_state['daily_pnl'] < self.max_daily_loss * 0.5:
             warnings.append("Approaching daily loss limit")
-    
+
+        if not account_state['can_trade']:
+            warnings.append("Trading disabled by risk guard (daily or trailing)")
+
+        if trailing.get('risk_state') == 'red':
+            warnings.append("Topstep trailing drawdown RED - bias HOLD/FLAT")
+
+        if trailing.get('below_balance_floor'):
+            warnings.append("Account balance below $48k guardrail")
+
         if account_state['consecutive_losses'] >= 2:
             warnings.append(f"On {account_state['consecutive_losses']} consecutive losses")
         
@@ -432,6 +608,9 @@ class PositionManager:
                 
             if len(position_state['stop_orders']) == 0:
                 suggestions.append("No stop loss detected - high risk")
+
+        if trailing.get('risk_state') == 'red' or not topstep_can_trade:
+            suggestions.append("Bias HOLD/FLAT due to trailing drawdown guard")
 
         context['warnings'] = warnings
         context['suggestions'] = suggestions
