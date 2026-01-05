@@ -30,6 +30,11 @@ def load_config():
         'DAILY_PROFIT_TARGET': float(os.getenv("DAILY_PROFIT_TARGET", 99999.0)),
         'MAX_DAILY_LOSS': float(os.getenv("MAX_DAILY_LOSS", -250.0)),
         'MAX_CONSECUTIVE_LOSSES': int(os.getenv("MAX_CONSECUTIVE_LOSSES", 99999)),
+        # Topstep Combine constants
+        'COMBINE_ACCOUNT_SIZE_USD': float(os.getenv("COMBINE_ACCOUNT_SIZE_USD", 50000)),
+        'TRAILING_MAX_LOSS_USD': float(os.getenv("TRAILING_MAX_LOSS_USD", 2000)),
+        'DD_SOFT_50_PCT': float(os.getenv("DD_SOFT_50_PCT", 0.50)),
+        'DD_SOFT_75_PCT': float(os.getenv("DD_SOFT_75_PCT", 0.75)),
     }
     # Build account map
     config['ACCOUNTS'] = {

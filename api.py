@@ -414,6 +414,16 @@ def _compute_simple_position_context(
     price, side, current price (from Supabase if available), and unrealized PnL.
     """
 
+    topstep_context = {
+        "account_size_usd": float(config.get("COMBINE_ACCOUNT_SIZE_USD", 50000)),
+        "trailing_max_loss_usd": float(config.get("TRAILING_MAX_LOSS_USD", 2000)),
+        "trailing_loss_limit_usd": -float(config.get("TRAILING_MAX_LOSS_USD", 2000)),
+        "trailing_dd_used_usd": 0.0,
+        "trailing_dd_remaining_usd": float(config.get("TRAILING_MAX_LOSS_USD", 2000)),
+        "trailing_dd_used_pct": 0.0,
+        "risk_state": "green",
+    }
+
     if not positions:
         return {
             "has_position": False,
@@ -422,6 +432,7 @@ def _compute_simple_position_context(
             "average_price": None,
             "current_price": None,
             "unrealized_pnl": 0.0,
+            "topstep": topstep_context,
         }
 
     total_size = sum(p.get("size", 0) for p in positions)
@@ -453,6 +464,7 @@ def _compute_simple_position_context(
         "average_price": avg_price,
         "current_price": current_price,
         "unrealized_pnl": unrealized_pnl,
+        "topstep": topstep_context,
     }
 
 

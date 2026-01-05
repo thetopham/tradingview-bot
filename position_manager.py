@@ -3,9 +3,13 @@
 Simplified position context provider for AI trading decisions
 """
 
+import json
 import logging
+import os
+import threading
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from api import search_pos, search_open, search_trades, get_contract
@@ -23,7 +27,16 @@ class PositionManager:
         self.accounts = accounts
         self.logger = logging.getLogger(__name__)
         self._account_state_cache: Dict[int, Tuple[float, Dict]] = {}
-        
+        self._equity_state: Dict[str, Dict] = {}
+        self._equity_state_path = Path(os.environ.get("ACCOUNT_EQUITY_STATE_PATH", "./account_equity_state.json"))
+        self._equity_state_bak = self._equity_state_path.with_suffix(self._equity_state_path.suffix + ".bak")
+        self._equity_state_lock = threading.RLock()
+
+        self.combine_account_size_usd = float(config.get('COMBINE_ACCOUNT_SIZE_USD', 50000))
+        self.trailing_max_loss_usd = float(config.get('TRAILING_MAX_LOSS_USD', 2000))
+        self.dd_soft_50_pct = float(config.get('DD_SOFT_50_PCT', 0.50))
+        self.dd_soft_75_pct = float(config.get('DD_SOFT_75_PCT', 0.75))
+
         # Risk parameters (for context only)
         self.max_daily_loss = config.get('MAX_DAILY_LOSS', -500.0)
         self.profit_target = config.get('DAILY_PROFIT_TARGET', 500.0)
@@ -34,6 +47,143 @@ class PositionManager:
         else:
             self.max_consecutive_losses = raw_max_consecutive_losses
         self.consecutive_loss_guard_enabled = self.max_consecutive_losses is not None
+
+        self._load_equity_state()
+
+    # ─── Persistent Equity State Helpers ──────────────────────────────
+    def _load_equity_state(self) -> None:
+        """Load persisted equity state from disk."""
+
+        with self._equity_state_lock:
+            primary_error = None
+            data = None
+
+            def _load_from(path: Path):
+                with path.open("r", encoding="utf-8") as f:
+                    return json.load(f)
+
+            try:
+                if self._equity_state_path.exists():
+                    data = _load_from(self._equity_state_path)
+            except Exception as exc:  # pragma: no cover - defensive
+                primary_error = exc
+                self.logger.warning("Failed to parse equity state from %s: %s", self._equity_state_path, exc)
+
+            if data is None and self._equity_state_bak.exists():
+                try:
+                    data = _load_from(self._equity_state_bak)
+                    self.logger.warning(
+                        "Recovered equity state from backup %s after parse failure", self._equity_state_bak
+                    )
+                except Exception as exc:  # pragma: no cover - defensive
+                    self.logger.warning(
+                        "Failed to parse backup equity state from %s: %s", self._equity_state_bak, exc
+                    )
+
+            if data is None:
+                if primary_error:
+                    self.logger.warning(
+                        "Starting with empty equity state due to parse errors; primary=%s", primary_error
+                    )
+                self._equity_state = {}
+                return
+
+            self._equity_state = data.get("equity_state", {}) or {}
+            self.logger.info("Loaded equity state for %s accounts", len(self._equity_state))
+
+    def _save_equity_state(self) -> None:
+        """Persist equity state to disk (best effort)."""
+
+        with self._equity_state_lock:
+            payload = {"schema_version": 1, "equity_state": self._equity_state, "saved_at": datetime.now(MT).isoformat()}
+            self._equity_state_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = self._equity_state_path.with_suffix(self._equity_state_path.suffix + ".tmp")
+
+            try:
+                if self._equity_state_path.exists():
+                    try:
+                        self._equity_state_bak.write_bytes(self._equity_state_path.read_bytes())
+                    except Exception as exc:  # pragma: no cover - defensive
+                        self.logger.warning(
+                            "Failed to write backup equity state to %s: %s", self._equity_state_bak, exc
+                        )
+
+                with tmp_path.open("w", encoding="utf-8") as f:
+                    json.dump(payload, f, ensure_ascii=False)
+                os.replace(tmp_path, self._equity_state_path)
+            except Exception as exc:  # pragma: no cover - defensive
+                self.logger.error("Failed to save equity state to %s: %s", self._equity_state_path, exc)
+
+    def _default_equity_state(self) -> Dict:
+        now = datetime.now(MT)
+        return {
+            "session_start_ts": now.isoformat(),
+            "session_start_equity_usd": float(self.combine_account_size_usd),
+            "equity_peak_usd": float(self.combine_account_size_usd),
+        }
+
+    def _parse_timestamp(self, value) -> datetime:
+        try:
+            if isinstance(value, datetime):
+                return value if value.tzinfo else value.replace(tzinfo=MT)
+            if isinstance(value, str):
+                dt = datetime.fromisoformat(value)
+                return dt if dt.tzinfo else MT.localize(dt)
+        except Exception:
+            pass
+        return datetime.now(MT)
+
+    def _compute_topstep_state(self, acct_id: int) -> Dict:
+        """Compute trailing drawdown usage with persistent equity tracking."""
+
+        key = str(acct_id)
+        state = self._equity_state.get(key) or self._default_equity_state()
+
+        session_start_ts = self._parse_timestamp(state.get("session_start_ts"))
+        trades_since_start = search_trades(acct_id, session_start_ts)
+
+        gross_pnl = sum(float(t.get("profitAndLoss") or 0) for t in trades_since_start if t.get("profitAndLoss") is not None)
+        fees_paid = sum(self._extract_trade_fees(t) for t in trades_since_start)
+        net_realized = gross_pnl - fees_paid
+
+        equity = float(state.get("session_start_equity_usd", self.combine_account_size_usd)) + net_realized
+        equity_peak = max(float(state.get("equity_peak_usd", self.combine_account_size_usd)), equity)
+
+        trailing_dd_used = max(0.0, equity_peak - equity)
+        trailing_dd_remaining = max(0.0, float(self.trailing_max_loss_usd) - trailing_dd_used)
+        trailing_dd_used_pct = trailing_dd_used / float(self.trailing_max_loss_usd) if self.trailing_max_loss_usd else 0.0
+
+        if trailing_dd_used_pct < self.dd_soft_50_pct:
+            risk_state = "green"
+        elif trailing_dd_used_pct < self.dd_soft_75_pct:
+            risk_state = "yellow"
+        else:
+            risk_state = "red"
+
+        state.update(
+            {
+                "session_start_ts": session_start_ts.isoformat(),
+                "session_start_equity_usd": float(state.get("session_start_equity_usd", self.combine_account_size_usd)),
+                "equity_peak_usd": equity_peak,
+                "equity_usd": equity,
+                "last_refreshed_ts": datetime.now(MT).isoformat(),
+            }
+        )
+        self._equity_state[key] = state
+        self._save_equity_state()
+
+        return {
+            "account_size_usd": float(state.get("session_start_equity_usd", self.combine_account_size_usd)),
+            "trailing_max_loss_usd": float(self.trailing_max_loss_usd),
+            "trailing_loss_limit_usd": -float(self.trailing_max_loss_usd),
+            "trailing_dd_used_usd": trailing_dd_used,
+            "trailing_dd_remaining_usd": trailing_dd_remaining,
+            "trailing_dd_used_pct": trailing_dd_used_pct,
+            "equity_usd": equity,
+            "equity_peak_usd": equity_peak,
+            "risk_state": risk_state,
+            "realized_pnl_since_session_start_usd": net_realized,
+        }
 
     def get_position_state_light(
         self, acct_id: int, cid: str, *, current_price: Optional[float] = None
@@ -277,6 +427,18 @@ class PositionManager:
         # Get all open positions
         all_positions = search_pos(acct_id)
         open_position_count = len([p for p in all_positions if p.get("size", 0) > 0])
+
+        topstep = self._compute_topstep_state(acct_id)
+        topstep.update(
+            {
+                "realized_pnl_today_usd": daily_pnl,
+                "daily_pnl_usd": daily_pnl,
+            }
+        )
+
+        can_trade = self._can_trade(daily_pnl, consecutive_losses)
+        risk_level = self._assess_account_risk(daily_pnl, consecutive_losses, open_position_count)
+        risk_bias_hold = (topstep.get("risk_state") == "red") or (not can_trade)
         
         return {
             'daily_pnl': daily_pnl,
@@ -288,8 +450,10 @@ class PositionManager:
             'win_rate': len(winning_trades) / len(trades) if trades else 0,
             'consecutive_losses': consecutive_losses,
             'open_positions': open_position_count,
-            'can_trade': self._can_trade(daily_pnl, consecutive_losses),
-            'risk_level': self._assess_account_risk(daily_pnl, consecutive_losses, open_position_count)
+            'can_trade': can_trade,
+            'risk_level': risk_level,
+            'topstep': topstep,
+            'risk_bias_hold': risk_bias_hold,
         }
 
     def get_account_state_cached(self, acct_id: int, max_age_seconds: int = 300) -> Dict:
@@ -368,7 +532,7 @@ class PositionManager:
         """
         position_state = self.get_position_state(acct_id, cid)
         account_state = self.get_account_state(acct_id)
-    
+
         context = {
             'current_position': {
                 'has_position': position_state['has_position'],
@@ -389,25 +553,36 @@ class PositionManager:
                 'consecutive_losses': account_state['consecutive_losses'],
                 'open_positions': account_state['open_positions'],
                 'risk_level': account_state['risk_level'],
-                'can_trade': account_state['can_trade']
+                'can_trade': account_state['can_trade'],
+                'risk_bias_hold': account_state.get('risk_bias_hold'),
             },
             'risk_limits': {
                 'max_daily_loss': self.max_daily_loss,
                 'profit_target': self.profit_target,
                 'max_consecutive_losses': self.max_consecutive_losses,
-                'consecutive_loss_guard_enabled': self.consecutive_loss_guard_enabled
-            }
+                'consecutive_loss_guard_enabled': self.consecutive_loss_guard_enabled,
+                'combine_account_size_usd': self.combine_account_size_usd,
+                'trailing_max_loss_usd': self.trailing_max_loss_usd,
+            },
+            'topstep': account_state.get('topstep', {}),
         }
     
         # Add specific warnings for AI consideration
         warnings = []
-        
+
         if account_state['daily_pnl'] < self.max_daily_loss * 0.5:
             warnings.append("Approaching daily loss limit")
-    
+
         if account_state['consecutive_losses'] >= 2:
             warnings.append(f"On {account_state['consecutive_losses']} consecutive losses")
-        
+
+        topstep_state = account_state.get('topstep') or {}
+        risk_state = topstep_state.get('risk_state')
+        if risk_state == "red":
+            warnings.append("Topstep trailing drawdown high: RED state")
+        elif risk_state == "yellow":
+            warnings.append("Topstep trailing drawdown elevated: YELLOW state")
+
         if position_state['has_position']:
             if position_state['duration_minutes'] > 60:
                 warnings.append(f"Position open for {position_state['duration_minutes']:.0f} minutes")
@@ -419,7 +594,7 @@ class PositionManager:
         
         # Add position suggestions for AI
         suggestions = []
-        
+
         if position_state['has_position']:
             if position_state['duration_minutes'] > 120:
                 suggestions.append("Consider closing stale position")
@@ -432,6 +607,9 @@ class PositionManager:
                 
             if len(position_state['stop_orders']) == 0:
                 suggestions.append("No stop loss detected - high risk")
+
+        if account_state.get('risk_bias_hold'):
+            suggestions.append("Risk rules favor HOLD/FLAT due to can_trade=False or RED state")
 
         context['warnings'] = warnings
         context['suggestions'] = suggestions
