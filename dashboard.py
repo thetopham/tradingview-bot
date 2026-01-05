@@ -123,28 +123,15 @@ def _coerce_dt(raw_val: Any) -> Optional[datetime]:
         return None
 
 
-def _range_start_mt(range_key: str, tz) -> datetime:
-    """Return the start datetime for a range in the provided timezone."""
-
-    now_tz = datetime.now(tz)
-    if range_key == "today":
-        return now_tz.replace(hour=0, minute=0, second=0, microsecond=0)
-    if range_key == "30d":
-        return now_tz - timedelta(days=30)
-    return now_tz - timedelta(days=7)
-
-
 def _range_start_iso(range_key: str) -> Optional[str]:
-    start_mt = _range_start_mt(range_key, MOUNTAIN_TZ)
-    return start_mt.astimezone(timezone.utc).isoformat()
-
-
-def _range_label(range_key: str) -> str:
+    now_mt = datetime.now(MOUNTAIN_TZ)
     if range_key == "today":
-        return "Today"
-    if range_key == "30d":
-        return "Last 30 Days"
-    return "Last 7 Days"
+        start_mt = now_mt.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif range_key == "30d":
+        start_mt = now_mt - timedelta(days=30)
+    else:
+        start_mt = now_mt - timedelta(days=7)
+    return start_mt.astimezone(timezone.utc).isoformat()
 
 
 def _resolve_pnl(record: Dict[str, Any]) -> Optional[float]:
@@ -269,8 +256,12 @@ def _streak_for_trades(closed: List[Tuple[datetime, Dict[str, Any]]]) -> Optiona
 def _compute_metrics(
     rows: List[Dict[str, Any]], range_key: str, tz, open_positions: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
-    start_range = _range_start_mt(range_key, tz)
-    range_trades = _filter_closed_trades(rows, start_range, tz)
+    now_tz = datetime.now(tz)
+    start_today = now_tz.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_7d = now_tz - timedelta(days=7)
+
+    today_trades = _filter_closed_trades(rows, start_today, tz)
+    week_trades = _filter_closed_trades(rows, start_7d, tz)
 
     def summarize(trades: List[Tuple[datetime, Dict[str, Any]]]) -> Dict[str, Any]:
         if not trades:
@@ -327,8 +318,9 @@ def _compute_metrics(
             "profit_factor": _compute_profit_factor(gross_wins, gross_losses) if trade_count else None,
         }
 
-    range_summary = summarize(range_trades)
-    streak = _streak_for_trades(range_trades)
+    today_summary = summarize(today_trades)
+    week_summary = summarize(week_trades)
+    streak = _streak_for_trades(today_trades)
 
     open_active = [p for p in (open_positions or []) if p.get("has_position")]
     open_unrealized = sum(float(p.get("unrealized_pnl") or 0) for p in open_active)
@@ -343,12 +335,13 @@ def _compute_metrics(
             "size": open_size,
             "duration_minutes": max_duration,
         },
-        "range": {
-            "key": range_key,
-            "label": _range_label(range_key),
-            "summary": range_summary,
+        "today": today_summary,
+        "seven_day": {
+            "net_pnl": week_summary["net_pnl"],
+            "win_rate": week_summary["win_rate"],
         },
         "streak": streak,
+        "range": range_key,
     }
 
 
