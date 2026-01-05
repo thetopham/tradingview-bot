@@ -13,7 +13,7 @@ TV_PORT = config['TV_PORT']
 ACCOUNTS = config['ACCOUNTS']
 OVERRIDE_CONTRACT_ID = config['OVERRIDE_CONTRACT_ID']
 N8N_CHART_ENDPOINTS = {
-    "5m": config.get('N8N_5MCHART_FETCH_URL') or config.get('N8N_CHART_FETCH_URL'),
+    "5m": config.get('N8N_5MCHART_FETCH_URL'),
     "15m": config.get('N8N_15MCHART_FETCH_URL'),
     "30m": config.get('N8N_30MCHART_FETCH_URL'),
 }
