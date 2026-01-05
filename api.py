@@ -125,6 +125,14 @@ def search_open(acct_id):
     logging.debug("Open orders for %s: %s", acct_id, orders)
     return orders
 
+
+def search_accounts(only_active: bool = True):
+    """Return available accounts (optionally filtered to active)."""
+
+    payload = {"onlyActiveAccounts": bool(only_active)}
+    resp = post("/api/Account/search", payload)
+    return resp.get("accounts", [])
+
 def cancel(acct_id, order_id):
     resp = post("/api/Order/cancel", {"accountId": acct_id, "orderId": order_id})
     if not resp.get("success", True):
@@ -460,6 +468,17 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=N
     position_summary = _summarize_positions(positions or [])
     simple_position_context = position_context or _compute_simple_position_context(positions or [], sym)
 
+    # Risk bias: if upstream context reports trailing drawdown red or trading blocked, favor HOLD/FLAT
+    risk_bias_hold = False
+    if isinstance(simple_position_context, dict):
+        account_metrics = simple_position_context.get("account_metrics", {})
+        topstep_ctx = simple_position_context.get("topstep", {})
+        risk_bias_hold = account_metrics.get("can_trade") is False
+        risk_bias_hold = risk_bias_hold or topstep_ctx.get("risk_state") == "red"
+
+    if risk_bias_hold and str(sig).upper() not in {"HOLD", "FLAT"}:
+        sig = "HOLD"
+
     now = datetime.now(MT)
     if in_get_flat(now):
         logging.info(
@@ -486,6 +505,7 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=N
         "positions": positions or [],
         "position_summary": position_summary,
         "position_context": simple_position_context,
+        "risk_bias": "hold" if risk_bias_hold else None,
     }
     try:
         resp = session.post(ai_url, json=payload, timeout=150)
