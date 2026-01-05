@@ -12,6 +12,7 @@ import logging
 from typing import Any, Dict, List, Tuple
 
 from api import get_supabase_client
+from postgrest.exceptions import APIError
 
 logging.basicConfig(level=logging.INFO)
 
@@ -118,7 +119,24 @@ def derive_entry_exit(trades: List[Dict[str, Any]], meta: Dict[str, Any] | None 
 def main():
     sb = get_supabase_client()
     logging.info("Fetching trade_results rows for backfill...")
-    resp = sb.table("trade_results").select("id,raw_trades,entry_price,exit_price,entry_price_source,exit_price_source").limit(2000).execute()
+    include_sources = True
+    try:
+        resp = sb.table("trade_results").select(
+            "id,raw_trades,entry_price,exit_price,entry_price_source,exit_price_source"
+        ).limit(2000).execute()
+    except APIError as exc:
+        error_detail = exc.args[0] if exc.args else {}
+        message = error_detail.get("message") if isinstance(error_detail, dict) else str(exc)
+        if "does not exist" in (message or ""):
+            logging.warning(
+                "Price source columns missing in trade_results table (error: %s); falling back without them",
+                message,
+            )
+            include_sources = False
+            resp = sb.table("trade_results").select("id,raw_trades,entry_price,exit_price").limit(2000).execute()
+        else:
+            raise
+
     rows = resp.data or []
 
     updated = 0
@@ -144,10 +162,12 @@ def main():
         updates = {}
         if entry_price is not None and row.get("entry_price") is None:
             updates["entry_price"] = entry_price
-            updates["entry_price_source"] = entry_source
+            if include_sources:
+                updates["entry_price_source"] = entry_source
         if exit_price is not None and row.get("exit_price") is None:
             updates["exit_price"] = exit_price
-            updates["exit_price_source"] = exit_source
+            if include_sources:
+                updates["exit_price_source"] = exit_source
 
         if updates:
             sb.table("trade_results").update(updates).eq("id", row.get("id")).execute()
