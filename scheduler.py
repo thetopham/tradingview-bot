@@ -2,9 +2,11 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import logging
+from datetime import datetime
 import requests
 from config import load_config
 from api import flatten_contract, search_pos
+from auth import in_get_flat
 
 config = load_config()
 WEBHOOK_SECRET = config['WEBHOOK_SECRET']
@@ -43,6 +45,11 @@ def start_scheduler(app):
                 flatten_contract(acct_id, cid, timeout=10)
 
     def chart_prefetch_job(timeframes):
+        now = datetime.now(LOCAL_TZ)
+        if in_get_flat(now):
+            logging.info("[APScheduler] In get-flat window; skipping chart prefetch")
+            return
+
         configured = {
             tf: url
             for tf, url in N8N_CHART_ENDPOINTS.items()
