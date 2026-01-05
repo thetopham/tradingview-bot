@@ -146,6 +146,7 @@ def track_trade(
     tp_ids=None,
     trades=None,
     regime=None,
+    prompt_version=None,
 ):
     """Enhanced trade tracking with session ID to prevent mixing trades"""
 
@@ -169,6 +170,7 @@ def track_trade(
         "symbol": symbol,
         "trades": trades,
         "regime": regime,
+        "prompt_version": prompt_version,
         "trace_id": _build_trace_id(entry_time, ai_decision_id, order_id=order_id, session_id=session_id),
     }
 
