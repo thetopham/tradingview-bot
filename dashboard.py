@@ -162,6 +162,7 @@ def _fetch_ai_trade_feed(
         sb = get_supabase_client()
         columns = (
             "ai_decision_id,decision_time,entry_time,exit_time,account,symbol,signal,size,"
+            "entry_price,exit_price,"
             "strategy,reason,screenshot_url,urls,total_pnl,fees_total,net_pnl,decision_json,updated_at"
         )
         query = sb.table("ai_trade_feed").select(columns)
@@ -198,6 +199,8 @@ def _fetch_ai_trade_feed(
             "symbol": record.get("symbol"),
             "signal": record.get("signal"),
             "size": record.get("size"),
+            "entry_price": record.get("entry_price"),
+            "exit_price": record.get("exit_price"),
             "strategy": record.get("strategy"),
             "pnl": _resolve_pnl(record),
             "net_pnl": record.get("net_pnl"),

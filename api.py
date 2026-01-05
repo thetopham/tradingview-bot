@@ -669,6 +669,101 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
             return -qty
         return 0.0
 
+    def _price_and_size(trade: dict) -> tuple[float, float] | None:
+        try:
+            price = float(trade.get("price"))
+        except Exception:
+            price = None
+        try:
+            size = float(trade.get("size") or 0)
+        except Exception:
+            size = 0.0
+        if price is None or size <= 0:
+            return None
+        return price, size
+
+    def _compute_entry_exit_prices(trades: list[dict], meta_dict: dict):
+        if not trades:
+            return None, None, None, None
+
+        entry_trades: list[tuple[float, float]] = []
+        exit_trades: list[tuple[float, float]] = []
+
+        first_with_qty = next((t for t in trades if _signed_qty(t) != 0), None)
+        if not first_with_qty:
+            return None, None, None, None
+
+        initial_sign = 1 if _signed_qty(first_with_qty) > 0 else -1
+        pos = 0.0
+        phase = "entry"
+
+        for trade in trades:
+            delta = _signed_qty(trade)
+            if delta == 0:
+                continue
+            delta_sign = 1 if delta > 0 else -1
+            ps = _price_and_size(trade)
+
+            if phase == "entry":
+                if (pos == 0 and delta_sign == initial_sign) or (
+                    pos != 0 and delta_sign == initial_sign and (pos + delta) * initial_sign > 0
+                ):
+                    if ps:
+                        entry_trades.append((ps[0], ps[1]))
+                    pos += delta
+                    continue
+                phase = "exit"
+
+            if ps:
+                exit_trades.append((ps[0], ps[1]))
+            pos += delta
+            if phase == "exit" and abs(pos) < 1e-9:
+                break
+
+        def _vwap(pairs: list[tuple[float, float]]) -> float | None:
+            if not pairs:
+                return None
+            total = sum(p * s for p, s in pairs)
+            vol = sum(s for _, s in pairs)
+            if vol <= 0:
+                return None
+            return total / vol
+
+        entry_vwap = _vwap(entry_trades)
+        exit_vwap = _vwap(exit_trades)
+
+        entry_source = "fills_vwap" if entry_vwap is not None else None
+        exit_source = "fills_vwap" if exit_vwap is not None else None
+
+        def _coerce_float(val):
+            try:
+                return float(val)
+            except Exception:
+                return None
+
+        if entry_vwap is None:
+            meta_entry = _coerce_float(meta_dict.get("entry_price"))
+            if meta_entry is not None:
+                entry_vwap = meta_entry
+                entry_source = "meta_entry_price"
+            else:
+                ps_first = _price_and_size(trades[0])
+                if ps_first:
+                    entry_vwap = ps_first[0]
+                    entry_source = "first_trade_price"
+
+        if exit_vwap is None:
+            ps_last = None
+            for trade in reversed(trades):
+                ps_last = _price_and_size(trade)
+                if ps_last:
+                    break
+            if ps_last:
+                exit_vwap = ps_last[0]
+                exit_source = "last_trade_price"
+
+        return entry_vwap, exit_vwap, entry_source, exit_source
+
     def _slice_round_trip(trades: list[dict], entry_order_ids: set[str], entry_dt_ct: datetime) -> list[dict]:
         """Slice trades to *this* position: start at entry orderId, stop when position returns to flat."""
         if not trades:
@@ -827,6 +922,10 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
     # Net = gross - fees
     net_pnl = gross_pnl - fees_total
 
+    entry_price, exit_price, entry_price_source, exit_price_source = _compute_entry_exit_prices(
+        relevant_trades, meta
+    )
+
 
     trade_ids = [t.get("id") for t in relevant_trades if t.get("id") is not None]
     duration_sec = int(max((exit_dt - entry_dt).total_seconds(), 0))
@@ -932,6 +1031,10 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         "total_pnl": gross_pnl,
         "fees_total": fees_total,
         "net_pnl": net_pnl,
+        "entry_price": entry_price,
+        "exit_price": exit_price,
+        "entry_price_source": entry_price_source,
+        "exit_price_source": exit_price_source,
         "raw_trades": relevant_trades if relevant_trades else [],
         "order_id": json.dumps(sorted(order_ids)) if order_ids else str(meta.get("order_id") or ""),
         "comment": comment,
@@ -979,6 +1082,10 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
                 "total_pnl": payload["total_pnl"],
                 "fees_total": payload.get("fees_total"),
                 "net_pnl": payload.get("net_pnl"),
+                "entry_price": payload.get("entry_price"),
+                "exit_price": payload.get("exit_price"),
+                "entry_price_source": payload.get("entry_price_source"),
+                "exit_price_source": payload.get("exit_price_source"),
                 "raw_trades": payload["raw_trades"],
                 "trade_ids": payload["trade_ids"],
                 "order_id": payload["order_id"],
