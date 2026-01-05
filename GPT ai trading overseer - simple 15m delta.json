@@ -1,0 +1,1367 @@
+{
+  "name": "GPT ai trading overseer - simple 15m delta",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Start here: Step-by Step Youtube Tutorial :star:\n\n[![Technical Analyst AI Agent using LLM Vision](https://img.youtube.com/vi/yjBHheCB6Ek/sddefault.jpg)](https://youtu.be/yjBHheCB6Ek)\n",
+        "height": 550,
+        "width": 507,
+        "color": 7
+      },
+      "id": "f0cc3ef0-94a7-4fc8-835a-29b3882a870c",
+      "name": "Sticky Note5",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        160,
+        -608
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "simple15m",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1088,
+        352
+      ],
+      "id": "99bbd43b-9299-4a00-8dc0-974fbc1e537e",
+      "name": "Webhook",
+      "webhookId": "17d75e11-94b5-426b-a554-6db917241306"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.2,
+      "position": [
+        3520,
+        352
+      ],
+      "id": "ce8fc06a-4034-412f-8b67-aa768727afdd",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-5-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        2368,
+        544
+      ],
+      "id": "004034b9-5e6b-4deb-9431-f33246eb954d",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "hOvrgCZvpztkucKb",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1088,
+        528
+      ],
+      "id": "4f7eb61f-f03e-4a9f-91c2-31dbe83356e4",
+      "name": "When clicking ‘Test workflow’"
+    },
+    {
+      "parameters": {
+        "tableId": "ai_trading_log",
+        "dataToSend": "autoMapInputData"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2976,
+        352
+      ],
+      "id": "f0ca534c-eb6b-484c-948e-2e9ee88bf905",
+      "name": "Supabase",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $input.first().json.text;\n\n// Normalize to string\nraw = String(raw ?? \"\").trim();\n\n// Strip code fences if present\nraw = raw\n  .replace(/^```json\\s*/i, \"\")\n  .replace(/^```\\s*/i, \"\")\n  .replace(/```$/i, \"\")\n  .trim();\n\n// Try parse directly; if it fails, extract first {...} JSON block\nlet obj;\ntry {\n  obj = JSON.parse(raw);\n} catch (e) {\n  const start = raw.indexOf(\"{\");\n  const end = raw.lastIndexOf(\"}\");\n  if (start >= 0 && end > start) {\n    obj = JSON.parse(raw.slice(start, end + 1));\n  } else {\n    throw e;\n  }\n}\n\n// Hardening: make reason single-line\nif (typeof obj.reason === \"string\") {\n  obj.reason = obj.reason.replace(/\\r?\\n|\\r/g, \" \").replace(/\\s+/g, \" \").trim();\n}\n\n// Optional: enforce size as integer\nif (obj.size !== undefined) {\n  obj.size = Number.parseInt(obj.size, 10);\n}\n\n// Return as a proper n8n item\nreturn [{ json: obj }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2736,
+        352
+      ],
+      "id": "66eaf975-f3cb-4f13-b692-a04a606a9c91",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1088,
+        144
+      ],
+      "id": "2c402cc2-b423-4e5e-a1b6-2d47e4db729d",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-pro-preview-05-06",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        2560,
+        720
+      ],
+      "id": "f8c43819-bd19-4572-8635-ee70e231da61",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "F4FVFeD0uuK5mXJ7",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "object",
+        "operation": "create",
+        "bucketName": "tradingview-chart",
+        "objectName": "=charts/{{ $json.ai_decision_id }}/15m.jpg",
+        "createData": {},
+        "createQuery": {},
+        "encryptionHeaders": {},
+        "requestOptions": {}
+      },
+      "name": "Upload to GCS",
+      "type": "n8n-nodes-base.googleCloudStorage",
+      "typeVersion": 1,
+      "position": [
+        3408,
+        544
+      ],
+      "id": "97f89f43-76c3-4ffe-8f6a-8c212fd6275e",
+      "retryOnFail": true,
+      "credentials": {
+        "googleCloudStorageOAuth2Api": {
+          "id": "kT6LnTnLCRqZwDOj",
+          "name": "Google Cloud Storage account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('set url').item.json.url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3184,
+        544
+      ],
+      "id": "d9085401-5c22-4119-a81f-ff902527be85",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "27b01d5c-b00a-4266-b6aa-ae9a2472d2db",
+              "name": "url",
+              "value": "=https://storage.googleapis.com/tradingview-chart/charts/{{ $('Supabase').item.json.ai_decision_id }}/15m.jpg",
+              "type": "string"
+            },
+            {
+              "id": "6d0b4721-0211-4acb-9d58-882bd7bfe0a8",
+              "name": "timeframe",
+              "value": "=15m",
+              "type": "string"
+            },
+            {
+              "id": "45c55a40-6d76-4234-9217-b249ec4d4656",
+              "name": "id",
+              "value": "={{ $('Supabase').item.json.ai_decision_id }}",
+              "type": "number"
+            },
+            {
+              "id": "b5c9f6f5-0d42-4303-9716-9c88bf061b12",
+              "name": "chart_time",
+              "value": "={{ $now }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3648,
+        544
+      ],
+      "id": "ccb38fe0-1159-4f89-9a72-c6f1972fcb49",
+      "name": "Edit Fields2"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "ai_trading_log",
+        "filterType": "string",
+        "filterString": "=ai_decision_id=eq.{{ $json.id }}",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "urls",
+              "fieldValue": "={{ $json.url }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        3888,
+        544
+      ],
+      "id": "a1ecb3b8-b540-4c33-ad59-c9581311f0e6",
+      "name": "Supabase1",
+      "retryOnFail": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the trading overseer for MES (15-minute loop).\n\nYou ONLY decide:\n1) signal: BUY | SELL | HOLD | FLAT\n2) reason: plain English, no fluff\n3) size: 1 | 2 | 3\n\nDefinitions:\n- BUY/SELL = enter or reverse position\n- HOLD = no action\n- FLAT = flatten current position (exit)\n\nRe-occuring process:\n- This process runs every 15 minutes.\n- Your decision should assume you will be asked again in ~15 minutes.\n- If uncertain, prefer HOLD and reassess next run.\n- If you include a “future self” note, keep it short and relevant for the next 1–5 runs (15–75 minutes).\n\nRisk/Bracket (informational):\nSL = -$30 \nTP = +$60 \n(Topstep changes point distance with size; risk stays ~$30) Use larger size only if tighter sl/tp fits current volatility/structure.\nSize meaning: choose bracket tightness (TP/SL distance), not leverage.\n\n\nCHART LEGEND (5m):\n- EMA 9 (Close) = BLUE\n- EMA 21 (Close) = YELLOW\n- VWAP (Session) = RED\n- MACD (12,26,9) = histogram + lines in MACD pane\n- ATR (14, RMA) = red line in ATR pane\n\nDATAFEED + DERIVED (15m numeric, source of truth):\n{{ JSON.stringify($('5m derived snapshot').item.json, null, 2) }}\nIf screenshot and numeric disagree, trust numeric values.\n\n\nCURRENT POSITION (source of truth):\nhas_position={{ $('Webhook').item.json.body.position_context.current_position.has_position }}\nside={{ $('Webhook').item.json.body.position_context.current_position.side || 'none' }}\ncontracts={{ $('Webhook').item.json.body.position_context.current_position.size }}\nunrealized_pnl=${{ $('Webhook').item.json.body.position_context.current_position.unrealized_pnl }}\nduration_mins={{ $('Webhook').item.json.body.position_context.current_position.duration_minutes }}\n\nLAST 5 AI DECISIONS (most recent first):\nprevious: ai_decision_id, timestamp, signal, reason\n{{ (($('Aggregate').item.json.data) || []).map(d => `${d.ai_decision_id} ${d.timestamp} ${d.signal}: ${d.reason}`).join('\\n') || \"None\" }}\n\nReason format (required):\ncurrent thesis (why this signal).\ncurrent position data\nInvalidation: <what would make this wrong in the next 15–75 mins>.\n\nOUTPUT REQUIREMENTS:\n- Return ONLY valid JSON \n- strategy must be \"simple\".\n\nRETURN ONLY THIS JSON:\n{\n  \"timestamp\":\"{{ $now }}\",\n  \"strategy\":\"simple\",\n  \"signal\":\"BUY|SELL|HOLD|FLAT\",\n  \"symbol\":\"CON.F.US.MES.H26\",\n  \"account\":\"{{ $('Webhook').item.json.body.account }}\",\n  \"size\": 1,\n  \"reason\":\"<reasoning>\",\n  \"urls\":\"{{ $('set url').item.json.url }}\"\n}\n",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "messageType": "imageBinary"
+            }
+          ]
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [
+        2368,
+        352
+      ],
+      "id": "08e9e67f-8be4-4820-8095-55775983027e",
+      "name": "Basic LLM Chain",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1904,
+        736
+      ],
+      "id": "b5c0ccaa-dadd-460d-b25a-576c574e0d30",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-opus-4-20250514",
+          "mode": "list",
+          "cachedResultName": "Claude Opus 4"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        2352,
+        720
+      ],
+      "id": "8a7ff88a-29bd-446e-9ced-5170ac9de863",
+      "name": "Anthropic Chat Model",
+      "credentials": {
+        "anthropicApi": {
+          "id": "SYGdKwRCUXN1yoB4",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.chart-img.com/v2/tradingview/layout-chart/storage/cLDFUbRS",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "tradingview-session-id",
+              "value": "xpy37kx3hnmae3v1s5ef6x7daimwi9j8"
+            },
+            {
+              "name": "tradingview-session-id-sign",
+              "value": "v3:ACiGDw6hGbRCPE1XPmC3F8Ui41D7L6BSb/zqECFveFE="
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "format",
+              "value": "jpeg"
+            },
+            {
+              "name": "interval",
+              "value": "5m"
+            },
+            {
+              "name": "width",
+              "value": "1920"
+            },
+            {
+              "name": "height",
+              "value": "1080"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "87fc2f90-9aab-4caa-8f54-a605f2a207ee",
+      "name": "Tradingview Chart",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1488,
+        736
+      ],
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ZleHrixI7F5TA8Yb",
+          "name": "chart-img"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "ai_trading_log",
+        "limit": 5,
+        "filterType": "string",
+        "filterString": "=account=eq.delta&order=ai_decision_id.desc&limit=5"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -880,
+        352
+      ],
+      "id": "f3cb039e-fce3-40c1-bc67-20217476e7e3",
+      "name": "Get many rows",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -544,
+        352
+      ],
+      "id": "4f5701b3-8f24-4254-be24-62caaf227177",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a91f16c2-6718-4c9a-b64e-14605fbf446a",
+              "name": "ai_decision_id",
+              "value": "={{ $json.ai_decision_id }}",
+              "type": "number"
+            },
+            {
+              "id": "27962e82-7e85-47ec-8768-7d9e9ad684fa",
+              "name": "signal",
+              "value": "={{ $json.signal }}",
+              "type": "string"
+            },
+            {
+              "id": "89685755-83de-4be6-9fbc-6e6a2f4aac88",
+              "name": "reason",
+              "value": "={{ $json.reason }}",
+              "type": "string"
+            },
+            {
+              "id": "111a91a0-86b9-4d6c-8386-2d29b295e6a5",
+              "name": "timestamp",
+              "value": "={{ $json.timestamp }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -704,
+        352
+      ],
+      "id": "2525f912-3492-4dbe-8a5f-e5c28ea4b14d",
+      "name": "Edit Fields3"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "73f4aee5-ed19-4135-ae40-09abfacbee78",
+              "name": "ts",
+              "value": "={{ $json.ts }}",
+              "type": "string"
+            },
+            {
+              "id": "1af74867-1166-4b37-b647-abc0a1154626",
+              "name": "c",
+              "value": "={{ $json.c }}",
+              "type": "number"
+            },
+            {
+              "id": "b62fbeca-7d27-4d75-9b3a-64184730ab74",
+              "name": "ema9",
+              "value": "={{ $json.ema9 }}",
+              "type": "number"
+            },
+            {
+              "id": "bff37745-d7e3-4f4e-87fe-9504a570a2fd",
+              "name": "ema21",
+              "value": "={{ $json.ema21 }}",
+              "type": "number"
+            },
+            {
+              "id": "3e78929e-5833-454e-96bb-12b5d08b7891",
+              "name": "vwap",
+              "value": "={{ $json.vwap }}",
+              "type": "number"
+            },
+            {
+              "id": "8637b963-9891-4fc6-b92a-ad86833a72f7",
+              "name": "atr",
+              "value": "={{ $json.atr }}",
+              "type": "number"
+            },
+            {
+              "id": "c8d10b8a-d8f6-48cf-b2a3-08c4918d2ddf",
+              "name": "macd_hist",
+              "value": "={{ $json.macd_hist }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        672,
+        352
+      ],
+      "id": "66884045-1e66-41bf-ad0e-131182d7027a",
+      "name": "Latest 5m Snapshot"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "tv_datafeed_15m",
+        "limit": 1,
+        "filterType": "string",
+        "filterString": "=symbol=eq.MES&order=ts.desc&limit=1"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        16,
+        416
+      ],
+      "id": "1a6d4b84-6377-4ba8-b3f5-e64b19f59786",
+      "name": "Get datafeed_5m",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Expect the most recent CLOSED 5m bar (align to 5-minute boundary)\nconst now = new Date();\nconst ms = now.getTime();\nconst fiveMin = 5 * 60 * 1000;\n\n// use the previous completed bar close time\nconst expected = new Date(Math.floor(ms / fiveMin) * fiveMin);\n\nreturn [{ json: { expected_ts: expected.toISOString() } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        352
+      ],
+      "id": "14580694-16a7-4770-aa87-70fca5200304",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "amount": 2
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -176,
+        352
+      ],
+      "id": "6127b77b-c4c3-45fd-b91d-f1901c008e03",
+      "name": "Wait",
+      "webhookId": "f5bd799c-a7f3-4947-b85f-98a0950d50d2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "30820a48-c378-4033-b7b3-06a42eec2d86",
+              "leftValue": "={{ $json.ts }}",
+              "rightValue": "={{ $json.expected_ts }}\n",
+              "operator": {
+                "type": "dateTime",
+                "operation": "afterOrEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        368
+      ],
+      "id": "88509184-b71f-45a8-a38d-0db5cd20fb32",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        240,
+        368
+      ],
+      "id": "2a5d6b31-dc35-402c-820c-5bce3f96a6b4",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $input.first().json;\n\nconst c = Number(row.c);\nconst vwap = Number(row.vwap);\nconst ema21 = Number(row.ema21);\nconst atr = Number(row.atr);\n\nconst c_minus_vwap_pts = c - vwap;\nconst c_minus_ema21_pts = c - ema21;\n\n// TP and SL distances in points by Topstep size mapping\nconst tp_pts_size1 = 12;\nconst tp_pts_size2 = 6;\nconst tp_pts_size3 = 4;\nconst sl_pts_size1 = 6;\nconst sl_pts_size2 = 3;\nconst sl_pts_size3 = 2;\n\nconst tp_to_atr_size1 = atr ? tp_pts_size1 / atr : null;\nconst sl_to_atr_size1 = atr ? sl_pts_size1 / atr : null;\nconst tp_to_atr_size2 = atr ? tp_pts_size2 / atr : null;\nconst sl_to_atr_size2 = atr ? sl_pts_size2 / atr : null;\nconst tp_to_atr_size3 = atr ? tp_pts_size3 / atr : null;\nconst sl_to_atr_size3 = atr ? sl_pts_size3 / atr : null;\n\n// Round helper (2 decimals)\nconst r = (x) => (x == null ? null : Math.round(x * 100) / 100);\n\nreturn [{\n  json: {\n    ...row,\n    c_minus_vwap_pts: r(c_minus_vwap_pts),\n    c_minus_ema21_pts: r(c_minus_ema21_pts),\n    tp_to_atr_size1: r(tp_to_atr_size1),\n    sl_to_atr_size1: r(sl_to_atr_size1),\n    tp_to_atr_size2: r(tp_to_atr_size2),\n    sl_to_atr_size2: r(sl_to_atr_size2),\n    tp_to_atr_size3: r(tp_to_atr_size3),\n    sl_to_atr_size3: r(sl_to_atr_size3),\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        352
+      ],
+      "id": "9b46abe8-ee96-4b02-af81-11fcf41d75e9",
+      "name": "5m derived snapshot"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7d733105-b0e5-4590-ba13-b908adce16f5",
+              "name": "ai_decision_id",
+              "value": "={{ $json.ai_decision_id }}",
+              "type": "number"
+            },
+            {
+              "id": "3e67b373-ce51-4c87-8289-696bf7fb3967",
+              "name": "strategy",
+              "value": "={{ $json.strategy }}",
+              "type": "string"
+            },
+            {
+              "id": "4dde2ce1-3ee9-4aea-a062-05f7f4c0cbc4",
+              "name": "signal",
+              "value": "={{ $json.signal }}",
+              "type": "string"
+            },
+            {
+              "id": "ccfff928-1534-4361-9503-869da76ddb84",
+              "name": "symbol",
+              "value": "={{ $json.symbol }}",
+              "type": "string"
+            },
+            {
+              "id": "dab5ee6a-35c8-43b2-833c-cc9dc6abc9e1",
+              "name": "account",
+              "value": "={{ $json.account }}",
+              "type": "string"
+            },
+            {
+              "id": "442178dc-509b-438c-96cd-83b5b7de5070",
+              "name": "size",
+              "value": "={{ $json.size }}",
+              "type": "string"
+            },
+            {
+              "id": "03ac8761-f64a-4b19-a875-a23712f08924",
+              "name": "reason",
+              "value": "={{ $json.reason }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3264,
+        352
+      ],
+      "id": "49e34eb3-6fa9-45c0-81fc-683cb3fa2ec1",
+      "name": "Build Response"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "charts",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "symbol",
+              "condition": "eq",
+              "keyValue": "MES"
+            },
+            {
+              "keyName": "timeframe",
+              "condition": "eq",
+              "keyValue": "5m"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "chart_url",
+              "fieldValue": "={{ $json.url }}"
+            },
+            {
+              "fieldId": "updated_at",
+              "fieldValue": "={{ $now }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1696,
+        736
+      ],
+      "id": "1c355c28-ffc7-4336-8d9d-a12e39b0a391",
+      "name": "Supabase2",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Supabase3').item.json.chart_url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1696,
+        272
+      ],
+      "id": "1d5a722f-054e-4e8b-9e41-5a47cc5fe56e",
+      "name": "HTTP Request2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "04a3fd08-7396-47d6-830d-da9165fa0bc0",
+              "leftValue": "={{ (new Date().getTime() - new Date($json[\"updated_at\"]).getTime()) / 60000 }}",
+              "rightValue": 14.8,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1264,
+        352
+      ],
+      "id": "995bc4c8-0719-46ea-9932-bf02e316cc34",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "charts",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "timeframe",
+              "keyValue": "15m"
+            },
+            {
+              "keyName": "symbol",
+              "keyValue": "MES"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1088,
+        352
+      ],
+      "id": "a99ea5a8-8293-49b4-aaa4-83d39414b60b",
+      "name": "Supabase3",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "charts",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "symbol",
+              "condition": "eq",
+              "keyValue": "MES"
+            },
+            {
+              "keyName": "timeframe",
+              "condition": "eq",
+              "keyValue": "15m"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "chart_url",
+              "fieldValue": "={{ $json.url }}"
+            },
+            {
+              "fieldId": "updated_at",
+              "fieldValue": "={{ $now }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1696,
+        448
+      ],
+      "id": "b287d40d-411d-48e7-8836-159f2cc7503a",
+      "name": "Supabase4",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.chart_url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1856,
+        448
+      ],
+      "id": "7325a676-21b6-404b-8759-22e096632aca",
+      "name": "HTTP Request3"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.chart-img.com/v2/tradingview/layout-chart/storage/1LucwVmQ",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "tradingview-session-id",
+              "value": "xpy37kx3hnmae3v1s5ef6x7daimwi9j8"
+            },
+            {
+              "name": "tradingview-session-id-sign",
+              "value": "v3:ACiGDw6hGbRCPE1XPmC3F8Ui41D7L6BSb/zqECFveFE="
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "format",
+              "value": "jpeg"
+            },
+            {
+              "name": "interval",
+              "value": "5m"
+            },
+            {
+              "name": "width",
+              "value": "1920"
+            },
+            {
+              "name": "height",
+              "value": "1080"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f30a056c-78ab-45a4-994c-cee46e612254",
+      "name": "Tradingview Chart1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1520,
+        448
+      ],
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ZleHrixI7F5TA8Yb",
+          "name": "chart-img"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "694cc668-54e1-4b18-94e7-51a381764295",
+              "name": "url",
+              "value": "={{ $json.chart_url }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "includeBinary": true
+        }
+      },
+      "id": "dc294eea-ae9f-44e6-9855-a1cdbcc73df2",
+      "name": "set url",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        2160,
+        352
+      ],
+      "typeVersion": 3.3
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get many rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Webhook": {
+      "main": [
+        []
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Test workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get many rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Get many rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        []
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Upload to GCS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to GCS": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields2": {
+      "main": [
+        [
+          {
+            "node": "Supabase1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase1": {
+      "main": [
+        []
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        []
+      ]
+    },
+    "Anthropic Chat Model": {
+      "ai_languageModel": [
+        []
+      ]
+    },
+    "Tradingview Chart": {
+      "main": [
+        [
+          {
+            "node": "Supabase2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many rows": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields3": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Latest 5m Snapshot": {
+      "main": [
+        [
+          {
+            "node": "5m derived snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get datafeed_5m": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get datafeed_5m",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Latest 5m Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Latest 5m Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5m derived snapshot": {
+      "main": [
+        [
+          {
+            "node": "Supabase3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase2": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "set url",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tradingview Chart1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase3": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase4": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request3": {
+      "main": [
+        [
+          {
+            "node": "set url",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tradingview Chart1": {
+      "main": [
+        [
+          {
+            "node": "Supabase4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "set url": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "a84be8cf-72fe-4a87-862d-e2f1e50dc499",
+  "meta": {
+    "templateId": "2569",
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9783a33f8d5600da0ff08d35d1dc9051c104e0a37fceb74a2ffe1557dcda02bc"
+  },
+  "id": "uWzJd3f2Hqo8nDNh",
+  "tags": []
+}

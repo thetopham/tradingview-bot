@@ -1,0 +1,140 @@
+{
+  "name": "datafeed_15m",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "tvdatafeed_15m",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        0
+      ],
+      "id": "8539f2b0-8083-4900-9d09-501ac9795f2f",
+      "name": "Webhook",
+      "webhookId": "32fc197d-666f-42c0-857e-a18e2dab8f66"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a6c7b32b-90b6-4344-829c-0b3771fbeb83",
+              "name": "data",
+              "value": "={{ $json.body }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        80,
+        0
+      ],
+      "id": "e5bcb0c4-d1de-408e-a098-2d5d5dbbb275",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [ JSON.parse($input.first().json.data) ];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        0
+      ],
+      "id": "2d8d9f41-5993-483e-960f-0ed873054876",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "tableId": "tv_datafeed_15m",
+        "dataToSend": "autoMapInputData"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        544,
+        0
+      ],
+      "id": "5238c3dd-a69e-49ec-905b-06e5adef113e",
+      "name": "Supabase",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "{\"symbol\":\"MES\",\"timeframe\":\"{{interval}}\",\"o\":{{open}},\"h\":{{high}},\"l\":{{low}},\"c\":{{close}},\"v\":{{volume}},\"sma20\":{{plot_0}},\"sma50\":{{plot_1}},\"ema8\":{{plot_2}},\"ema21\":{{plot_3}},\"vwap\":{{plot_4}},\"atr\":{{plot_5}},\"bb_upper\":{{plot_6}},\"bb_middle\":{{plot_7}},\"bb_lower\":{{plot_8}},\"rsi\":{{plot_9}},\"macd\":{{plot_10}},\"macd_signal\":{{plot_11}},\"macd_hist\":{{plot_12}},\"stoch_k\":{{plot_13}},\"stoch_d\":{{plot_14}},\"obv\":{{plot_15}},\"fisher\":{{plot_16}},\"phobos_momentum\":{{plot_17}},\"vzo\":{{plot_18}}}\n",
+        "height": 320,
+        "width": 368
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -656,
+        -320
+      ],
+      "id": "92603242-28ea-4467-83f5-70a47b8ff7f0",
+      "name": "Sticky Note"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "5a322eb8-2f6d-4ef2-86fa-2883fae0c1d2",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9783a33f8d5600da0ff08d35d1dc9051c104e0a37fceb74a2ffe1557dcda02bc"
+  },
+  "id": "onPuif8hwjaEPHRS",
+  "tags": []
+}
