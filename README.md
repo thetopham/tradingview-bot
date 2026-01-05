@@ -19,6 +19,10 @@ This repo runs a lightweight execution + observability layer for an “AI day tr
 - `signalr_listener.py` – listens to broker events; logs results when a position closes
 - `api.py` – ProjectX REST calls + Supabase logging helpers
 - `dashboard.py` + `dashboard.html` – UI and API endpoint for merged feed
+- `n8n/` – exported n8n workflows
+  - `n8n/overseers/` – overseer AI flows for different accounts/timeframes
+  - `n8n/chart_fetch/` – 5m/15m/30m prefetch helper flows
+  - `n8n/datafeeds/` – merged data feed exports
 
 ## Local setup
 
