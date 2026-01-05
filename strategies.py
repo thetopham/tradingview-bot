@@ -35,7 +35,7 @@ def _compute_entry_fill(acct_id: int, oid: int) -> float | None:
         time.sleep(0.25)
     return price
 
-def run_simple(acct_id: int, sym: str, sig: str, size: int, alert: str, ai_decision_id=None):
+def run_simple(acct_id: int, sym: str, sig: str, size: int, alert: str, ai_decision_id=None, prompt_version=None):
     """Execute a simple market order; server-side brackets handled by broker."""
     cid = get_contract(sym)
     sig = (sig or "").upper()
@@ -91,6 +91,7 @@ def run_simple(acct_id: int, sym: str, sig: str, size: int, alert: str, ai_decis
         tp_ids=None,
         trades=[entry],
         regime=None,
+        prompt_version=None,
     )
 
 '''
