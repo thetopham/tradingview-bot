@@ -155,7 +155,7 @@ def _compute_profit_factor(gross_wins: float, gross_losses: float) -> Optional[f
 # ─── Supabase Fetch ───────────────────────────────────────────────────────────
 
 def _fetch_ai_trade_feed(
-    *, limit: int = 200, account: str = "all", range_key: str = "7d", include_open: bool = True
+    *, limit: int = 2000, account: str = "all", range_key: str = "7d", include_open: bool = True
 ) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, str]]]:
     errors: Optional[Dict[str, str]] = None
     try:
