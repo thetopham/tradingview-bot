@@ -265,7 +265,7 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "=You are the trading overseer for MES (5-minute loop).\n\nYou ONLY decide:\n1) signal: BUY | SELL | HOLD | FLAT\n2) reason: plain English, no fluff\n3) size: 1 | 2 | 3\n\nDefinitions:\n- BUY/SELL = enter or reverse position\n- HOLD = no action\n- FLAT = flatten current position (exit)\n\nRe-occuring process:\n- This process runs every 5 minutes.\n- Your decision should assume you will be asked again in ~5 minutes.\n- If uncertain, prefer HOLD and reassess next run.\n- If you include a “future self” note, keep it short and relevant for the next 1–5 runs (5–25 minutes).\n\nCHART LEGEND (5m):\n- EMA 9 (Close) = BLUE\n- EMA 21 (Close) = YELLOW\n- VWAP (Session) = RED\n- MACD (12,26,9) = histogram + lines in MACD pane\n- ATR (14, RMA) = red line in ATR pane\n\nRisk/Bracket (informational):\nSL = -$60 \nTP = +$30 \n(Topstep changes point distance with size; risk stays ~$60) Use larger size only if tighter sl/tp fits current volatility/structure.\nSize meaning: choose bracket tightness (TP/SL distance), not leverage.\n\nBracket distances by size (SOURCE OF TRUTH = datafeed snapshot fields):\n- See: brackets (points + $) and bracket_summary in the JSON below.\n- You MUST choose size based on these exact distances. Do not invent SL/TP.\n\nDATAFEED + DERIVED (5m numeric, source of truth):\n{{ JSON.stringify($('5m derived snapshot').item.json, null, 2) }}\nIf screenshot and numeric disagree, trust numeric values.\n\nCURRENT POSITION (source of truth):\nhas_position={{ $('Webhook').item.json.body.position_context.current_position.has_position }}\nside={{ $('Webhook').item.json.body.position_context.current_position.side || 'none' }}\ncontracts={{ $('Webhook').item.json.body.position_context.current_position.size }}\nunrealized_pnl=${{ $('Webhook').item.json.body.position_context.current_position.unrealized_pnl }}\nduration_mins={{ $('Webhook').item.json.body.position_context.current_position.duration_minutes }}\n\nLAST 5 AI DECISIONS (most recent first):\nprevious: ai_decision_id, timestamp, signal, reason\n{{ (($('Aggregate').item.json.data) || []).map(d => `${d.ai_decision_id} ${d.timestamp} ${d.signal}: ${d.reason}`).join('\\n') || \"None\" }}\n\nReason format (required):\ncurrent thesis (why this signal).\ncurrent position data\nInvalidation: <what would make this wrong in the next 5–25 mins>.\n\nOUTPUT REQUIREMENTS:\n- Return ONLY valid JSON \n- strategy must be \"simple\".\n\nRETURN ONLY THIS JSON:\n{\n  \"timestamp\":\"{{ $now }}\",\n  \"strategy\":\"simple\",\n  \"signal\":\"BUY|SELL|HOLD|FLAT\",\n  \"symbol\":\"CON.F.US.MES.H26\",\n  \"account\":\"{{ $('Webhook').item.json.body.account }}\",\n  \"size\": 1,\n  \"reason\":\"<reasoning>\",\n  \"urls\":\"{{ $('set url').item.json.url }}\"\n  \"prompt_version\":\"simple-5m-gamma-1-4-2026-brackets-1t2\"\n}\n",
+        "text": "=You are the trading overseer for MES (5-minute loop).\n\nYou ONLY decide:\n1) signal: BUY | SELL | HOLD | FLAT\n2) reason: plain English, no fluff\n3) size: 1 | 2 | 3\n\nDefinitions:\n- BUY/SELL = enter or reverse position\n- HOLD = no action\n- FLAT = flatten current position (exit)\n\nRe-occuring process:\n- This process runs every 5 minutes.\n- Your decision should assume you will be asked again in ~5 minutes.\n- If uncertain, prefer HOLD and reassess next run.\n- If you include a “future self” note, keep it short and relevant for the next 1–5 runs (5–25 minutes).\n\nCHART LEGEND (5m):\n- EMA 9 (Close) = BLUE\n- EMA 21 (Close) = YELLOW\n- VWAP (Session) = RED\n- MACD (12,26,9) = histogram + lines in MACD pane\n- ATR (14, RMA) = red line in ATR pane\n\nRisk/Bracket (informational):\nSL = -$60 \nTP = +$30 \n(Topstep changes point distance with size; risk stays ~$60) Use larger size only if tighter sl/tp fits current volatility/structure.\nSize meaning: choose bracket tightness (TP/SL distance), not leverage.\n\nBracket distances by size (SOURCE OF TRUTH = datafeed snapshot fields):\n- See: brackets (points + $) and bracket_summary in the JSON below.\n- You MUST choose size based on these exact distances. Do not invent SL/TP.\n\nDATAFEED + DERIVED (5m numeric, source of truth):\n{{ JSON.stringify($('5m derived snapshot').item.json, null, 2) }}\nIf screenshot and numeric disagree, trust numeric values.\n\nCURRENT POSITION (source of truth):\nhas_position={{ $('Webhook').item.json.body.position_context.current_position.has_position }}\nside={{ $('Webhook').item.json.body.position_context.current_position.side || 'none' }}\ncontracts={{ $('Webhook').item.json.body.position_context.current_position.size }}\nunrealized_pnl=${{ $('Webhook').item.json.body.position_context.current_position.unrealized_pnl }}\nduration_mins={{ $('Webhook').item.json.body.position_context.current_position.duration_minutes }}\n\nLAST 5 AI DECISIONS (most recent first):\nprevious: ai_decision_id, timestamp, signal, reason\n{{ (($('Aggregate').item.json.data) || []).map(d => `${d.ai_decision_id} ${d.timestamp} ${d.signal}: ${d.reason}`).join('\\n') || \"None\" }}\n\nReason format (required):\ncurrent thesis (why this signal).\ncurrent position data\nInvalidation: <what would make this wrong in the next 5–25 mins>.\n\nOUTPUT REQUIREMENTS:\n- Return ONLY valid JSON \n- strategy must be \"simple\".\n\nRETURN ONLY THIS JSON:\n{\n  \"timestamp\":\"{{ $now }}\",\n  \"strategy\":\"simple\",\n  \"signal\":\"BUY|SELL|HOLD|FLAT\",\n  \"symbol\":\"CON.F.US.MES.H26\",\n  \"account\":\"{{ $('Webhook').item.json.body.account }}\",\n  \"size\": 1,\n  \"reason\":\"<reasoning>\",\n  \"urls\":\"{{ $('set url').item.json.url }}\",\n  \"prompt_version\":\"simple-5m-gamma-1-4-2026-brackets-1t2\"\n}\n",
         "messages": {
           "messageValues": [
             {
@@ -623,7 +623,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const row = $input.first().json;\n\nconst c = Number(row.c);\nconst vwap = Number(row.vwap);\nconst ema21 = Number(row.ema21);\nconst atr = Number(row.atr);\n\nconst c_minus_vwap_pts = c - vwap;\nconst c_minus_ema21_pts = c - ema21;\n\n// === Topstep bracket distances (POINTS) by size ===\n// Your mapping:\n// 1 contract = SL/TP 12/6\n// 2 contracts = 6/3\n// 3 contracts = 4/2\nconst POINT_VALUE_USD = 5; // MES = $5 per point per contract\n\nconst brackets = {\n  1: { sl_pts: 12, tp_pts: 6 },\n  2: { sl_pts: 6, tp_pts: 3 },\n  3: { sl_pts: 3, tp_pts: 2 },\n};\n\n// add USD equivalents (risk stays ~$60, TP ~$30) for clarity\nfor (const k of Object.keys(brackets)) {\n  const size = Number(k);\n  brackets[size].sl_usd = brackets[size].sl_pts * POINT_VALUE_USD * size;\n  brackets[size].tp_usd = brackets[size].tp_pts * POINT_VALUE_USD * size;\n}\n\n// ATR multiples (keep your existing fields, but also make them explicit in the table)\nconst tp_to_atr_size1 = atr ? brackets[1].tp_pts / atr : null;\nconst sl_to_atr_size1 = atr ? brackets[1].sl_pts / atr : null;\nconst tp_to_atr_size2 = atr ? brackets[2].tp_pts / atr : null;\nconst sl_to_atr_size2 = atr ? brackets[2].sl_pts / atr : null;\nconst tp_to_atr_size3 = atr ? brackets[3].tp_pts / atr : null;\nconst sl_to_atr_size3 = atr ? brackets[3].sl_pts / atr : null;\n\n// Round helper (2 decimals)\nconst r = (x) => (x == null ? null : Math.round(x * 100) / 100);\n\n// Human-readable line so the model can’t “ignore” the JSON\nconst bracket_summary =\n  `SIZE->BRACKET: ` +\n  `1=SL ${brackets[1].sl_pts}pt($${brackets[1].sl_usd}) TP ${brackets[1].tp_pts}pt($${brackets[1].tp_usd}); ` +\n  `2=SL ${brackets[2].sl_pts}pt($${brackets[2].sl_usd}) TP ${brackets[2].tp_pts}pt($${brackets[2].tp_usd}); ` +\n  `3=SL ${brackets[3].sl_pts}pt($${brackets[3].sl_usd}) TP ${brackets[3].tp_pts}pt($${brackets[3].tp_usd}).`;\n\nreturn [{\n  json: {\n    ...row,\n\n    // deltas\n    c_minus_vwap_pts: r(c_minus_vwap_pts),\n    c_minus_ema21_pts: r(c_minus_ema21_pts),\n\n    // original ATR multiple fields (kept)\n    tp_to_atr_size1: r(tp_to_atr_size1),\n    sl_to_atr_size1: r(sl_to_atr_size1),\n    tp_to_atr_size2: r(tp_to_atr_size2),\n    sl_to_atr_size2: r(sl_to_atr_size2),\n    tp_to_atr_size3: r(tp_to_atr_size3),\n    sl_to_atr_size3: r(sl_to_atr_size3),\n\n    // NEW: explicit bracket points + dollars + point value\n    point_value_usd: POINT_VALUE_USD,\n    brackets, // {1:{sl_pts,tp_pts,sl_usd,tp_usd}, ...}\n    bracket_summary,\n  }\n}];\n"
+        "jsCode": "const row = $input.first().json;\n\nconst c = Number(row.c);\nconst vwap = Number(row.vwap);\nconst ema21 = Number(row.ema21);\nconst atr = Number(row.atr);\n\nconst c_minus_vwap_pts = c - vwap;\nconst c_minus_ema21_pts = c - ema21;\n\n// === Topstep bracket distances (POINTS) by size ===\n// Your mapping:\n// 1 contract = SL/TP 12/6\n// 2 contracts = 6/3\n// 3 contracts = 4/2\nconst POINT_VALUE_USD = 5; // MES = $5 per point per contract\n\nconst brackets = {\n  1: { sl_pts: 12, tp_pts: 6 },\n  2: { sl_pts: 6, tp_pts: 3 },\n  3: { sl_pts: 4, tp_pts: 2 },\n};\n\n// add USD equivalents (risk stays ~$60, TP ~$30) for clarity\nfor (const k of Object.keys(brackets)) {\n  const size = Number(k);\n  brackets[size].sl_usd = brackets[size].sl_pts * POINT_VALUE_USD * size;\n  brackets[size].tp_usd = brackets[size].tp_pts * POINT_VALUE_USD * size;\n}\n\n// ATR multiples (keep your existing fields, but also make them explicit in the table)\nconst tp_to_atr_size1 = atr ? brackets[1].tp_pts / atr : null;\nconst sl_to_atr_size1 = atr ? brackets[1].sl_pts / atr : null;\nconst tp_to_atr_size2 = atr ? brackets[2].tp_pts / atr : null;\nconst sl_to_atr_size2 = atr ? brackets[2].sl_pts / atr : null;\nconst tp_to_atr_size3 = atr ? brackets[3].tp_pts / atr : null;\nconst sl_to_atr_size3 = atr ? brackets[3].sl_pts / atr : null;\n\n// Round helper (2 decimals)\nconst r = (x) => (x == null ? null : Math.round(x * 100) / 100);\n\n// Human-readable line so the model can’t “ignore” the JSON\nconst bracket_summary =\n  `SIZE->BRACKET: ` +\n  `1=SL ${brackets[1].sl_pts}pt($${brackets[1].sl_usd}) TP ${brackets[1].tp_pts}pt($${brackets[1].tp_usd}); ` +\n  `2=SL ${brackets[2].sl_pts}pt($${brackets[2].sl_usd}) TP ${brackets[2].tp_pts}pt($${brackets[2].tp_usd}); ` +\n  `3=SL ${brackets[3].sl_pts}pt($${brackets[3].sl_usd}) TP ${brackets[3].tp_pts}pt($${brackets[3].tp_usd}).`;\n\nreturn [{\n  json: {\n    ...row,\n\n    // deltas\n    c_minus_vwap_pts: r(c_minus_vwap_pts),\n    c_minus_ema21_pts: r(c_minus_ema21_pts),\n\n    // original ATR multiple fields (kept)\n    tp_to_atr_size1: r(tp_to_atr_size1),\n    sl_to_atr_size1: r(sl_to_atr_size1),\n    tp_to_atr_size2: r(tp_to_atr_size2),\n    sl_to_atr_size2: r(sl_to_atr_size2),\n    tp_to_atr_size3: r(tp_to_atr_size3),\n    sl_to_atr_size3: r(sl_to_atr_size3),\n\n    // NEW: explicit bracket points + dollars + point value\n    point_value_usd: POINT_VALUE_USD,\n    brackets, // {1:{sl_pts,tp_pts,sl_usd,tp_usd}, ...}\n    bracket_summary,\n  }\n}];\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -974,7 +974,97 @@
       "typeVersion": 3.3
     }
   ],
-  "pinData": {},
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n.thetopham.com",
+            "user-agent": "python-requests/2.32.5",
+            "content-length": "1047",
+            "accept": "*/*",
+            "accept-encoding": "gzip, br",
+            "cdn-loop": "cloudflare; loops=1",
+            "cf-connecting-ip": "71.218.241.177",
+            "cf-ipcountry": "US",
+            "cf-ray": "9b914c4308cee669-DEN",
+            "cf-visitor": "{\"scheme\":\"https\"}",
+            "cf-warp-tag-id": "ab76dbd7-011c-42ec-9501-c562736f8c45",
+            "connection": "keep-alive",
+            "content-type": "application/json",
+            "x-forwarded-for": "71.218.241.177",
+            "x-forwarded-proto": "https"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "account": "gamma",
+            "strategy": "simple",
+            "signal": "",
+            "symbol": "CON.F.US.MES.H26",
+            "size": 3,
+            "alert": "APScheduler 5m overseer",
+            "positions": [
+              {
+                "id": 508561933,
+                "accountId": 11065803,
+                "contractId": "CON.F.US.MES.H26",
+                "creationTimestamp": "2026-01-05T07:25:44.48987+00:00",
+                "type": 2,
+                "size": 2,
+                "averagePrice": 6907.5
+              }
+            ],
+            "position_summary": [
+              {
+                "contract": "CON.F.US.MES.H26",
+                "side": "SHORT",
+                "size": 2,
+                "avg_price": 6907.5,
+                "pnl": -3.5
+              }
+            ],
+            "position_context": {
+              "current_position": {
+                "has_position": true,
+                "size": 2,
+                "side": "SHORT",
+                "entry_price": 6907.5,
+                "current_price": 6909.25,
+                "current_pnl": -17.5,
+                "unrealized_pnl": -17.5,
+                "realized_pnl": 0,
+                "duration_minutes": 9.51164685,
+                "stop_count": 1,
+                "target_count": 1
+              },
+              "account_metrics": {
+                "daily_pnl": -8.61,
+                "win_rate": 0,
+                "consecutive_losses": 1,
+                "open_positions": 1,
+                "risk_level": "low",
+                "can_trade": true
+              },
+              "risk_limits": {
+                "max_daily_loss": -2000,
+                "profit_target": 99999999,
+                "max_consecutive_losses": 999999,
+                "consecutive_loss_guard_enabled": true
+              },
+              "warnings": [],
+              "suggestions": []
+            }
+          },
+          "webhookUrl": "https://n8n.thetopham.com/webhook/simple3",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
   "connections": {
     "Webhook": {
       "main": [
@@ -1362,7 +1452,7 @@
     "executionOrder": "v1",
     "availableInMCP": false
   },
-  "versionId": "5a302d3c-1831-4a9a-bcc7-a1d8d4c83e65",
+  "versionId": "ff93b4d5-588f-44b5-a035-a3b803a8dec5",
   "meta": {
     "templateId": "2569",
     "templateCredsSetupCompleted": true,
