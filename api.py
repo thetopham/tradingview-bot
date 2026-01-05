@@ -1076,6 +1076,7 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
                 "trade_ids": payload["trade_ids"],
                 "order_id": payload["order_id"],
                 "comment": payload["comment"],
+                "prompt_version": payload.get("prompt_version"),
             }
             if payload.get("ai_decision_id") is not None and existing.get("ai_decision_id") in (None, ""):
                 updates["ai_decision_id"] = payload["ai_decision_id"]
