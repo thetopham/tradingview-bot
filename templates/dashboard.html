@@ -108,8 +108,6 @@
                             <th>Symbol</th>
                             <th>Signal</th>
                             <th>Size</th>
-                            <th>Entry Px</th>
-                            <th>Exit Px</th>
                             <th>PnL</th>
                             <th>Decision ID</th>
                             <th>Reason</th>
@@ -192,8 +190,6 @@
                     row.symbol || '',
                     row.signal || '',
                     row.size || '',
-                    row.entry_price !== null && row.entry_price !== undefined ? formatNumber(row.entry_price) : '',
-                    row.exit_price !== null && row.exit_price !== undefined ? formatNumber(row.exit_price) : '',
                     row.pnl !== null && row.pnl !== undefined ? `$${formatNumber(row.pnl)}` : '',
                     row.ai_decision_id || '',
                     row.reason || '',
