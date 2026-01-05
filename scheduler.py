@@ -18,8 +18,8 @@ N8N_CHART_ENDPOINTS = {
     "30m": config.get('N8N_30MCHART_FETCH_URL'),
 }
 N8N_SCHEDULED_FLOW_ENDPOINTS = {
-    "delta": config.get("N8N_OVERSEER_URL_TEST4") or config.get("N8N_AI_URL"),
-    "epsilon": config.get("N8N_OVERSEER_URL_TEST5") or config.get("N8N_AI_URL"),
+    "delta": config.get("N8N_OVERSEER_URL_TEST4"),
+    "epsilon": config.get("N8N_OVERSEER_URL_TEST5"),
 }
 
 def start_scheduler(app):
