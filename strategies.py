@@ -83,6 +83,7 @@ def run_simple(acct_id: int, sym: str, sig: str, size: int, alert: str, ai_decis
         sig=sig,
         size=size,
         order_id=entry.get("orderId"),
+        entry_price=fill_price,
         alert=alert,
         account=account_label,
         symbol=log_symbol,

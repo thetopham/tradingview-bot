@@ -46,6 +46,7 @@ def track_trade(
     alert,
     account,
     symbol,
+    entry_price=None,
     sl_id=None,
     tp_ids=None,
     trades=None,
@@ -65,6 +66,7 @@ def track_trade(
         "signal": sig,
         "size": size,
         "order_id": order_id,
+        "entry_price": entry_price,
         "sl_id": sl_id,
         "tp_ids": tp_ids,
         "alert": alert,
@@ -384,6 +386,15 @@ def on_order_update(args):
             meta["entry_time"] = order_data.get("creationTimestamp") or time.time()
         if "order_id" not in meta or not meta["order_id"]:
             meta["order_id"] = order_data.get("id")
+        if not meta.get("entry_price"):
+            for key in ("averageFillPrice", "avgFillPrice", "fillPrice"):
+                value = order_data.get(key)
+                try:
+                    if value is not None:
+                        meta["entry_price"] = float(value)
+                        break
+                except (TypeError, ValueError):
+                    continue
         logging.info(f"Order filled: {order_data}")
         logging.info(f"[on_order_update] meta after update: {meta}")
 
