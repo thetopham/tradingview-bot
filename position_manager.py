@@ -3,12 +3,15 @@
 Simplified position context provider for AI trading decisions
 """
 
+import json
 import logging
+import os
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from api import search_pos, search_open, search_trades, get_contract
+from api import get_contract, search_accounts, search_open, search_pos, search_trades, get_supabase_client
 from config import load_config
 
 config = load_config()
@@ -23,6 +26,8 @@ class PositionManager:
         self.accounts = accounts
         self.logger = logging.getLogger(__name__)
         self._account_state_cache: Dict[int, Tuple[float, Dict]] = {}
+        self._account_balance_cache: Dict[int, Tuple[float, float]] = {}
+        self._equity_state: Dict[str, Dict[str, float]] = {}
         
         # Risk parameters (for context only)
         self.max_daily_loss = config.get('MAX_DAILY_LOSS', -500.0)
@@ -34,6 +39,17 @@ class PositionManager:
         else:
             self.max_consecutive_losses = raw_max_consecutive_losses
         self.consecutive_loss_guard_enabled = self.max_consecutive_losses is not None
+
+        # Trailing drawdown parameters
+        self.trailing_max_loss_usd = 2000.0
+        self.dd_soft_50_pct = 0.50
+        self.dd_soft_75_pct = 0.75
+
+        # Persistent equity tracking
+        default_state_path = Path(os.environ.get("TRADE_STATE_PATH", "./trade_state.json"))
+        self.equity_state_path = Path(os.environ.get("ACCOUNT_STATE_PATH", default_state_path))
+        self.equity_state_bak_path = self.equity_state_path.with_suffix(self.equity_state_path.suffix + ".bak")
+        self._load_equity_state()
 
     def get_position_state_light(
         self, acct_id: int, cid: str, *, current_price: Optional[float] = None
@@ -121,6 +137,83 @@ class PositionManager:
             'position_type': position_type,
             'creationTimestamp': creation_time,
         }
+
+    # ------------------------------------------------------------------
+    # Persistent equity tracking (session start + peak)
+    # ------------------------------------------------------------------
+    def _load_equity_state(self) -> None:
+        """Load persisted equity state from disk."""
+
+        try:
+            if not self.equity_state_path.exists() and not self.equity_state_bak_path.exists():
+                self._equity_state = {}
+                return
+
+            def _read(path: Path):
+                with path.open("r", encoding="utf-8") as f:
+                    return json.load(f)
+
+            data = None
+            primary_error = None
+
+            try:
+                if self.equity_state_path.exists():
+                    data = _read(self.equity_state_path)
+            except Exception as exc:
+                primary_error = exc
+                self.logger.warning("Failed to parse equity state from %s: %s", self.equity_state_path, exc)
+
+            if data is None and self.equity_state_bak_path.exists():
+                try:
+                    data = _read(self.equity_state_bak_path)
+                    self.logger.warning(
+                        "Recovered equity state from backup %s after parse failure", self.equity_state_bak_path
+                    )
+                except Exception as exc:
+                    self.logger.warning(
+                        "Failed to parse backup equity state from %s: %s", self.equity_state_bak_path, exc
+                    )
+
+            if data is None:
+                if primary_error:
+                    self.logger.warning("Starting with empty equity state due to parse errors; primary=%s", primary_error)
+                self._equity_state = {}
+                return
+
+            self._equity_state = data.get("equity_state", {}) or {}
+        except Exception as exc:
+            self.logger.error("Unable to load equity state: %s", exc)
+            self._equity_state = {}
+
+    def _save_equity_state(self, *, force: bool = False) -> None:
+        """Persist equity state to disk (best-effort)."""
+
+        try:
+            self.equity_state_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = self.equity_state_path.with_suffix(self.equity_state_path.suffix + ".tmp")
+
+            if self.equity_state_path.exists():
+                try:
+                    self.equity_state_bak_path.write_bytes(self.equity_state_path.read_bytes())
+                except Exception as exc:
+                    self.logger.warning(
+                        "Failed to write backup equity state to %s: %s", self.equity_state_bak_path, exc
+                    )
+
+            payload = {
+                "schema_version": 1,
+                "saved_at": datetime.now(timezone.utc).isoformat(),
+                "equity_state": self._equity_state,
+            }
+
+            with tmp_path.open("w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+
+            os.replace(tmp_path, self.equity_state_path)
+        except Exception as exc:
+            if force:
+                raise
+            self.logger.warning("Unable to persist equity state to %s: %s", self.equity_state_path, exc)
     
     def get_position_state(self, acct_id: int, cid: str) -> Dict:
         """
@@ -304,6 +397,168 @@ class PositionManager:
         state = self.get_account_state(acct_id)
         self._account_state_cache[acct_id] = (now, state)
         return state
+
+    # ------------------------------------------------------------------
+    # Account balance + trailing drawdown helpers
+    # ------------------------------------------------------------------
+    def _get_account_balance(self, acct_id: int, *, max_age_seconds: int = 30) -> Optional[float]:
+        """Fetch account balance with lightweight caching."""
+
+        now = time.time()
+        cached = self._account_balance_cache.get(acct_id)
+        if cached and now - cached[0] <= max_age_seconds:
+            return cached[1]
+
+        try:
+            accounts = search_accounts(only_active_accounts=True)
+            if not isinstance(accounts, list):
+                accounts = []
+
+            ts = time.time()
+            found_balance = None
+
+            for acct in accounts:
+                acct_id_val = acct.get("id")
+                try:
+                    acct_id_int = int(acct_id_val)
+                except Exception:
+                    continue
+
+                balance = acct.get("balance")
+                try:
+                    balance_val = float(balance) if balance is not None else None
+                except Exception:
+                    balance_val = None
+
+                if balance_val is not None:
+                    self._account_balance_cache[acct_id_int] = (ts, balance_val)
+                    if acct_id_int == acct_id:
+                        found_balance = balance_val
+
+            if found_balance is not None:
+                return found_balance
+
+        except Exception as exc:
+            self.logger.error("Failed to fetch account balance for %s: %s", acct_id, exc)
+
+        if cached:
+            return cached[1]
+
+        return None
+
+    def _get_equity_record(self, acct_id: int) -> Dict[str, float]:
+        key = str(acct_id)
+        if key not in self._equity_state:
+            self._equity_state[key] = {}
+        return self._equity_state[key]
+
+    def _update_equity_peaks(self, acct_id: int, *, current_equity: float) -> Dict[str, float]:
+        record = self._get_equity_record(acct_id)
+        session_start = record.get("session_start_equity_usd")
+        equity_peak = record.get("equity_peak_usd")
+
+        if session_start is None:
+            session_start = current_equity
+
+        if equity_peak is None:
+            equity_peak = current_equity
+
+        equity_peak = max(equity_peak, current_equity)
+
+        updated = {
+            "session_start_equity_usd": float(session_start),
+            "equity_peak_usd": float(equity_peak),
+        }
+
+        self._equity_state[str(acct_id)] = updated
+        self._save_equity_state()
+        return updated
+
+    def _compute_trailing_drawdown(self, acct_id: int, account_state: Dict) -> Dict[str, Optional[float]]:
+        balance = self._get_account_balance(acct_id)
+        if balance is None:
+            return {
+                "account_size_usd": None,
+                "balance_usd": None,
+                "session_start_equity_usd": None,
+                "equity_peak_usd": None,
+                "trailing_max_loss_usd": self.trailing_max_loss_usd,
+                "trailing_loss_limit_usd": -self.trailing_max_loss_usd,
+                "trailing_dd_used_usd": None,
+                "trailing_dd_remaining_usd": None,
+                "trailing_dd_used_pct": None,
+                "dd_soft_50_pct": self.dd_soft_50_pct,
+                "dd_soft_75_pct": self.dd_soft_75_pct,
+                "risk_state": "unknown",
+            }
+
+        equity_state = self._update_equity_peaks(acct_id, current_equity=balance)
+        peak = equity_state.get("equity_peak_usd", balance)
+
+        trailing_dd_used = max(0.0, peak - balance)
+        trailing_dd_remaining = max(0.0, self.trailing_max_loss_usd - trailing_dd_used)
+        trailing_dd_used_pct = trailing_dd_used / self.trailing_max_loss_usd if self.trailing_max_loss_usd else 0.0
+
+        if trailing_dd_used_pct < self.dd_soft_50_pct:
+            risk_state = "green"
+        elif trailing_dd_used_pct < self.dd_soft_75_pct:
+            risk_state = "yellow"
+        else:
+            risk_state = "red"
+
+        risk_state = "red" if not account_state.get("can_trade", True) else risk_state
+
+        return {
+            "account_size_usd": balance,
+            "balance_usd": balance,
+            "session_start_equity_usd": equity_state.get("session_start_equity_usd"),
+            "equity_peak_usd": peak,
+            "trailing_max_loss_usd": self.trailing_max_loss_usd,
+            "trailing_loss_limit_usd": -self.trailing_max_loss_usd,
+            "trailing_dd_used_usd": trailing_dd_used,
+            "trailing_dd_remaining_usd": trailing_dd_remaining,
+            "trailing_dd_used_pct": trailing_dd_used_pct,
+            "dd_soft_50_pct": self.dd_soft_50_pct,
+            "dd_soft_75_pct": self.dd_soft_75_pct,
+            "risk_state": risk_state,
+        }
+
+    def _log_topstep_metrics_to_supabase(self, acct_id: int, metrics: Dict[str, Optional[float]]):
+        """Best-effort logging of risk metrics to Supabase."""
+
+        try:
+            supabase = get_supabase_client()
+        except Exception as exc:
+            self.logger.debug("Supabase client unavailable for topstep metrics: %s", exc)
+            return
+
+        account_slug = None
+        try:
+            for name, id_val in self.accounts.items():
+                if id_val == acct_id:
+                    account_slug = name
+                    break
+        except Exception:
+            account_slug = str(acct_id)
+
+        payload = {
+            "account": account_slug or str(acct_id),
+            "account_id": acct_id,
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "balance_usd": metrics.get("balance_usd"),
+            "session_start_equity_usd": metrics.get("session_start_equity_usd"),
+            "equity_peak_usd": metrics.get("equity_peak_usd"),
+            "trailing_max_loss_usd": metrics.get("trailing_max_loss_usd"),
+            "trailing_dd_used_usd": metrics.get("trailing_dd_used_usd"),
+            "trailing_dd_remaining_usd": metrics.get("trailing_dd_remaining_usd"),
+            "trailing_dd_used_pct": metrics.get("trailing_dd_used_pct"),
+            "risk_state": metrics.get("risk_state"),
+        }
+
+        try:
+            supabase.table("account_metrics").upsert(payload).execute()
+        except Exception as exc:
+            self.logger.warning("Failed to log topstep metrics to Supabase: %s", exc)
     
     def _can_trade(self, daily_pnl: float, consecutive_losses: int) -> bool:
         """Determine if account is allowed to trade based on risk limits"""
@@ -368,6 +623,7 @@ class PositionManager:
         """
         position_state = self.get_position_state(acct_id, cid)
         account_state = self.get_account_state(acct_id)
+        topstep_metrics = self._compute_trailing_drawdown(acct_id, account_state)
     
         context = {
             'current_position': {
@@ -385,18 +641,21 @@ class PositionManager:
             },
             'account_metrics': {
                 'daily_pnl': account_state['daily_pnl'],
+                'realized_pnl_today_usd': account_state['daily_pnl'],
                 'win_rate': account_state['win_rate'],
                 'consecutive_losses': account_state['consecutive_losses'],
                 'open_positions': account_state['open_positions'],
                 'risk_level': account_state['risk_level'],
-                'can_trade': account_state['can_trade']
+                'can_trade': account_state['can_trade'],
+                'balance_usd': topstep_metrics.get('balance_usd'),
             },
             'risk_limits': {
                 'max_daily_loss': self.max_daily_loss,
                 'profit_target': self.profit_target,
                 'max_consecutive_losses': self.max_consecutive_losses,
                 'consecutive_loss_guard_enabled': self.consecutive_loss_guard_enabled
-            }
+            },
+            'topstep': topstep_metrics,
         }
     
         # Add specific warnings for AI consideration
@@ -435,6 +694,18 @@ class PositionManager:
 
         context['warnings'] = warnings
         context['suggestions'] = suggestions
+
+        context['risk_state'] = topstep_metrics.get('risk_state')
+        context['risk_bias'] = (
+            'hold'
+            if (not account_state['can_trade'] or topstep_metrics.get('risk_state') == 'red')
+            else 'normal'
+        )
+
+        try:
+            self._log_topstep_metrics_to_supabase(acct_id, topstep_metrics)
+        except Exception:
+            self.logger.debug("Topstep metrics Supabase log skipped due to error", exc_info=True)
 
         return context
 

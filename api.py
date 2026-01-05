@@ -10,6 +10,7 @@ from auth import ensure_token, get_token, in_get_flat, session
 from config import load_config
 from dateutil import parser
 from supabase import create_client
+from typing import Dict, List, Optional, Tuple
 
 
 config = load_config()
@@ -145,6 +146,17 @@ def close_pos(acct_id, cid):
 def search_trades(acct_id, since):
     trades = post("/api/Trade/search", {"accountId": acct_id, "startTimestamp": since.isoformat()}).get("trades", [])
     return trades
+
+
+def search_accounts(only_active_accounts: bool = True) -> List[Dict]:
+    """Return available accounts (optionally filtering to active only)."""
+
+    payload = {"onlyActiveAccounts": bool(only_active_accounts)}
+    try:
+        return post("/api/Account/search", payload).get("accounts", [])
+    except Exception as exc:
+        logging.error("Failed to fetch accounts: %s", exc)
+        return []
 
 def flatten_contract(acct_id, cid, timeout=10):
     logging.info("Flattening contract %s for acct %s", cid, acct_id)
