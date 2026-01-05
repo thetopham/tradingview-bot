@@ -35,17 +35,12 @@ LOCAL_TZ        = config['MT']
 GET_FLAT_START  = config['GET_FLAT_START']
 GET_FLAT_END    = config['GET_FLAT_END']
 
-AI_ENDPOINTS = {
-    "epsilon": config['N8N_AI_URL'],
-    "beta": config['N8N_AI_URL'],
-}
-
 AI_TEST_ENDPOINTS = {
-    "beta": config.get("N8N_OVERSEER_URL_TEST1") or config['N8N_AI_URL'],
-    "alpha": config.get("N8N_OVERSEER_URL_TEST2") or config['N8N_AI_URL'],
-    "gamma": config.get("N8N_OVERSEER_URL_TEST3") or config['N8N_AI_URL'],
-    "delta": config.get("N8N_OVERSEER_URL_TEST4") or config['N8N_AI_URL'],
-    "epsilon": config.get("N8N_OVERSEER_URL_TEST5") or config['N8N_AI_URL'],
+    "beta": config.get("N8N_OVERSEER_URL_TEST1"),
+    "alpha": config.get("N8N_OVERSEER_URL_TEST2"),
+    "gamma": config.get("N8N_OVERSEER_URL_TEST3"),
+    "delta": config.get("N8N_OVERSEER_URL_TEST4"),
+    "epsilon": config.get("N8N_OVERSEER_URL_TEST5"),
 }
 
 AUTH_LOCK = threading.Lock()
@@ -98,7 +93,7 @@ def handle_webhook_logic(data):
             return
 
         # --- AI Overseer Routing ---
-        ai_url = AI_TEST_ENDPOINTS.get(acct) or AI_ENDPOINTS.get(acct) or config.get('N8N_AI_URL')
+        ai_url = AI_TEST_ENDPOINTS.get(acct)
         if ai_url:
             positions = search_pos(acct_id)
 
