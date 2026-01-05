@@ -3,13 +3,24 @@
 Simplified position context provider for AI trading decisions
 """
 
+import json
 import logging
+import os
+import threading
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from api import search_pos, search_open, search_trades, get_contract
 from config import load_config
+from dateutil import parser
+from topstep import (
+    COMBINE_ACCOUNT_SIZE_USD,
+    TRAILING_MAX_LOSS_USD,
+    DD_SOFT_50_PCT,
+    DD_SOFT_75_PCT,
+)
 
 config = load_config()
 MT = config['MT']
@@ -23,6 +34,14 @@ class PositionManager:
         self.accounts = accounts
         self.logger = logging.getLogger(__name__)
         self._account_state_cache: Dict[int, Tuple[float, Dict]] = {}
+
+        # Trailing drawdown state (persisted)
+        self._topstep_lock = threading.RLock()
+        self._topstep_state_path = Path(os.environ.get("TOPSTEP_STATE_PATH", "./topstep_state.json"))
+        self._topstep_state_bak = self._topstep_state_path.with_suffix(self._topstep_state_path.suffix + ".bak")
+        self._topstep_state: Dict[str, Dict] = {}
+        self._topstep_last_save: float = 0.0
+        self._load_topstep_state()
         
         # Risk parameters (for context only)
         self.max_daily_loss = config.get('MAX_DAILY_LOSS', -500.0)
@@ -277,9 +296,10 @@ class PositionManager:
         # Get all open positions
         all_positions = search_pos(acct_id)
         open_position_count = len([p for p in all_positions if p.get("size", 0) > 0])
-        
+
         return {
             'daily_pnl': daily_pnl,
+            'realized_pnl_today': daily_pnl,
             'gross_pnl': gross_pnl,
             'daily_fees': fees_paid,
             'trade_count': len(trades),
@@ -368,7 +388,8 @@ class PositionManager:
         """
         position_state = self.get_position_state(acct_id, cid)
         account_state = self.get_account_state(acct_id)
-    
+        topstep = self._compute_topstep_context(acct_id, account_state)
+
         context = {
             'current_position': {
                 'has_position': position_state['has_position'],
@@ -385,18 +406,22 @@ class PositionManager:
             },
             'account_metrics': {
                 'daily_pnl': account_state['daily_pnl'],
+                'realized_pnl_today': account_state['realized_pnl_today'],
                 'win_rate': account_state['win_rate'],
                 'consecutive_losses': account_state['consecutive_losses'],
                 'open_positions': account_state['open_positions'],
                 'risk_level': account_state['risk_level'],
-                'can_trade': account_state['can_trade']
+                'can_trade': account_state['can_trade'],
+                'topstep_risk_state': topstep['risk_state'],
+                'topstep_trailing_dd_used_pct': topstep['trailing_dd_used_pct'],
             },
             'risk_limits': {
                 'max_daily_loss': self.max_daily_loss,
                 'profit_target': self.profit_target,
                 'max_consecutive_losses': self.max_consecutive_losses,
                 'consecutive_loss_guard_enabled': self.consecutive_loss_guard_enabled
-            }
+            },
+            'topstep': topstep,
         }
     
         # Add specific warnings for AI consideration
@@ -404,7 +429,12 @@ class PositionManager:
         
         if account_state['daily_pnl'] < self.max_daily_loss * 0.5:
             warnings.append("Approaching daily loss limit")
-    
+
+        if topstep['risk_state'] == "red":
+            warnings.append("Topstep trailing drawdown RED — bias to HOLD/FLAT")
+        elif topstep['risk_state'] == "yellow":
+            warnings.append("Topstep trailing drawdown YELLOW — be conservative")
+
         if account_state['consecutive_losses'] >= 2:
             warnings.append(f"On {account_state['consecutive_losses']} consecutive losses")
         
@@ -419,7 +449,10 @@ class PositionManager:
         
         # Add position suggestions for AI
         suggestions = []
-        
+
+        if not account_state['can_trade'] or topstep['risk_state'] == "red":
+            suggestions.append("Risk guard active: favor HOLD/FLAT until risk improves")
+
         if position_state['has_position']:
             if position_state['duration_minutes'] > 120:
                 suggestions.append("Consider closing stale position")
@@ -437,6 +470,188 @@ class PositionManager:
         context['suggestions'] = suggestions
 
         return context
+
+    def _load_topstep_state(self) -> None:
+        with self._topstep_lock:
+            primary_error = None
+            data = None
+
+            def _load_from(path: Path):
+                with path.open("r", encoding="utf-8") as f:
+                    return json.load(f)
+
+            try:
+                if self._topstep_state_path.exists():
+                    data = _load_from(self._topstep_state_path)
+            except Exception as exc:
+                primary_error = exc
+                self.logger.warning("Failed to parse Topstep state from %s: %s", self._topstep_state_path, exc)
+
+            if data is None and self._topstep_state_bak.exists():
+                try:
+                    data = _load_from(self._topstep_state_bak)
+                    self.logger.warning(
+                        "Recovered Topstep state from backup %s after parse failure", self._topstep_state_bak
+                    )
+                except Exception as exc:
+                    self.logger.warning(
+                        "Failed to parse backup Topstep state from %s: %s", self._topstep_state_bak, exc
+                    )
+
+            if data is None:
+                if primary_error:
+                    self.logger.warning(
+                        "Starting with empty Topstep state due to parse errors; primary=%s", primary_error
+                    )
+                self._topstep_state = {}
+                return
+
+            self._topstep_state = data.get("accounts", {}) or {}
+
+    def _save_topstep_state(self, force: bool = False) -> None:
+        with self._topstep_lock:
+            now_ts = time.time()
+            if not force and now_ts - self._topstep_last_save < 0.75:
+                return
+
+            data = {
+                "schema_version": 1,
+                "saved_at": datetime.now(timezone.utc).isoformat(),
+                "accounts": self._topstep_state,
+            }
+
+            self._topstep_state_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = self._topstep_state_path.with_suffix(self._topstep_state_path.suffix + ".tmp")
+
+            try:
+                if self._topstep_state_path.exists():
+                    try:
+                        self._topstep_state_bak.write_bytes(self._topstep_state_path.read_bytes())
+                    except Exception as exc:
+                        self.logger.warning(
+                            "Failed to write Topstep backup to %s: %s", self._topstep_state_bak, exc
+                        )
+
+                with tmp_path.open("w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False)
+                os.replace(tmp_path, self._topstep_state_path)
+                self._topstep_last_save = now_ts
+            except Exception as exc:
+                self.logger.error("Failed to save Topstep state to %s: %s", self._topstep_state_path, exc)
+
+    def _ensure_topstep_account(self, acct_id: int) -> Dict:
+        with self._topstep_lock:
+            key = str(acct_id)
+            if key not in self._topstep_state:
+                now = datetime.now(timezone.utc).isoformat()
+                self._topstep_state[key] = {
+                    "session_start_equity_usd": COMBINE_ACCOUNT_SIZE_USD,
+                    "equity_peak_usd": COMBINE_ACCOUNT_SIZE_USD,
+                    "cumulative_realized_pnl_usd": 0.0,
+                    "session_start_ts": now,
+                    "last_trade_ts": now,
+                }
+                self._save_topstep_state(force=True)
+            return self._topstep_state[key]
+
+    @staticmethod
+    def _parse_trade_timestamp(trade: Dict) -> Optional[datetime]:
+        raw = (
+            trade.get("creationTimestamp")
+            or trade.get("timestamp")
+            or trade.get("time")
+            or trade.get("ts")
+        )
+        if not raw:
+            return None
+        if isinstance(raw, (int, float)):
+            return datetime.fromtimestamp(float(raw), timezone.utc)
+        if isinstance(raw, datetime):
+            return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+        if isinstance(raw, str):
+            try:
+                dt = parser.isoparse(raw)
+                return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                return None
+        return None
+
+    def _update_topstep_equity(self, acct_id: int) -> Dict:
+        state = self._ensure_topstep_account(acct_id)
+
+        try:
+            since_ts = parser.isoparse(state.get("last_trade_ts")) + timedelta(milliseconds=1)
+        except Exception:
+            since_ts = datetime.now(timezone.utc) - timedelta(minutes=5)
+
+        trades: List[Dict] = []
+        try:
+            trades = search_trades(acct_id, since_ts)
+        except Exception as exc:
+            self.logger.warning("Topstep equity sync failed to fetch trades for %s: %s", acct_id, exc)
+
+        net_pnl = 0.0
+        last_seen_ts = since_ts
+        for trade in trades:
+            try:
+                pnl = float(trade.get("profitAndLoss") or 0)
+            except Exception:
+                pnl = 0.0
+            fees = self._extract_trade_fees(trade)
+            net_pnl += pnl - fees
+
+            ts = self._parse_trade_timestamp(trade)
+            if ts and ts > last_seen_ts:
+                last_seen_ts = ts
+
+        with self._topstep_lock:
+            state["cumulative_realized_pnl_usd"] = state.get("cumulative_realized_pnl_usd", 0.0) + net_pnl
+            state["last_trade_ts"] = (last_seen_ts or since_ts).isoformat()
+
+            start_equity = state.get("session_start_equity_usd", COMBINE_ACCOUNT_SIZE_USD)
+            equity = start_equity + state.get("cumulative_realized_pnl_usd", 0.0)
+            equity_peak = max(state.get("equity_peak_usd", COMBINE_ACCOUNT_SIZE_USD), equity)
+            state["equity_peak_usd"] = equity_peak
+            self._save_topstep_state()
+
+        return {
+            "equity_usd": equity,
+            "equity_peak_usd": state.get("equity_peak_usd", COMBINE_ACCOUNT_SIZE_USD),
+            "session_start_equity_usd": start_equity,
+        }
+
+    def _compute_topstep_context(self, acct_id: int, account_state: Dict) -> Dict:
+        equity_state = self._update_topstep_equity(acct_id)
+        equity = equity_state.get("equity_usd", float(COMBINE_ACCOUNT_SIZE_USD))
+        equity_peak = equity_state.get("equity_peak_usd", float(COMBINE_ACCOUNT_SIZE_USD))
+        session_start_equity = equity_state.get("session_start_equity_usd", float(COMBINE_ACCOUNT_SIZE_USD))
+
+        trailing_dd_used = max(0.0, equity_peak - equity)
+        trailing_dd_remaining = max(0.0, TRAILING_MAX_LOSS_USD - trailing_dd_used)
+        trailing_dd_used_pct = trailing_dd_used / TRAILING_MAX_LOSS_USD if TRAILING_MAX_LOSS_USD else 0.0
+
+        if trailing_dd_used_pct < DD_SOFT_50_PCT:
+            risk_state = "green"
+        elif trailing_dd_used_pct < DD_SOFT_75_PCT:
+            risk_state = "yellow"
+        else:
+            risk_state = "red"
+
+        return {
+            "account_size_usd": COMBINE_ACCOUNT_SIZE_USD,
+            "trailing_max_loss_usd": TRAILING_MAX_LOSS_USD,
+            "trailing_loss_limit_usd": -TRAILING_MAX_LOSS_USD,
+            "trailing_dd_used_usd": trailing_dd_used,
+            "trailing_dd_remaining_usd": trailing_dd_remaining,
+            "trailing_dd_used_pct": trailing_dd_used_pct,
+            "risk_state": risk_state,
+            "equity_usd": equity,
+            "equity_peak_usd": equity_peak,
+            "session_start_equity_usd": session_start_equity,
+            "dd_soft_50_pct": DD_SOFT_50_PCT,
+            "dd_soft_75_pct": DD_SOFT_75_PCT,
+            "realized_pnl_today_usd": account_state.get("realized_pnl_today"),
+        }
 
     @staticmethod
     def _extract_trade_fees(trade: Dict) -> float:

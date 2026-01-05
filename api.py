@@ -10,6 +10,7 @@ from auth import ensure_token, get_token, in_get_flat, session
 from config import load_config
 from dateutil import parser
 from supabase import create_client
+from topstep import COMBINE_ACCOUNT_SIZE_USD, TRAILING_MAX_LOSS_USD, DD_SOFT_50_PCT, DD_SOFT_75_PCT
 
 
 config = load_config()
@@ -453,6 +454,20 @@ def _compute_simple_position_context(
         "average_price": avg_price,
         "current_price": current_price,
         "unrealized_pnl": unrealized_pnl,
+        "topstep": {
+            "account_size_usd": COMBINE_ACCOUNT_SIZE_USD,
+            "trailing_max_loss_usd": TRAILING_MAX_LOSS_USD,
+            "trailing_loss_limit_usd": -TRAILING_MAX_LOSS_USD,
+            "trailing_dd_used_usd": 0.0,
+            "trailing_dd_remaining_usd": float(TRAILING_MAX_LOSS_USD),
+            "trailing_dd_used_pct": 0.0,
+            "risk_state": "green",
+            "equity_usd": float(COMBINE_ACCOUNT_SIZE_USD),
+            "equity_peak_usd": float(COMBINE_ACCOUNT_SIZE_USD),
+            "session_start_equity_usd": float(COMBINE_ACCOUNT_SIZE_USD),
+            "dd_soft_50_pct": DD_SOFT_50_PCT,
+            "dd_soft_75_pct": DD_SOFT_75_PCT,
+        },
     }
 
 
