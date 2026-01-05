@@ -1,8 +1,11 @@
+import json
 import os
+import shutil
 import time
 import threading
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytz
 from dateutil import parser
@@ -11,12 +14,106 @@ from signalrcore.hub_connection_builder import HubConnectionBuilder
 from api import ACCOUNTS, search_pos, log_trade_results_to_supabase
 
 MT = pytz.timezone("America/Denver")
-USER_HUB_URL_BASE = "wss://rtc.topstepx.com/hubs/user?access_token={}"
+USER_HUB_URL_BASE = "wss://rtc.topstepx.com/hubs/user?access_token={}" 
 
 orders_state = {}
 positions_state = {}
 trade_meta = {}
 recent_closures = {}
+STATE_PATH = Path(os.environ.get("TRADE_STATE_PATH", "./trade_state.json"))
+STATE_BAK_PATH = STATE_PATH.with_suffix(STATE_PATH.suffix + ".bak")
+_state_lock = threading.RLock()
+_last_save_ts = 0.0
+
+
+def _tm_key(acct_id, cid):
+    return f"{int(acct_id)}|{cid}"
+
+
+def _now_iso():
+    return datetime.now(MT).isoformat()
+
+
+def _normalize_state_map(raw_map):
+    normalized = {}
+    if isinstance(raw_map, dict):
+        for key, value in raw_map.items():
+            try:
+                if isinstance(key, (list, tuple)) and len(key) == 2:
+                    normalized[_tm_key(key[0], key[1])] = value
+                else:
+                    normalized[str(key)] = value
+            except Exception:
+                continue
+    return normalized
+
+
+def _load_trade_state():
+    global trade_meta, recent_closures, _last_save_ts
+
+    def _load_file(path):
+        if not path.exists():
+            return None
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as exc:
+            logging.warning("Failed to parse trade state from %s: %s", path, exc)
+            return None
+
+    with _state_lock:
+        data = _load_file(STATE_PATH)
+        if data is None:
+            data = _load_file(STATE_BAK_PATH)
+            if data is not None:
+                logging.warning("Loaded trade state from backup file %s", STATE_BAK_PATH)
+
+        if data is None:
+            trade_meta = {}
+            recent_closures = {}
+            logging.warning("Starting with empty trade state; no valid state file found")
+        else:
+            trade_meta = _normalize_state_map(data.get("trade_meta", {}))
+            recent_closures = _normalize_state_map(data.get("recent_closures", {}))
+            logging.info(
+                "Loaded trade state: %s sessions, %s recent closures", len(trade_meta), len(recent_closures)
+            )
+        _last_save_ts = 0.0
+
+
+def _save_trade_state(force=False):
+    global _last_save_ts
+
+    with _state_lock:
+        now = time.time()
+        if not force and (now - _last_save_ts) < 0.75:
+            return
+
+        payload = {
+            "schema_version": 1,
+            "saved_at": _now_iso(),
+            "trade_meta": {str(k): v for k, v in trade_meta.items()},
+            "recent_closures": {str(k): v for k, v in recent_closures.items()},
+        }
+
+        tmp_path = STATE_PATH.with_suffix(STATE_PATH.suffix + ".tmp")
+        tmp_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with tmp_path.open("w", encoding="utf-8") as f:
+                json.dump(payload, f)
+
+            if STATE_PATH.exists():
+                try:
+                    shutil.copyfile(STATE_PATH, STATE_BAK_PATH)
+                except Exception as exc:
+                    logging.warning("Failed to backup trade state: %s", exc)
+
+            os.replace(tmp_path, STATE_PATH)
+            _last_save_ts = now
+            logging.info("Saved trade state (%s sessions)", len(trade_meta))
+        except Exception as exc:
+            logging.error("Failed to save trade state: %s", exc)
 
 def _build_trace_id(entry_time, ai_decision_id, order_id=None, session_id=None):
     try:
@@ -82,7 +179,9 @@ def track_trade(
         f"order {order_id}, {sig} {size} {symbol}, trace_id={meta['trace_id']}"
     )
 
-    trade_meta[(acct_id, cid)] = meta
+    key = _tm_key(acct_id, cid)
+    trade_meta[key] = meta
+    _save_trade_state()
 
 
 def reconstruct_trade_metadata_on_startup():
@@ -102,7 +201,8 @@ def reconstruct_trade_metadata_on_startup():
                     cid = pos["contractId"]
                     creation_time = pos.get("creationTimestamp")
 
-                    if (acct_id, cid) in trade_meta:
+                    key = _tm_key(acct_id, cid)
+                    if key in trade_meta:
                         continue
 
                     position_type = pos.get("type")
@@ -140,7 +240,7 @@ def reconstruct_trade_metadata_on_startup():
                         "trace_id": trace_id,
                     }
 
-                    trade_meta[(acct_id, cid)] = meta
+                    trade_meta[key] = meta
                     reconstructed_count += 1
 
                     logging.warning(
@@ -156,6 +256,7 @@ def reconstruct_trade_metadata_on_startup():
 
     if reconstructed_count > 0:
         logging.info("Successfully reconstructed metadata for %s open positions", reconstructed_count)
+        _save_trade_state(force=True)
     else:
         logging.info("No open positions found that need metadata reconstruction")
 
@@ -381,22 +482,29 @@ def on_order_update(args):
     
 
     if status == 2:
-        meta = trade_meta.setdefault((account_id, contract_id), {})
+        key = _tm_key(account_id, contract_id)
+        meta = trade_meta.setdefault(key, {})
+        updated = False
         if "entry_time" not in meta or not meta["entry_time"]:
             meta["entry_time"] = order_data.get("creationTimestamp") or time.time()
+            updated = True
         if "order_id" not in meta or not meta["order_id"]:
             meta["order_id"] = order_data.get("id")
+            updated = True
         if not meta.get("entry_price"):
-            for key in ("averageFillPrice", "avgFillPrice", "fillPrice"):
-                value = order_data.get(key)
+            for key_name in ("averageFillPrice", "avgFillPrice", "fillPrice"):
+                value = order_data.get(key_name)
                 try:
                     if value is not None:
                         meta["entry_price"] = float(value)
+                        updated = True
                         break
                 except (TypeError, ValueError):
                     continue
         logging.info(f"Order filled: {order_data}")
         logging.info(f"[on_order_update] meta after update: {meta}")
+        if updated:
+            _save_trade_state()
 
 
 def on_position_update(args):
@@ -414,8 +522,10 @@ def on_position_update(args):
     positions_state.setdefault(account_id, {})[contract_id] = position_data
 
     entry_time = position_data.get("creationTimestamp")
+    key = _tm_key(account_id, contract_id)
     if size > 0:
-        meta = trade_meta.get((account_id, contract_id))
+        meta = trade_meta.get(key)
+        state_changed = False
 
         if meta is not None:
             if not meta.get("trace_id"):
@@ -425,6 +535,7 @@ def on_position_update(args):
                     order_id=meta.get("order_id"),
                     session_id=meta.get("session_id"),
                 )
+                state_changed = True
 
             meta_entry_time = meta.get("entry_time")
 
@@ -441,9 +552,11 @@ def on_position_update(args):
                 if time_diff > 60:
                     logging.warning(f"Metadata appears to be from old position (age: {time_diff:.0f}s), clearing")
                     meta = None
-                    trade_meta.pop((account_id, contract_id), None)
+                    trade_meta.pop(key, None)
+                    state_changed = True
                 else:
                     meta["entry_time"] = entry_time
+                    state_changed = True
             except Exception as e:
                 logging.error(f"Error comparing timestamps: {e}")
 
@@ -464,7 +577,7 @@ def on_position_update(args):
 
             session_id = str(uuid.uuid4())[:8]
 
-            trade_meta[(account_id, contract_id)] = {
+            trade_meta[key] = {
                 "entry_time": entry_time or time.time(),
                 "ai_decision_id": None,
                 "strategy": "manual",
@@ -482,10 +595,14 @@ def on_position_update(args):
                 "session_id": session_id,
                 "trace_id": _build_trace_id(entry_time, None, session_id=session_id),
             }
-    
+            state_changed = True
+
+        if state_changed:
+            _save_trade_state()
+
 
     if size == 0:
-        last_close = recent_closures.get((account_id, contract_id))
+        last_close = recent_closures.get(key)
         if last_close and time.time() - last_close < 5:
             logging.warning(
                 "[on_position_update] Duplicate close detected within 5s for acct=%s cid=%s; skipping log",
@@ -494,10 +611,11 @@ def on_position_update(args):
             )
             return
 
-        recent_closures[(account_id, contract_id)] = time.time()
-        meta = trade_meta.pop((account_id, contract_id), None)
+        recent_closures[key] = time.time()
+        meta = trade_meta.pop(key, None)
         logging.info(f"[on_position_update] Position closed for acct={account_id}, cid={contract_id}")
         logging.info(f"[on_position_update] meta at close: {meta}")
+        _save_trade_state()
 
         if meta:
             ai_decision_id = meta.get("ai_decision_id")
@@ -583,6 +701,9 @@ def cleanup_stale_metadata(max_age_hours=24):
         if meta:
             logging.info(f"Removed stale metadata for session {meta.get('session_id')}")
 
+    if stale_keys:
+        _save_trade_state()
+
     return len(stale_keys)
 
 def parse_account_ids_from_env():
@@ -603,7 +724,9 @@ def launch_signalr_listener(get_token, get_token_expiry, authenticate, auth_lock
     accounts = parse_account_ids_from_env()
     logging.info(f"Parsed accounts from env: {accounts}")
 
+    _load_trade_state()
     reconstruct_trade_metadata_on_startup()
+    cleanup_stale_metadata()
 
     event_handlers = {
         "on_account_update": on_account_update,
