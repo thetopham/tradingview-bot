@@ -90,6 +90,7 @@ def run_simple(acct_id: int, sym: str, sig: str, size: int, alert: str, ai_decis
         tp_ids=None,
         trades=[entry],
         regime=None,
+        entry_price=fill_price,
     )
 
 '''

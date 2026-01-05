@@ -50,6 +50,7 @@ def track_trade(
     tp_ids=None,
     trades=None,
     regime=None,
+    entry_price=None,
 ):
     """Enhanced trade tracking with session ID to prevent mixing trades"""
 
@@ -74,6 +75,12 @@ def track_trade(
         "regime": regime,
         "trace_id": _build_trace_id(entry_time, ai_decision_id, order_id=order_id, session_id=session_id),
     }
+
+    if entry_price is not None:
+        try:
+            meta["entry_price"] = float(entry_price)
+        except Exception:
+            pass
 
     logging.info(
         f"[track_trade] New session {session_id} - AI decision {ai_decision_id}, "
@@ -384,6 +391,17 @@ def on_order_update(args):
             meta["entry_time"] = order_data.get("creationTimestamp") or time.time()
         if "order_id" not in meta or not meta["order_id"]:
             meta["order_id"] = order_data.get("id")
+
+        if meta is not None and meta.get("entry_price") in (None, ""):
+            for price_key in ("averageFillPrice", "avgFillPrice", "fillPrice"):
+                candidate = order_data.get(price_key)
+                if candidate is None:
+                    continue
+                try:
+                    meta["entry_price"] = float(candidate)
+                    break
+                except Exception:
+                    continue
         logging.info(f"Order filled: {order_data}")
         logging.info(f"[on_order_update] meta after update: {meta}")
 
