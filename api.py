@@ -136,6 +136,14 @@ def search_pos(acct_id):
     logging.debug("Open positions for %s: %s", acct_id, pos)
     return pos
 
+def search_accounts(only_active_accounts: bool = True) -> List[Dict]:
+    """Return account records with balance/canTrade flags."""
+
+    payload = {"onlyActiveAccounts": bool(only_active_accounts)}
+    accounts = post("/api/Account/search", payload).get("accounts", [])
+    logging.debug("Accounts search (active_only=%s) returned %s records", only_active_accounts, len(accounts))
+    return accounts
+
 def close_pos(acct_id, cid):
     resp = post("/api/Position/closeContract", {"accountId": acct_id, "contractId": cid})
     if not resp.get("success", True):
