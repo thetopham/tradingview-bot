@@ -669,6 +669,86 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
             return -qty
         return 0.0
 
+    def _safe_float(val):
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return None
+
+    def _compute_vwap(trades: list[dict]) -> float | None:
+        numer = 0.0
+        denom = 0.0
+        for t in trades:
+            price = _safe_float(t.get("price"))
+            size = _safe_float(t.get("size"))
+            if price is None or size is None or size <= 0:
+                continue
+            numer += price * size
+            denom += size
+        if denom == 0:
+            return None
+        return numer / denom
+
+    def _compute_entry_exit_prices(trades: list[dict], meta: dict) -> tuple[float | None, float | None, str | None, str | None]:
+        if not trades:
+            return None, None, None, None
+
+        initial_sign = None
+        pos = 0.0
+        entry_trades: list[dict] = []
+        exit_trades: list[dict] = []
+        exiting = False
+
+        for t in trades:
+            delta = _signed_qty(t)
+            if delta == 0:
+                continue
+            sign = 1 if delta > 0 else -1
+            if initial_sign is None:
+                initial_sign = sign
+
+            if not exiting:
+                next_pos = pos + delta
+                if sign == initial_sign and (pos == 0 or abs(next_pos) > abs(pos)):
+                    entry_trades.append(t)
+                    pos = next_pos
+                    continue
+                exiting = True
+
+            pos += delta
+            exit_trades.append(t)
+
+        entry_vwap = _compute_vwap(entry_trades)
+        exit_vwap = _compute_vwap(exit_trades)
+
+        entry_source = None
+        exit_source = None
+
+        if entry_vwap is None:
+            meta_entry = _safe_float((meta or {}).get("entry_price"))
+            if meta_entry is not None:
+                entry_vwap = meta_entry
+                entry_source = "meta_entry_price"
+            else:
+                first_trade = trades[0] if trades else None
+                first_price = _safe_float(first_trade.get("price")) if isinstance(first_trade, dict) else None
+                if first_price is not None:
+                    entry_vwap = first_price
+                    entry_source = "first_trade_price"
+        else:
+            entry_source = "trade_fills_vwap"
+
+        if exit_vwap is None:
+            last_trade = trades[-1] if trades else None
+            last_price = _safe_float(last_trade.get("price")) if isinstance(last_trade, dict) else None
+            if last_price is not None:
+                exit_vwap = last_price
+                exit_source = "last_trade_price"
+        else:
+            exit_source = "trade_fills_vwap"
+
+        return entry_vwap, exit_vwap, entry_source, exit_source
+
     def _slice_round_trip(trades: list[dict], entry_order_ids: set[str], entry_dt_ct: datetime) -> list[dict]:
         """Slice trades to *this* position: start at entry orderId, stop when position returns to flat."""
         if not trades:
@@ -827,6 +907,10 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
     # Net = gross - fees
     net_pnl = gross_pnl - fees_total
 
+    entry_price, exit_price, entry_price_source, exit_price_source = _compute_entry_exit_prices(
+        relevant_trades, meta
+    )
+
 
     trade_ids = [t.get("id") for t in relevant_trades if t.get("id") is not None]
     duration_sec = int(max((exit_dt - entry_dt).total_seconds(), 0))
@@ -932,6 +1016,10 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         "total_pnl": gross_pnl,
         "fees_total": fees_total,
         "net_pnl": net_pnl,
+        "entry_price": entry_price,
+        "exit_price": exit_price,
+        "entry_price_source": entry_price_source,
+        "exit_price_source": exit_price_source,
         "raw_trades": relevant_trades if relevant_trades else [],
         "order_id": json.dumps(sorted(order_ids)) if order_ids else str(meta.get("order_id") or ""),
         "comment": comment,
@@ -979,6 +1067,10 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
                 "total_pnl": payload["total_pnl"],
                 "fees_total": payload.get("fees_total"),
                 "net_pnl": payload.get("net_pnl"),
+                "entry_price": payload.get("entry_price"),
+                "exit_price": payload.get("exit_price"),
+                "entry_price_source": payload.get("entry_price_source"),
+                "exit_price_source": payload.get("exit_price_source"),
                 "raw_trades": payload["raw_trades"],
                 "trade_ids": payload["trade_ids"],
                 "order_id": payload["order_id"],
