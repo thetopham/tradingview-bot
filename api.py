@@ -136,6 +136,17 @@ def search_pos(acct_id):
     logging.debug("Open positions for %s: %s", acct_id, pos)
     return pos
 
+def search_accounts(only_active_accounts: bool = True):
+    """Query available accounts with balances.
+
+    Args:
+        only_active_accounts: When True, filter to active accounts.
+    """
+
+    payload = {"onlyActiveAccounts": bool(only_active_accounts)}
+    resp = post("/api/Account/search", payload)
+    return resp.get("accounts", [])
+
 def close_pos(acct_id, cid):
     resp = post("/api/Position/closeContract", {"accountId": acct_id, "contractId": cid})
     if not resp.get("success", True):
@@ -520,6 +531,29 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=N
             "reason": f"AI error: {str(e)}",
             "error": True
         }
+
+
+def log_account_snapshot_to_supabase(payload: dict) -> None:
+    """Best-effort logging of account equity/risk snapshot to Supabase."""
+
+    if not payload:
+        return
+
+    try:
+        supabase = get_supabase_client()
+    except Exception as exc:
+        logging.debug("[log_account_snapshot_to_supabase] Supabase init skipped: %s", exc)
+        return
+
+    try:
+        supabase.table("account_equity_snapshots").insert(payload).execute()
+        logging.info(
+            "[log_account_snapshot_to_supabase] Uploaded snapshot for account=%s at %s",
+            payload.get("account"),
+            payload.get("captured_at"),
+        )
+    except Exception as exc:
+        logging.warning("[log_account_snapshot_to_supabase] Failed to write snapshot: %s", exc)
         
 
 

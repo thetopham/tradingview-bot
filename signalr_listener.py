@@ -24,6 +24,7 @@ orders_state = {}
 positions_state = {}
 trade_meta = {}
 recent_closures = {}
+account_equity_state = {}
 
 
 def _tm_key(acct_id, cid):
@@ -40,7 +41,7 @@ def _now_iso():
 
 
 def _load_trade_state():
-    global trade_meta, recent_closures, _last_save_ts
+    global trade_meta, recent_closures, _last_save_ts, account_equity_state
 
     with _state_lock:
         primary_error = None
@@ -76,6 +77,7 @@ def _load_trade_state():
 
         trade_meta = data.get("trade_meta", {}) or {}
         recent_closures = data.get("recent_closures", {}) or {}
+        account_equity_state = data.get("account_equity_state", {}) or {}
         _last_save_ts = 0.0
         logging.info("Loaded trade state: %s sessions", len(trade_meta))
 
@@ -89,10 +91,11 @@ def _save_trade_state(force=False):
             return
 
         data = {
-            "schema_version": 1,
+            "schema_version": 2,
             "saved_at": _now_iso(),
             "trade_meta": trade_meta,
             "recent_closures": recent_closures,
+            "account_equity_state": account_equity_state,
         }
 
         STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -112,6 +115,18 @@ def _save_trade_state(force=False):
             logging.info("Saved trade state: %s sessions", len(trade_meta))
         except Exception as exc:
             logging.error("Failed to save trade state to %s: %s", STATE_PATH, exc)
+
+
+def get_account_equity_state(acct_id: int) -> dict:
+    with _state_lock:
+        return account_equity_state.get(str(acct_id)) or account_equity_state.get(int(acct_id)) or {}
+
+
+def update_account_equity_state(acct_id: int, state: dict) -> None:
+    with _state_lock:
+        key = str(acct_id)
+        account_equity_state[key] = state
+        _save_trade_state()
 
 def _build_trace_id(entry_time, ai_decision_id, order_id=None, session_id=None):
     try:
