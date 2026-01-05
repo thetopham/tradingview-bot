@@ -17,10 +17,6 @@ N8N_CHART_ENDPOINTS = {
     "15m": config.get('N8N_15MCHART_FETCH_URL'),
     "30m": config.get('N8N_30MCHART_FETCH_URL'),
 }
-N8N_SCHEDULED_FLOW_ENDPOINTS = {
-    "delta": config.get("N8N_OVERSEER_URL_TEST4"),
-    "epsilon": config.get("N8N_OVERSEER_URL_TEST5"),
-}
 
 def start_scheduler(app):
     scheduler = BackgroundScheduler()
@@ -78,71 +74,42 @@ def start_scheduler(app):
             except Exception as exc:
                 logging.error("[APScheduler] Chart prefetch failed for %s: %s", timeframe, exc)
 
-    def overseer_job():
+    def trigger_overseer(account: str, timeframe_label: str):
+        if account not in ACCOUNTS:
+            logging.warning("[APScheduler] Unknown account %s for overseer trigger", account)
+            return
+
         symbol = OVERRIDE_CONTRACT_ID or "CON.F.US.MES.H26"
-        target_accounts = [acct for acct in ("alpha", "beta", "gamma") if acct in ACCOUNTS]
-
-        if not target_accounts:
-            logging.warning("[APScheduler] No target accounts configured for overseer job")
-            return
-
-        for acct in target_accounts:
-            data = {
-                "secret": WEBHOOK_SECRET,
-                "strategy": "",
-                "account": acct,
-                "signal": "",
-                "symbol": symbol,
-                "size": 3,
-                "alert": "APScheduler 5m overseer",
-            }
-            try:
-                response = requests.post(
-                    f'http://localhost:{TV_PORT}/webhook',
-                    json=data,
-                    timeout=10,
-                )
-                snippet = response.text[:120]
-                logging.info(
-                    "[APScheduler] Overseer call account=%s status=%s body=%s",
-                    acct,
-                    response.status_code,
-                    snippet,
-                )
-            except Exception as exc:
-                logging.error("[APScheduler] Overseer call failed for %s: %s", acct, exc)
-
-    def run_n8n_flow(account: str, timeframe: str):
-        url = N8N_SCHEDULED_FLOW_ENDPOINTS.get(account)
-        if not url:
-            logging.warning(
-                "[APScheduler] n8n flow for %s (%s) not configured; skipping",
-                account,
-                timeframe,
-            )
-            return
-
-        payload = {
-            "symbol": "MES",
-            "timeframe": timeframe,
-            "source": f"scheduler-{account}",
+        data = {
             "secret": WEBHOOK_SECRET,
+            "strategy": "",
             "account": account,
+            "signal": "",
+            "symbol": symbol,
+            "size": 3,
+            "alert": f"APScheduler {timeframe_label} overseer",
         }
 
         try:
-            resp = requests.post(url, json=payload, timeout=30)
-            snippet = resp.text[:120]
+            response = requests.post(
+                f"http://localhost:{TV_PORT}/webhook",
+                json=data,
+                timeout=10,
+            )
+            snippet = response.text[:120]
             logging.info(
-                "[APScheduler] n8n flow account=%s timeframe=%s status=%s body=%s",
+                "[APScheduler] Overseer call account=%s timeframe=%s status=%s body=%s",
                 account,
-                timeframe,
-                resp.status_code,
+                timeframe_label,
+                response.status_code,
                 snippet,
             )
         except Exception as exc:
             logging.error(
-                "[APScheduler] n8n flow failed for %s (%s): %s", account, timeframe, exc
+                "[APScheduler] Overseer call failed for %s (%s): %s",
+                account,
+                timeframe_label,
+                exc,
             )
 
     scheduler.add_job(
@@ -169,28 +136,35 @@ def start_scheduler(app):
         replace_existing=True
     )
 
-    scheduler.add_job(
-        run_n8n_flow,
-        CronTrigger(minute='0,15,30,45', second=15, timezone=LOCAL_TZ),
-        id='n8n_delta_flow_15m',
-        args=["delta", "15m"],
-        replace_existing=True,
-    )
+    for account in ("alpha", "beta", "gamma"):
+        if account not in ACCOUNTS:
+            logging.info("[APScheduler] Skipping overseer setup for missing account %s", account)
+            continue
+        scheduler.add_job(
+            trigger_overseer,
+            CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=15, timezone=LOCAL_TZ),
+            id=f"overseer_job_5m_{account}",
+            args=[account, "5m"],
+            replace_existing=True,
+        )
 
-    scheduler.add_job(
-        run_n8n_flow,
-        CronTrigger(minute='0,30', second=15, timezone=LOCAL_TZ),
-        id='n8n_epsilon_flow_30m',
-        args=["epsilon", "30m"],
-        replace_existing=True,
-    )
+    if "delta" in ACCOUNTS:
+        scheduler.add_job(
+            trigger_overseer,
+            CronTrigger(minute='0,15,30,45', second=15, timezone=LOCAL_TZ),
+            id='overseer_job_15m_delta',
+            args=["delta", "15m"],
+            replace_existing=True,
+        )
 
-    scheduler.add_job(
-        overseer_job,
-        CronTrigger(minute='0,5,10,15,20,25,30,35,40,45,50,55', second=15, timezone=LOCAL_TZ),
-        id='overseer_job',
-        replace_existing=True
-    )
+    if "epsilon" in ACCOUNTS:
+        scheduler.add_job(
+            trigger_overseer,
+            CronTrigger(minute='0,30', second=15, timezone=LOCAL_TZ),
+            id='overseer_job_30m_epsilon',
+            args=["epsilon", "30m"],
+            replace_existing=True,
+        )
 
     scheduler.add_job(
         flatten_all_open_positions,
