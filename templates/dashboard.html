@@ -65,7 +65,7 @@
         <div class="col-md-3">
             <div class="card card-metric shadow-sm">
                 <div class="card-body">
-                    <div class="text-muted">Today Realized (Net / Gross / Fees)</div>
+                    <div class="text-muted" id="rangeRealizedLabel">Today Realized (Net / Gross / Fees)</div>
                     <div class="metric-value" id="todayNet">-</div>
                     <div class="small" id="todayGross">-</div>
                 </div>
@@ -74,7 +74,7 @@
         <div class="col-md-3">
             <div class="card card-metric shadow-sm">
                 <div class="card-body">
-                    <div class="text-muted">Today Trades</div>
+                    <div class="text-muted" id="rangeTradesLabel">Today Trades</div>
                     <div class="metric-value" id="todayTrades">-</div>
                     <div class="small" id="todayQuality">-</div>
                 </div>
@@ -83,7 +83,7 @@
         <div class="col-md-3">
             <div class="card card-metric shadow-sm">
                 <div class="card-body">
-                    <div class="text-muted">7D Performance</div>
+                    <div class="text-muted" id="rangePerformanceLabel">7D Performance</div>
                     <div class="metric-value" id="weekNet">-</div>
                     <div class="small" id="weekWin">-</div>
                 </div>
@@ -150,8 +150,9 @@
         function renderMetrics(payload) {
             const metrics = payload.metrics || {};
             const open = metrics.open_positions || {};
-            const today = metrics.today || {};
-            const week = metrics.seven_day || {};
+            const rangeInfo = metrics.range || {};
+            const rangeSummary = rangeInfo.summary || {};
+            const rangeLabel = rangeInfo.label || 'Selected Range';
             const streak = metrics.streak;
 
             setText('openPnl', `$${formatNumber(open.unrealized_pnl)}`);
@@ -161,19 +162,23 @@
             if (open.duration_minutes) openDetails.push(`${formatNumber(open.duration_minutes, 1)} min`);
             setText('openMeta', openDetails.join(' • ') || 'No open positions');
 
-            setText('todayNet', `$${formatNumber(today.net_pnl)} net`);
-            const gross = `$${formatNumber(today.gross_pnl)} gross / fees $${formatNumber(today.fees)}`;
+            setText('rangeRealizedLabel', `${rangeLabel} Realized (Net / Gross / Fees)`);
+            setText('rangeTradesLabel', `${rangeLabel} Trades`);
+            setText('rangePerformanceLabel', `${rangeLabel} Performance`);
+
+            setText('todayNet', `$${formatNumber(rangeSummary.net_pnl)} net`);
+            const gross = `$${formatNumber(rangeSummary.gross_pnl)} gross / fees $${formatNumber(rangeSummary.fees)}`;
             setText('todayGross', gross);
 
-            const winRate = today.win_rate === null || today.win_rate === undefined ? '-' : `${(today.win_rate * 100).toFixed(1)}% win`;
-            const pf = today.profit_factor === null || today.profit_factor === undefined ? '-' : `PF ${formatNumber(today.profit_factor, 2)}`;
-            const avg = today.avg_trade === null || today.avg_trade === undefined ? '-' : `$${formatNumber(today.avg_trade)} avg`;
-            setText('todayTrades', `${today.trade_count || 0} trades`);
+            const winRate = rangeSummary.win_rate === null || rangeSummary.win_rate === undefined ? '-' : `${(rangeSummary.win_rate * 100).toFixed(1)}% win`;
+            const pf = rangeSummary.profit_factor === null || rangeSummary.profit_factor === undefined ? '-' : `PF ${formatNumber(rangeSummary.profit_factor, 2)}`;
+            const avg = rangeSummary.avg_trade === null || rangeSummary.avg_trade === undefined ? '-' : `$${formatNumber(rangeSummary.avg_trade)} avg`;
+            setText('todayTrades', `${rangeSummary.trade_count || 0} trades`);
             const streakText = streak ? `${streak.count} ${streak.type} streak` : '';
             setText('todayQuality', [winRate, avg, pf, streakText].filter(Boolean).join(' • '));
 
-            setText('weekNet', `$${formatNumber(week.net_pnl)} net`);
-            const weekWin = week.win_rate === null || week.win_rate === undefined ? '-' : `${(week.win_rate * 100).toFixed(1)}% win`;
+            setText('weekNet', `$${formatNumber(rangeSummary.net_pnl)} net`);
+            const weekWin = rangeSummary.win_rate === null || rangeSummary.win_rate === undefined ? '-' : `${(rangeSummary.win_rate * 100).toFixed(1)}% win`;
             setText('weekWin', weekWin);
         }
 
