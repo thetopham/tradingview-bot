@@ -164,6 +164,7 @@ def handle_webhook_logic(data):
                 logging.warning("AI returned non-integer size=%r; keeping size=%s", ai_decision.get("size"), size)
             alert = ai_decision.get("alert", alert)
             ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
+            prompt_version = ai_decision.get("prompt_version")
             cid = get_contract(sym)
             
         
@@ -172,7 +173,7 @@ def handle_webhook_logic(data):
             logging.error("Strategy '%s' is not implemented in this build (supported: simple)", strat)
             return
 
-        run_simple(acct_id, sym, sig, size, alert, ai_decision_id)
+        run_simple(acct_id, sym, sig, size, alert, ai_decision_id, prompt_version=prompt_version)
     except Exception as e:
         import traceback
         logging.error(f"Exception in handle_webhook_logic: {e}\n{traceback.format_exc()}")
