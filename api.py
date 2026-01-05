@@ -1026,6 +1026,7 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         "trade_ids": trade_ids if trade_ids else [],
         "trace_id": trace_id,
         "session_id": meta.get("session_id"),
+        "prompt_version": meta.get("prompt_version"),
     }
 
     # ---------------------------------------------------------------------
