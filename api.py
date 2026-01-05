@@ -654,6 +654,26 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
                 fee_sum += abs(_to_float(v))
         return fee_sum
 
+    def _extract_price(trade: dict) -> float | None:
+        """Extract a trade price if available."""
+        if not isinstance(trade, dict):
+            return None
+
+        preferred_keys = (
+            "price",
+            "avgPrice",
+            "averagePrice",
+            "fillPrice",
+        )
+
+        for key in preferred_keys:
+            if key in trade and trade.get(key) is not None:
+                try:
+                    return float(trade.get(key))
+                except (TypeError, ValueError):
+                    continue
+        return None
+
     def _signed_qty(trade: dict) -> float:
         """Buy=+size, Sell=-size (ProjectX side: 0=BUY, 1=SELL)."""
         try:
@@ -827,6 +847,22 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
     # Net = gross - fees
     net_pnl = gross_pnl - fees_total
 
+    # Entry/exit prices (best-effort from the sliced trade sequence)
+    entry_price = None
+    exit_price = None
+    pos_tracker = 0.0
+    for t in relevant_trades:
+        qty = _signed_qty(t)
+        if qty == 0:
+            continue
+
+        if pos_tracker == 0 and entry_price is None:
+            entry_price = _extract_price(t)
+
+        pos_tracker += qty
+
+        if pos_tracker == 0:
+            exit_price = _extract_price(t)
 
     trade_ids = [t.get("id") for t in relevant_trades if t.get("id") is not None]
     duration_sec = int(max((exit_dt - entry_dt).total_seconds(), 0))
@@ -932,6 +968,8 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         "total_pnl": gross_pnl,
         "fees_total": fees_total,
         "net_pnl": net_pnl,
+        "entry_price": entry_price,
+        "exit_price": exit_price,
         "raw_trades": relevant_trades if relevant_trades else [],
         "order_id": json.dumps(sorted(order_ids)) if order_ids else str(meta.get("order_id") or ""),
         "comment": comment,
@@ -979,6 +1017,8 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
                 "total_pnl": payload["total_pnl"],
                 "fees_total": payload.get("fees_total"),
                 "net_pnl": payload.get("net_pnl"),
+                "entry_price": payload.get("entry_price"),
+                "exit_price": payload.get("exit_price"),
                 "raw_trades": payload["raw_trades"],
                 "trade_ids": payload["trade_ids"],
                 "order_id": payload["order_id"],
