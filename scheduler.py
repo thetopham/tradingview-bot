@@ -17,6 +17,10 @@ N8N_CHART_ENDPOINTS = {
     "15m": config.get('N8N_15MCHART_FETCH_URL'),
     "30m": config.get('N8N_30MCHART_FETCH_URL'),
 }
+N8N_SCHEDULED_FLOW_ENDPOINTS = {
+    "delta": config.get("N8N_OVERSEER_URL_TEST4"),
+    "epsilon": config.get("N8N_OVERSEER_URL_TEST5"),
+}
 
 def start_scheduler(app):
     scheduler = BackgroundScheduler()
@@ -108,7 +112,8 @@ def start_scheduler(app):
             except Exception as exc:
                 logging.error("[APScheduler] Overseer call failed for %s: %s", acct, exc)
 
-    def run_n8n_flow(account: str, timeframe: str, url: str):
+    def run_n8n_flow(account: str, timeframe: str):
+        url = N8N_SCHEDULED_FLOW_ENDPOINTS.get(account)
         if not url:
             logging.warning(
                 "[APScheduler] n8n flow for %s (%s) not configured; skipping",
@@ -168,7 +173,7 @@ def start_scheduler(app):
         run_n8n_flow,
         CronTrigger(minute='0,15,30,45', second=15, timezone=LOCAL_TZ),
         id='n8n_delta_flow_15m',
-        args=["delta", "15m", N8N_CHART_ENDPOINTS.get("15m")],
+        args=["delta", "15m"],
         replace_existing=True,
     )
 
@@ -176,7 +181,7 @@ def start_scheduler(app):
         run_n8n_flow,
         CronTrigger(minute='0,30', second=15, timezone=LOCAL_TZ),
         id='n8n_epsilon_flow_30m',
-        args=["epsilon", "30m", N8N_CHART_ENDPOINTS.get("30m")],
+        args=["epsilon", "30m"],
         replace_existing=True,
     )
 
