@@ -82,6 +82,15 @@ def start_scheduler(app):
                 logging.error("[APScheduler] Chart prefetch failed for %s: %s", timeframe, exc)
 
     def trigger_overseer(account: str, timeframe_label: str):
+        now = datetime.now(LOCAL_TZ)
+        if in_get_flat(now):
+            logging.info(
+                "[APScheduler] Skipping overseer for %s (%s) during get-flat window",
+                account,
+                timeframe_label,
+            )
+            return
+
         if account not in ACCOUNTS:
             logging.warning("[APScheduler] Unknown account %s for overseer trigger", account)
             return
