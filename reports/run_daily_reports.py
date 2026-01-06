@@ -1,15 +1,18 @@
 # reports/run_daily_reports.py
-import os, sys, json, zipfile, subprocess
+import sys, json, zipfile, subprocess
 from pathlib import Path
 from datetime import datetime
 
-def run_and_capture(script_path: Path, out_txt: Path):
+def run_and_capture(py: str, script_path: Path, out_txt: Path):
     p = subprocess.run(
-        [sys.executable, str(script_path)],
+        [py, str(script_path)],
         capture_output=True,
-        text=True
+        text=True,
     )
-    out_txt.write_text(p.stdout + ("\n\nSTDERR:\n" + p.stderr if p.stderr else ""), encoding="utf-8")
+    out_txt.write_text(
+        (p.stdout or "") + ("\n\nSTDERR:\n" + p.stderr if p.stderr else ""),
+        encoding="utf-8",
+    )
     if p.returncode != 0:
         raise RuntimeError(f"{script_path.name} failed (rc={p.returncode})")
 
@@ -20,28 +23,26 @@ def zip_dir(src_dir: Path, zip_path: Path):
                 z.write(p, p.relative_to(src_dir))
 
 def main():
-    # local “market day” label; tweak if you prefer previous session date
     day = datetime.now().strftime("%Y-%m-%d")
-    base = Path(__file__).resolve().parent
-    base = Path(__file__).resolve().parent
-    venv_py = base / ".venv" / "bin" / "python"
+
+    reports_dir = Path(__file__).resolve().parent              # .../tradingview-bot/reports
+    project_root = reports_dir.parent                           # .../tradingview-bot
+    venv_py = project_root / ".venv" / "bin" / "python"
     py = str(venv_py) if venv_py.exists() else sys.executable
 
-    subprocess.run([py, str(run_script)], check=True)
-    subprocess.run([py, str(upload_script)], check=True)
-    outdir = base / "daily" / day
+    outdir = reports_dir / "daily" / day
     charts_dir = outdir / "charts"
     outdir.mkdir(parents=True, exist_ok=True)
     charts_dir.mkdir(parents=True, exist_ok=True)
 
-    # Run your existing scripts, capture output exactly as you see it
-    run_and_capture(base / "session_report.py", outdir / "session_report.txt")
-    run_and_capture(base / "tod_analysis.py", outdir / "tod_analysis.txt")
+    # Capture your two analyses exactly as they print today
+    run_and_capture(py, reports_dir / "session_report.py", outdir / "session_report.txt")
+    run_and_capture(py, reports_dir / "tod_analysis.py", outdir / "tod_analysis.txt")
 
     summary = {
         "day": day,
         "generated_at": datetime.now().isoformat(),
-        "files": ["session_report.txt", "tod_analysis.txt"]
+        "files": ["session_report.txt", "tod_analysis.txt", "daily_report.md", "bundle.zip"],
     }
     (outdir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
