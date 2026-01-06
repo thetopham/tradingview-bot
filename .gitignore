@@ -1,0 +1,47 @@
+########################################
+# Secrets / env files
+########################################
+.env
+.env.*
+!.env.example
+env.copy
+
+########################################
+# Python artifacts
+########################################
+__pycache__/
+*.py[cod]
+*$py.class
+
+########################################
+# Virtual environments
+########################################
+venv/
+.venv/
+
+########################################
+# Bot runtime state (machine-specific)
+########################################
+trade_state.json
+trade_state.json.*
+account_equity_state.json
+account_equity_state.json.*
+
+########################################
+# Logs / generated outputs
+########################################
+*.log
+*.log.*
+*.jsonl
+
+
+########################################
+# Editor / OS junk
+########################################
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
