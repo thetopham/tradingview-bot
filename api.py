@@ -1120,7 +1120,7 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
                 "[log_trade_results_to_supabase] Uploaded trade result for acct=%s, cid=%s, PnL=%s, ai_decision_id=%s, trace_id=%s",
                 acct_id,
                 cid,
-                total_pnl,
+                payload["total_pnl"],
                 ai_decision_id_out,
                 trace_id,
             )
