@@ -1,0 +1,16 @@
+
+Window: 2026-01-06 16:00:00-07:00  →  2026-01-06 16:26:31.790744-07:00
+
+=== PNL BY SESSION (per account) ===
+account session  trades  net_pnl    avg  win_rate  pf
+  gamma    Asia       1   -26.48 -26.48       0.0 0.0
+
+=== NET PNL BY SESSION (wide) ===
+session   Asia  Late US  London  Pre-NY  NY Open  NY Midday  NY Afternoon  Other
+account                                                                         
+gamma   -26.48      0.0     0.0     0.0      0.0        0.0           0.0    0.0
+
+=== CUMULATIVE PNL BY SESSION ORDER (shows give-back) ===
+session   Asia  Late US  London  Pre-NY  NY Open  NY Midday  NY Afternoon  Other
+account                                                                         
+gamma   -26.48   -26.48  -26.48  -26.48   -26.48     -26.48        -26.48 -26.48
