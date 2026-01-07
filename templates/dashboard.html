@@ -6,16 +6,113 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
     <style>
-        body { padding: 20px; background-color: #f8f9fa; }
-        .card-metric { min-height: 120px; }
-        .metric-value { font-size: 1.5rem; font-weight: 700; }
-        .table thead th { position: sticky; top: 0; background: #fff; z-index: 1; }
-        .refresh-note { font-size: 0.9rem; color: #6c757d; }
-        .filter-bar .form-select, .filter-bar .form-check-input { max-width: 200px; }
+        :root {
+            color-scheme: light;
+            --tv-primary: #1f6feb;
+            --tv-card: #ffffff;
+            --tv-border: rgba(13, 17, 23, 0.08);
+            --tv-muted: #6c757d;
+            --tv-positive: #198754;
+            --tv-negative: #dc3545;
+        }
+
+        body {
+            padding: 24px;
+            background: radial-gradient(circle at 10% 10%, #ffffff 0%, #f1f4f8 55%, #eef1f6 100%);
+            color: #111827;
+        }
+
+        .dashboard-header {
+            padding: 16px 20px;
+            border-radius: 16px;
+            background: linear-gradient(120deg, #ffffff 0%, #f9fbff 65%);
+            border: 1px solid var(--tv-border);
+            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+        }
+
+        .card-metric {
+            min-height: 132px;
+            border-radius: 16px;
+            border: 1px solid var(--tv-border);
+            background: var(--tv-card);
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+        }
+
+        .metric-value {
+            font-size: 1.6rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .metric-positive { color: var(--tv-positive); }
+        .metric-negative { color: var(--tv-negative); }
+
+        .table thead th {
+            position: sticky;
+            top: 0;
+            background: #f8fafc;
+            z-index: 1;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #334155;
+        }
+
+        .refresh-note { font-size: 0.9rem; color: var(--tv-muted); }
+
+        .filter-bar {
+            background: #ffffff;
+            border-radius: 16px;
+            padding: 16px;
+            border: 1px solid var(--tv-border);
+            box-shadow: 0 8px 22px rgba(15, 23, 42, 0.04);
+        }
+
+        .filter-bar .form-select,
+        .filter-bar .form-check-input {
+            max-width: 220px;
+        }
+
+        .section-card {
+            border-radius: 18px;
+            border: 1px solid var(--tv-border);
+            box-shadow: 0 16px 32px rgba(15, 23, 42, 0.06);
+        }
+
+        .table-responsive { border-radius: 14px; }
+
+        .table td { font-size: 0.85rem; vertical-align: top; }
+
+        .reason-cell {
+            min-width: 260px;
+            max-width: 360px;
+            white-space: normal;
+        }
+
+        .pnl-cell.positive { color: var(--tv-positive); font-weight: 600; }
+        .pnl-cell.negative { color: var(--tv-negative); font-weight: 600; }
+
+        .badge-soft {
+            background: #eef2ff;
+            color: #1e3a8a;
+            border: 1px solid #c7d2fe;
+            font-weight: 600;
+            padding: 4px 8px;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .btn-primary {
+            background: var(--tv-primary);
+            border-color: var(--tv-primary);
+            box-shadow: 0 8px 18px rgba(31, 111, 235, 0.25);
+        }
     </style>
 </head>
 <body>
-    <div class="d-flex align-items-center justify-content-between mb-3">
+    <div class="d-flex align-items-center justify-content-between mb-4 dashboard-header">
         <div>
             <h1 class="h3 mb-0">AI Trade Feed</h1>
             <div class="refresh-note" id="lastUpdated"></div>
@@ -23,7 +120,7 @@
         <div class="refresh-note">Auto-refreshes every 15s</div>
     </div>
 
-    <div class="row g-3 mb-3 filter-bar">
+    <div class="row g-3 mb-4 filter-bar">
         <div class="col-md-3">
             <label class="form-label">Account</label>
             <select id="accountFilter" class="form-select">
@@ -91,10 +188,13 @@
         </div>
     </div>
 
-    <div class="card shadow-sm">
+    <div class="card shadow-sm section-card">
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center mb-2">
-                <h5 class="card-title mb-0">Trades & Decisions</h5>
+                <div class="d-flex align-items-center gap-2">
+                    <h5 class="card-title mb-0">Trades & Decisions</h5>
+                    <span class="badge-soft">Live feed</span>
+                </div>
                 <div class="refresh-note" id="rowCount"></div>
             </div>
             <div class="table-responsive" style="max-height: 70vh;">
@@ -149,6 +249,17 @@
             if (el) el.textContent = value;
         }
 
+        function setMetricValue(id, value) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.textContent = value;
+            el.classList.remove('metric-positive', 'metric-negative');
+            const numeric = Number(String(value).replace(/[^0-9.-]/g, ''));
+            if (!Number.isNaN(numeric) && numeric !== 0) {
+                el.classList.add(numeric > 0 ? 'metric-positive' : 'metric-negative');
+            }
+        }
+
         function renderMetrics(payload) {
             const metrics = payload.metrics || {};
             const open = metrics.open_positions || {};
@@ -156,14 +267,14 @@
             const week = metrics.seven_day || {};
             const streak = metrics.streak;
 
-            setText('openPnl', `$${formatNumber(open.unrealized_pnl)}`);
+            setMetricValue('openPnl', `$${formatNumber(open.unrealized_pnl)}`);
             const openDetails = [];
             if (open.side) openDetails.push(open.side);
             if (open.size) openDetails.push(`size ${open.size}`);
             if (open.duration_minutes) openDetails.push(`${formatNumber(open.duration_minutes, 1)} min`);
             setText('openMeta', openDetails.join(' • ') || 'No open positions');
 
-            setText('todayNet', `$${formatNumber(today.net_pnl)} net`);
+            setMetricValue('todayNet', `$${formatNumber(today.net_pnl)} net`);
             const gross = `$${formatNumber(today.gross_pnl)} gross / fees $${formatNumber(today.fees)}`;
             setText('todayGross', gross);
 
@@ -174,7 +285,7 @@
             const streakText = streak ? `${streak.count} ${streak.type} streak` : '';
             setText('todayQuality', [winRate, avg, pf, streakText].filter(Boolean).join(' • '));
 
-            setText('weekNet', `$${formatNumber(week.net_pnl)} net`);
+            setMetricValue('weekNet', `$${formatNumber(week.net_pnl)} net`);
             const weekWin = week.win_rate === null || week.win_rate === undefined ? '-' : `${(week.win_rate * 100).toFixed(1)}% win`;
             setText('weekWin', weekWin);
         }
@@ -193,15 +304,15 @@
                     { value: formatDate(row.exit_time) },
                     { value: row.account || '' },
                     { value: row.symbol || '' },
-                    { value: row.signal || '' },
+                    { value: row.signal || '', kind: 'signal' },
                     { value: row.size || '' },
                     { value: formatNumber(row.entry_price) },
                     { value: formatNumber(row.exit_price) },
-                    { value: row.pnl !== null && row.pnl !== undefined ? `$${formatNumber(row.pnl)}` : '' },
+                    { value: row.pnl, kind: 'pnl' },
                     { value: row.ai_decision_id || '' },
                     { value: isFlattenExit ? (row.exit_ai_decision_id || '') : '' },
-                    { value: row.reason || '' },
-                    { value: isFlattenExit ? (row.exit_reason || '') : '' },
+                    { value: row.reason || '', kind: 'reason' },
+                    { value: isFlattenExit ? (row.exit_reason || '') : '', kind: 'reason' },
                     { value: row.screenshot || '', kind: 'link' },
                     { value: row.strategy || '' }
                 ];
@@ -215,6 +326,24 @@
                         link.rel = 'noopener noreferrer';
                         link.textContent = 'Open';
                         td.appendChild(link);
+                    } else if (cell.kind === 'signal' && cell.value) {
+                        const badge = document.createElement('span');
+                        badge.className = 'badge-soft';
+                        badge.textContent = cell.value;
+                        td.appendChild(badge);
+                    } else if (cell.kind === 'pnl') {
+                        if (cell.value !== null && cell.value !== undefined) {
+                            const formatted = `$${formatNumber(cell.value)}`;
+                            td.textContent = formatted;
+                            td.classList.add('pnl-cell');
+                            if (cell.value > 0) td.classList.add('positive');
+                            if (cell.value < 0) td.classList.add('negative');
+                        } else {
+                            td.textContent = '';
+                        }
+                    } else if (cell.kind === 'reason') {
+                        td.textContent = cell.value;
+                        td.classList.add('reason-cell');
                     } else {
                         td.textContent = cell.value;
                     }
