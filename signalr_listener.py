@@ -152,9 +152,26 @@ def annotate_trade_exit_intent(
                 break
 
         session_id = str(uuid.uuid4())[:8]
-        entry_time = exit_requested_at or time.time()
+        entry_time = None
+        position_data = positions_state.get(acct_id, {}).get(cid)
+        if position_data:
+            entry_time = position_data.get("creationTimestamp")
+
+        if not entry_time:
+            try:
+                positions = search_pos(acct_id)
+                for pos in positions:
+                    if pos.get("contractId") == cid and pos.get("size", 0) > 0:
+                        entry_time = pos.get("creationTimestamp")
+                        break
+            except Exception as exc:
+                logging.warning(
+                    "[annotate_trade_exit_intent] Failed to fetch position for acct=%s cid=%s: %s",
+                    acct_id,
+                    cid,
+                    exc,
+                )
         meta = {
-            "entry_time": entry_time,
             "ai_decision_id": None,
             "strategy": "unknown",
             "signal": "UNKNOWN",
@@ -170,6 +187,8 @@ def annotate_trade_exit_intent(
             "comment": "Exit intent captured without prior metadata",
             "session_id": session_id,
         }
+        if entry_time:
+            meta["entry_time"] = entry_time
         trade_meta[key] = meta
 
     meta["exit_ai_decision_id"] = exit_ai_decision_id
@@ -675,11 +694,14 @@ def on_position_update(args):
 
         if meta:
             ai_decision_id = meta.get("ai_decision_id")
+            entry_time = meta.get("entry_time") or position_data.get("creationTimestamp")
+            if entry_time and not meta.get("entry_time"):
+                meta["entry_time"] = entry_time
             logging.info(f"[on_position_update] Calling log_trade_results_to_supabase with ai_decision_id={ai_decision_id}")
             log_trade_results_to_supabase(
                 acct_id=account_id,
                 cid=contract_id,
-                entry_time=meta.get("entry_time"),
+                entry_time=entry_time,
                 ai_decision_id=ai_decision_id,
                 meta=meta,
             )
