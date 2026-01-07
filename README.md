@@ -24,6 +24,15 @@ This repo runs a lightweight execution + observability layer for an “AI day tr
   - `n8n/chart_fetch/` – 5m/15m/30m prefetch helper flows
   - `n8n/datafeeds/` – merged data feed exports
 
+## Documentation
+
+The canonical docs entry point lives in [`documentation/README.md`](documentation/README.md).
+Key sections:
+
+- **Setup**: [Accounts & Market Access](documentation/README.md#2-accounts--market-access), [Infrastructure](documentation/README.md#4-infrastructure), [Environment Variables](documentation/README.md#16-environment-variables)
+- **Architecture**: [System Overview](documentation/README.md#1-system-overview), [Core Components](documentation/README.md#5-core-components)
+- **Operations**: [Scheduler](documentation/README.md#13-scheduler-apscheduler), [Logging & Observability](documentation/README.md#15-logging--observability), [Dashboard](documentation/README.md#14-dashboard)
+
 ## Local setup
 
 ### 1) Install
