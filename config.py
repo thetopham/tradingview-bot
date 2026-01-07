@@ -12,6 +12,7 @@ def load_config():
         'USER_NAME': os.getenv("PROJECTX_USERNAME"),
         'API_KEY': os.getenv("PROJECTX_API_KEY"),
         'WEBHOOK_SECRET': os.getenv("WEBHOOK_SECRET"),
+        'DASHBOARD_PASSWORD': os.getenv("DASHBOARD_PASSWORD"),
         'N8N_AI_URL': os.getenv("N8N_AI_URL"),
         'N8N_AI_URL2': os.getenv("N8N_AI_URL2"),
         'N8N_CHART_FETCH_URL': os.getenv("N8N_CHART_FETCH_URL"),
@@ -55,4 +56,3 @@ def load_config():
     config['WEEKEND_MARKET_OPEN'] = dtime(16, 0)
     config['MT'] = mountain
     return config
-

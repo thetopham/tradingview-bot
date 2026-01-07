@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
 from dateutil import parser
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, Response, jsonify, render_template, request
 
 from api import get_contract, get_supabase_client
 from config import load_config
@@ -14,6 +14,7 @@ from position_manager import PositionManager
 config = load_config()
 ACCOUNTS = config["ACCOUNTS"]
 DEFAULT_ACCOUNT = config["DEFAULT_ACCOUNT"]
+DASHBOARD_PASSWORD = config.get("DASHBOARD_PASSWORD")
 MOUNTAIN_TZ = pytz.timezone("America/Denver")
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,30 @@ logger = logging.getLogger(__name__)
 
 dashboard_bp = Blueprint("dashboard", __name__, template_folder="templates", static_folder="static")
 position_manager = PositionManager(ACCOUNTS)
+
+
+def _dashboard_requires_auth() -> bool:
+    return bool(DASHBOARD_PASSWORD)
+
+
+def _check_dashboard_auth() -> bool:
+    if not _dashboard_requires_auth():
+        return True
+    auth = request.authorization
+    if not auth or not auth.password:
+        return False
+    return auth.password == DASHBOARD_PASSWORD
+
+
+@dashboard_bp.before_request
+def _require_dashboard_auth() -> Optional[Response]:
+    if _check_dashboard_auth():
+        return None
+    return Response(
+        "Unauthorized",
+        401,
+        {"WWW-Authenticate": 'Basic realm="Dashboard"'},
+    )
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
