@@ -15,10 +15,11 @@ from api import (
 from position_manager import PositionManager
 from strategies import run_simple
 from scheduler import start_scheduler
-from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token, auth_lock
+from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token
 from signalr_listener import launch_signalr_listener
 from dashboard import dashboard_bp
 from threading import Thread
+import threading
 from datetime import datetime
 import logging
 
@@ -42,6 +43,7 @@ AI_TEST_ENDPOINTS = {
     "epsilon": config.get("N8N_OVERSEER_URL_TEST5"),
 }
 
+AUTH_LOCK = threading.Lock()
 POSITION_MANAGER = PositionManager(ACCOUNTS)
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -71,7 +73,6 @@ def handle_webhook_logic(data):
         size  = int(data.get("size", 1))
         alert = data.get("alert", "")
         ai_decision_id = data.get("ai_decision_id", None)
-        prompt_version = None
 
         if acct not in ACCOUNTS:
             logging.error(f"Unknown account '{acct}'")
@@ -184,8 +185,8 @@ if __name__ == "__main__":
             get_token=get_token,
             get_token_expiry=get_token_expiry,
             authenticate=authenticate,
-            auth_lock=auth_lock
-        )
+            auth_lock=AUTH_LOCK
+        ) 
         scheduler = start_scheduler(app)
         app.logger.info("Starting server.")
         app.run(host="0.0.0.0", port=TV_PORT, threaded=True)

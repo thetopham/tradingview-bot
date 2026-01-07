@@ -214,14 +214,13 @@ def _summarize_positions(positions, timeframe: str = "1m"):
 
         if current_price is None or avg_price is None:
             pnl = None
+        contract_multiplier = 5 # MES = $5/pt/contract
+        if side == "LONG":
+            pnl = (current_price - avg_price) * size * contract_multiplier
+        elif side == "SHORT":
+            pnl = (avg_price - current_price) * size * contract_multiplier
         else:
-            contract_multiplier = 5  # MES = $5/pt/contract
-            if side == "LONG":
-                pnl = (current_price - avg_price) * size * contract_multiplier
-            elif side == "SHORT":
-                pnl = (avg_price - current_price) * size * contract_multiplier
-            else:
-                pnl = None
+            pnl = None
 
         details = {
             "contract": cid,
@@ -445,14 +444,13 @@ def _compute_simple_position_context(
     side = "LONG" if position_type == 1 else "SHORT" if position_type == 2 else None
 
     current_price = _fetch_latest_price_from_supabase(symbol or MES, timeframe)
-    contract_multiplier = 5 if (symbol or MES) == MES else 1
 
     if current_price is None or avg_price is None:
         unrealized_pnl = 0.0
     elif side == "LONG":
-        unrealized_pnl = (current_price - avg_price) * total_size * contract_multiplier
+        unrealized_pnl = (current_price - avg_price) * total_size
     elif side == "SHORT":
-        unrealized_pnl = (avg_price - current_price) * total_size * contract_multiplier
+        unrealized_pnl = (avg_price - current_price) * total_size
     else:
         unrealized_pnl = 0.0
 
@@ -1120,7 +1118,7 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
                 "[log_trade_results_to_supabase] Uploaded trade result for acct=%s, cid=%s, PnL=%s, ai_decision_id=%s, trace_id=%s",
                 acct_id,
                 cid,
-                payload["total_pnl"],
+                total_pnl,
                 ai_decision_id_out,
                 trace_id,
             )
