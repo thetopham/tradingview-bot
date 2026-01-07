@@ -1,7 +1,14 @@
 # reports/run_daily_reports.py
 """
 Daily artifact generator:
-- Runs session_report.py + tod_analysis.py and captures stdout/stderr to disk
+
+- Runs report scripts and captures stdout/stderr to disk:
+    - session_report.py        -> session_report.txt
+    - tod_analysis.py          -> tod_analysis.txt
+    - performance_attribution.py (optional) -> performance_attribution.txt
+    - equity_drawdown_report.py (optional) -> equity_drawdown_report.txt
+    - data_quality_report.py     (optional) -> data_quality_report.txt
+
 - Pulls latest TradingView chart screenshot URLs from Supabase (ai_trading_log.urls jsonb STRING)
 - Downloads 5m/15m/30m screenshots into reports/daily/YYYY-MM-DD/charts/
 - Writes summary.json + daily_report.md
@@ -10,11 +17,13 @@ Daily artifact generator:
 Expected layout:
   tradingview-bot/
     .env
-    config.py
     reports/
       run_daily_reports.py   (this file)
       session_report.py
       tod_analysis.py
+      performance_attribution.py      (optional)
+      equity_drawdown_report.py       (optional)
+      data_quality_report.py          (optional)
 """
 
 import os
@@ -23,7 +32,7 @@ import json
 import zipfile
 import subprocess
 from pathlib import Path
-from datetime import datetime, timedelta, time as dtime
+from datetime import datetime, timedelta
 
 import requests
 
@@ -70,11 +79,28 @@ def _pick_python(project_root: Path) -> str:
     return sys.executable
 
 
-def run_and_capture(py: str, cwd: Path, script_path: Path, out_txt: Path):
+def run_and_capture(py: str, cwd: Path, script_path: Path, out_txt: Path, *, allow_fail: bool = True):
     """
     Run a python script and save combined stdout/stderr to out_txt.
     Ensures cwd is project root and PYTHONPATH includes project root.
+    Returns a status dict with rc and any error message.
     """
+    status = {
+        "script": script_path.name,
+        "path": str(script_path),
+        "out_txt": str(out_txt),
+        "ran": False,
+        "rc": None,
+        "ok": False,
+        "error": None,
+    }
+
+    if not script_path.exists():
+        msg = f"Script not found, skipping: {script_path}"
+        out_txt.write_text(msg + "\n", encoding="utf-8")
+        status.update({"ran": False, "rc": None, "ok": False, "error": msg})
+        return status
+
     env = os.environ.copy()
     env["PYTHONPATH"] = str(cwd) + (":" + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
 
@@ -86,13 +112,33 @@ def run_and_capture(py: str, cwd: Path, script_path: Path, out_txt: Path):
         env=env,
     )
 
+    status["ran"] = True
+    status["rc"] = p.returncode
+    status["ok"] = (p.returncode == 0)
+
+    header = [
+        f"script: {script_path.name}",
+        f"rc: {p.returncode}",
+        f"cwd: {cwd}",
+        f"ts_utc: {datetime.utcnow().isoformat()}Z",
+        "-" * 80,
+        "",
+    ]
+
+    body = (p.stdout or "")
+    err = (p.stderr or "")
+
     out_txt.write_text(
-        (p.stdout or "") + ("\n\nSTDERR:\n" + p.stderr if p.stderr else ""),
+        "\n".join(header) + body + ("\n\nSTDERR:\n" + err if err else ""),
         encoding="utf-8",
     )
 
     if p.returncode != 0:
-        raise RuntimeError(f"{script_path.name} failed (rc={p.returncode})")
+        status["error"] = f"{script_path.name} failed (rc={p.returncode})"
+        if not allow_fail:
+            raise RuntimeError(status["error"])
+
+    return status
 
 
 def zip_dir(src_dir: Path, zip_path: Path):
@@ -126,7 +172,10 @@ def _to_utc_iso(dt_local: datetime) -> str:
     # If tz-aware, convert; if naive, assume it's already UTC-ish.
     if dt_local.tzinfo is None:
         return dt_local.isoformat() + "Z"
-    return dt_local.astimezone(ZoneInfo("UTC")).isoformat().replace("+00:00", "Z")
+    try:
+        return dt_local.astimezone(ZoneInfo("UTC")).isoformat().replace("+00:00", "Z")
+    except Exception:
+        return dt_local.isoformat() + "Z"
 
 
 def _normalize_supabase_url(url: str) -> str:
@@ -193,7 +242,6 @@ def fetch_latest_chart_urls_from_supabase(session_start_utc_iso: str, limit: int
         if isinstance(u, str):
             url = u
         else:
-            # if it somehow comes back as json, stringify it
             url = str(u)
 
         url = url.strip().strip('"')
@@ -225,6 +273,19 @@ def download_image(url: str, dest_path: Path) -> bool:
         return False
 
 
+def _tail_text(path: Path, max_lines: int = 220) -> str:
+    """
+    Grab the last N lines for embedding into markdown.
+    """
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        if len(lines) <= max_lines:
+            return "\n".join(lines)
+        return "\n".join(lines[-max_lines:])
+    except Exception as exc:
+        return f"(unable to read {path.name}: {exc})"
+
+
 def main():
     project_root, reports_dir, env_path = _project_paths()
     _load_env(env_path)
@@ -245,12 +306,32 @@ def main():
     outdir.mkdir(parents=True, exist_ok=True)
     charts_dir.mkdir(parents=True, exist_ok=True)
 
-    # Run your existing scripts, capture output exactly as you see it
-    # (cwd=project_root so imports like config.py work)
-    run_and_capture(py, project_root, reports_dir / "session_report.py", outdir / "session_report.txt")
-    run_and_capture(py, project_root, reports_dir / "tod_analysis.py", outdir / "tod_analysis.txt")
+    # ----------------------------
+    # Run report scripts (non-fatal)
+    # ----------------------------
+    script_specs = [
+        ("session_report.py", "session_report.txt"),
+        ("tod_analysis.py", "tod_analysis.txt"),
+        # Optional “mature system” reports (only run if present):
+        ("performance_attribution.py", "performance_attribution.txt"),
+        ("equity_drawdown_report.py", "equity_drawdown_report.txt"),
+        ("data_quality_report.py", "data_quality_report.txt"),
+    ]
 
+    script_statuses = []
+    for script_name, out_name in script_specs:
+        status = run_and_capture(
+            py,
+            project_root,
+            reports_dir / script_name,
+            outdir / out_name,
+            allow_fail=True,  # don't break the daily pipeline
+        )
+        script_statuses.append(status)
+
+    # ----------------------------
     # Pull + download screenshots
+    # ----------------------------
     chart_result = fetch_latest_chart_urls_from_supabase(session_start_utc_iso)
     downloaded = {}
 
@@ -275,28 +356,58 @@ def main():
             chart_md_lines.append(f"_No {tf} screenshot found after session start._")
         chart_md_lines.append("")
 
-    daily_md = f"""# Daily Trading Report — {day_label}
+    # ----------------------------
+    # Build daily_report.md
+    # ----------------------------
+    md_parts = []
+    md_parts.append(f"# Daily Trading Report — {day_label}\n")
+    md_parts.append(f"**Session start (local):** {session_start_local.isoformat()}")
+    md_parts.append(f"**Session start (UTC):** {session_start_utc_iso}")
+    md_parts.append(f"**Report TZ:** {tz_name}")
+    md_parts.append("")
 
-**Session start (local):** {session_start_local.isoformat()}
-**Session start (UTC):** {session_start_utc_iso}
+    # Script status overview
+    md_parts.append("## Report Script Status")
+    md_parts.append("")
+    for st in script_statuses:
+        flag = "✅" if st.get("ok") else ("⚠️" if st.get("ran") else "⏭️")
+        md_parts.append(f"- {flag} `{st['script']}` → `{Path(st['out_txt']).name}` (rc={st.get('rc')})")
+    md_parts.append("")
 
-## Session report
-See `session_report.txt`
+    # Embed key report outputs
+    for script_name, out_name in script_specs:
+        out_path = outdir / out_name
+        title = out_name.replace(".txt", "").replace("_", " ").title()
+        md_parts.append(f"## {title}")
+        md_parts.append(f"_See `{out_name}` for full output._\n")
+        md_parts.append("```")
+        md_parts.append(_tail_text(out_path, max_lines=220))
+        md_parts.append("```")
+        md_parts.append("")
 
-## Time-of-day analysis
-See `tod_analysis.txt`
+    md_parts.append("\n".join(chart_md_lines))
+    md_parts.append("")
 
-{chr(10).join(chart_md_lines)}
-"""
+    daily_md = "\n".join(md_parts)
     (outdir / "daily_report.md").write_text(daily_md, encoding="utf-8")
 
+    # ----------------------------
+    # summary.json + bundle.zip
+    # ----------------------------
     summary = {
         "day": day_label,
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "report_tz": tz_name,
         "session_start_local": session_start_local.isoformat(),
         "session_start_utc": session_start_utc_iso,
-        "files": ["session_report.txt", "tod_analysis.txt", "daily_report.md", "summary.json", "bundle.zip"],
+        "python": py,
+        "scripts": script_statuses,
+        "files": [
+            "daily_report.md",
+            "summary.json",
+            "bundle.zip",
+            # include all txt outputs that exist
+        ] + [spec[1] for spec in script_specs if (outdir / spec[1]).exists()],
         "charts": {
             "found_urls": chart_result.get("urls") if chart_result else {},
             "downloaded": downloaded,
