@@ -1,0 +1,58 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Astronomus
+
+//@version=6
+indicator("30-Minute Datafeed Alert", overlay=true)
+
+// Compute everything on 15m bars
+tf = "30"
+
+[o, h, l, c, v] = request.security(syminfo.tickerid, tf, [open, high, low, close, volume], barmerge.gaps_off, barmerge.lookahead_off)
+
+// Trend
+sma20 = request.security(syminfo.tickerid, tf, ta.sma(close, 20))
+sma50 = request.security(syminfo.tickerid, tf, ta.sma(close, 50))
+ema9  = request.security(syminfo.tickerid, tf, ta.ema(close, 9))
+ema21 = request.security(syminfo.tickerid, tf, ta.ema(close, 21))
+vwap  = request.security(syminfo.tickerid, tf, ta.vwap)
+
+// Volatility
+atr = request.security(syminfo.tickerid, tf, ta.atr(14))
+[bb_upper, bb_middle, bb_lower] = request.security(syminfo.tickerid, tf, ta.bb(close, 20, 2))
+
+// Momentum
+rsi = request.security(syminfo.tickerid, tf, ta.rsi(close, 14))
+[macd, macd_signal, macd_hist] = request.security(syminfo.tickerid, tf, ta.macd(close, 12, 26, 9))
+k = request.security(syminfo.tickerid, tf, ta.stoch(close, high, low, 14))
+d = request.security(syminfo.tickerid, tf, ta.sma(ta.stoch(close, high, low, 14), 3))
+
+// Proxies
+phobos_momentum = macd_hist
+vzo = request.security(syminfo.tickerid, tf, 100 * (ta.ema(volume * (close > close[1] ? 1 : close < close[1] ? -1 : 0), 14) / ta.ema(volume, 14)))
+atr_upper = c + atr
+atr_lower = c - atr
+
+// Trigger only when a new 5m bar closes (even on 1m chart)
+new5mClose = request.security(syminfo.tickerid, tf, barstate.isconfirmed)
+alertcondition(new5mClose, title="Trigger Every 30 Min", message="30m alert")
+
+// Plot for alert access only
+plot(sma20,            title="sma20",            display=display.none)
+plot(sma50,            title="sma50",            display=display.none)
+plot(ema9,             title="ema9",             display=display.none)
+plot(ema21,            title="ema21",            display=display.none)
+plot(vwap,             title="vwap",             display=display.none)
+plot(atr,              title="atr",              display=display.none)
+plot(bb_upper,         title="bb_upper",         display=display.none)
+plot(bb_middle,        title="bb_middle",        display=display.none)
+plot(bb_lower,         title="bb_lower",         display=display.none)
+plot(rsi,              title="rsi",              display=display.none)
+plot(macd,             title="macd",             display=display.none)
+plot(macd_signal,      title="macd_signal",      display=display.none)
+plot(macd_hist,        title="macd_hist",        display=display.none)
+plot(k,                title="stoch_k",          display=display.none)
+plot(d,                title="stoch_d",          display=display.none)
+plot(phobos_momentum,  title="phobos_momentum",  display=display.none)
+plot(vzo,              title="vzo",              display=display.none)
+plot(atr_upper,        title="atr_upper",        display=display.none)
+plot(atr_lower,        title="atr_lower",        display=display.none)
