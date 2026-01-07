@@ -6,121 +6,139 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
     <style>
-        body { padding: 20px; background-color: #f8f9fa; }
-        .card-metric { min-height: 120px; }
-        .metric-value { font-size: 1.5rem; font-weight: 700; }
-        .table thead th { position: sticky; top: 0; background: #fff; z-index: 1; }
+        body { padding: 24px; background-color: #f8f9fa; }
+        .page-shell { max-width: 1400px; margin: 0 auto; }
+        .page-title { font-weight: 700; letter-spacing: -0.02em; }
+        .card-metric { min-height: 132px; border: 0; background: #fff; }
+        .metric-value { font-size: 1.6rem; font-weight: 700; }
+        .metric-label { font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.04em; }
+        .table thead th { position: sticky; top: 0; background: #f8f9fa; z-index: 1; box-shadow: inset 0 -1px 0 #dee2e6; }
         .refresh-note { font-size: 0.9rem; color: #6c757d; }
-        .filter-bar .form-select, .filter-bar .form-check-input { max-width: 200px; }
+        .filter-bar { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 6px 20px rgba(15, 23, 42, 0.06); }
+        .filter-bar .form-select, .filter-bar .form-check-input { max-width: 220px; }
+        .status-chip { font-size: 0.85rem; padding: 6px 12px; border-radius: 999px; background: #eef2ff; color: #4338ca; font-weight: 600; }
+        .metric-sub { color: #6c757d; }
+        .pnl-positive { color: #198754; }
+        .pnl-negative { color: #dc3545; }
+        .pnl-neutral { color: #6c757d; }
+        .table td { vertical-align: middle; }
+        .table td.reason-cell { min-width: 320px; }
+        .table td.sticky-action { position: sticky; right: 0; background: #fff; }
+        .table-responsive { border-radius: 12px; }
     </style>
 </head>
 <body>
-    <div class="d-flex align-items-center justify-content-between mb-3">
-        <div>
-            <h1 class="h3 mb-0">AI Trade Feed</h1>
-            <div class="refresh-note" id="lastUpdated"></div>
+    <div class="page-shell">
+        <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between mb-4 gap-2">
+            <div>
+                <h1 class="h3 mb-1 page-title">AI Trade Feed</h1>
+                <div class="refresh-note" id="lastUpdated"></div>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                <span class="status-chip">Live monitoring</span>
+                <div class="refresh-note">Auto-refreshes every 15s</div>
+            </div>
         </div>
-        <div class="refresh-note">Auto-refreshes every 15s</div>
-    </div>
 
-    <div class="row g-3 mb-3 filter-bar">
-        <div class="col-md-3">
-            <label class="form-label">Account</label>
-            <select id="accountFilter" class="form-select">
-                <option value="all" {% if default_account == 'all' %}selected{% endif %}>All</option>
-                {% for acct in accounts %}
-                <option value="{{ acct }}" {% if acct == default_account %}selected{% endif %}>{{ acct }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="col-md-3">
-            <label class="form-label">Range</label>
-            <select id="rangeFilter" class="form-select">
-                <option value="today" {% if default_range == 'today' %}selected{% endif %}>Today</option>
-                <option value="7d" {% if default_range == '7d' %}selected{% endif %}>Last 7d</option>
-                <option value="30d" {% if default_range == '30d' %}selected{% endif %}>Last 30d</option>
-            </select>
-        </div>
-        <div class="col-md-3 d-flex align-items-end">
-            <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="includeOpen" {% if default_include_open %}checked{% endif %}>
-                <label class="form-check-label" for="includeOpen">Include open positions</label>
+        <div class="row g-3 mb-4 filter-bar">
+            <div class="col-md-3">
+                <label class="form-label">Account</label>
+                <select id="accountFilter" class="form-select">
+                    <option value="all" {% if default_account == 'all' %}selected{% endif %}>All</option>
+                    {% for acct in accounts %}
+                    <option value="{{ acct }}" {% if acct == default_account %}selected{% endif %}>{{ acct }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Range</label>
+                <select id="rangeFilter" class="form-select">
+                    <option value="today" {% if default_range == 'today' %}selected{% endif %}>Today</option>
+                    <option value="7d" {% if default_range == '7d' %}selected{% endif %}>Last 7d</option>
+                    <option value="30d" {% if default_range == '30d' %}selected{% endif %}>Last 30d</option>
+                </select>
+            </div>
+            <div class="col-md-3 d-flex align-items-end">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="includeOpen" {% if default_include_open %}checked{% endif %}>
+                    <label class="form-check-label" for="includeOpen">Include open positions</label>
+                </div>
+            </div>
+            <div class="col-md-3 d-flex align-items-end">
+                <button id="refreshBtn" class="btn btn-primary w-100">Refresh</button>
             </div>
         </div>
-        <div class="col-md-3 d-flex align-items-end">
-            <button id="refreshBtn" class="btn btn-primary w-100">Refresh</button>
-        </div>
-    </div>
 
-    <div class="row g-3 mb-4" id="metricCards">
-        <div class="col-md-3">
-            <div class="card card-metric shadow-sm">
-                <div class="card-body">
-                    <div class="text-muted">Open Position PnL</div>
-                    <div class="metric-value" id="openPnl">-</div>
-                    <div class="small" id="openMeta"></div>
+        <div class="row g-3 mb-4" id="metricCards">
+            <div class="col-md-3">
+                <div class="card card-metric shadow-sm">
+                    <div class="card-body">
+                        <div class="metric-label text-muted">Open Position PnL</div>
+                        <div class="metric-value" id="openPnl">-</div>
+                        <div class="small metric-sub" id="openMeta"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card card-metric shadow-sm">
+                    <div class="card-body">
+                        <div class="metric-label text-muted">Today Realized</div>
+                        <div class="metric-value" id="todayNet">-</div>
+                        <div class="small metric-sub" id="todayGross">-</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card card-metric shadow-sm">
+                    <div class="card-body">
+                        <div class="metric-label text-muted">Today Trades</div>
+                        <div class="metric-value" id="todayTrades">-</div>
+                        <div class="small metric-sub" id="todayQuality">-</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card card-metric shadow-sm">
+                    <div class="card-body">
+                        <div class="metric-label text-muted">7D Performance</div>
+                        <div class="metric-value" id="weekNet">-</div>
+                        <div class="small metric-sub" id="weekWin">-</div>
+                    </div>
                 </div>
             </div>
         </div>
-        <div class="col-md-3">
-            <div class="card card-metric shadow-sm">
-                <div class="card-body">
-                    <div class="text-muted">Today Realized (Net / Gross / Fees)</div>
-                    <div class="metric-value" id="todayNet">-</div>
-                    <div class="small" id="todayGross">-</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card card-metric shadow-sm">
-                <div class="card-body">
-                    <div class="text-muted">Today Trades</div>
-                    <div class="metric-value" id="todayTrades">-</div>
-                    <div class="small" id="todayQuality">-</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card card-metric shadow-sm">
-                <div class="card-body">
-                    <div class="text-muted">7D Performance</div>
-                    <div class="metric-value" id="weekNet">-</div>
-                    <div class="small" id="weekWin">-</div>
-                </div>
-            </div>
-        </div>
-    </div>
 
-    <div class="card shadow-sm">
-        <div class="card-body">
-            <div class="d-flex justify-content-between align-items-center mb-2">
-                <h5 class="card-title mb-0">Trades & Decisions</h5>
-                <div class="refresh-note" id="rowCount"></div>
-            </div>
-            <div class="table-responsive" style="max-height: 70vh;">
-                <table class="table table-striped table-sm align-middle" id="feedTable">
-                    <thead>
-                        <tr>
-                            <th>Decision Time</th>
-                            <th>Entry Time</th>
-                            <th>Exit Time</th>
-                            <th>Account</th>
-                            <th>Symbol</th>
-                            <th>Signal</th>
-                            <th>Size</th>
-                            <th>Entry Px</th>
-                            <th>Exit Px</th>
-                            <th>PnL</th>
-                            <th>Entry Decision ID</th>
-                            <th>Exit Decision ID</th>
-                            <th>Entry Reason</th>
-                            <th>Exit Reason</th>
-                            <th>Screenshot</th>
-                            <th>Strategy</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
+        <div class="card shadow-sm border-0">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h5 class="card-title mb-0">Trades & Decisions</h5>
+                    <div class="refresh-note" id="rowCount"></div>
+                </div>
+                <div class="table-responsive" style="max-height: 70vh;">
+                    <table class="table table-striped table-sm align-middle" id="feedTable">
+                        <thead>
+                            <tr>
+                                <th>Decision Time</th>
+                                <th>Entry Time</th>
+                                <th>Exit Time</th>
+                                <th>Account</th>
+                                <th>Symbol</th>
+                                <th>Signal</th>
+                                <th>Size</th>
+                                <th>Entry Px</th>
+                                <th>Exit Px</th>
+                                <th>PnL</th>
+                                <th>Entry Decision ID</th>
+                                <th>Exit Decision ID</th>
+                                <th>Entry Reason</th>
+                                <th>Exit Reason</th>
+                                <th>Screenshot</th>
+                                <th>Strategy</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -149,6 +167,23 @@
             if (el) el.textContent = value;
         }
 
+        function setPnlClass(id, value) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.classList.remove('pnl-positive', 'pnl-negative', 'pnl-neutral');
+            if (value === null || value === undefined || isNaN(value)) {
+                el.classList.add('pnl-neutral');
+                return;
+            }
+            if (Number(value) > 0) {
+                el.classList.add('pnl-positive');
+            } else if (Number(value) < 0) {
+                el.classList.add('pnl-negative');
+            } else {
+                el.classList.add('pnl-neutral');
+            }
+        }
+
         function renderMetrics(payload) {
             const metrics = payload.metrics || {};
             const open = metrics.open_positions || {};
@@ -157,6 +192,7 @@
             const streak = metrics.streak;
 
             setText('openPnl', `$${formatNumber(open.unrealized_pnl)}`);
+            setPnlClass('openPnl', open.unrealized_pnl);
             const openDetails = [];
             if (open.side) openDetails.push(open.side);
             if (open.size) openDetails.push(`size ${open.size}`);
@@ -164,6 +200,7 @@
             setText('openMeta', openDetails.join(' • ') || 'No open positions');
 
             setText('todayNet', `$${formatNumber(today.net_pnl)} net`);
+            setPnlClass('todayNet', today.net_pnl);
             const gross = `$${formatNumber(today.gross_pnl)} gross / fees $${formatNumber(today.fees)}`;
             setText('todayGross', gross);
 
@@ -175,6 +212,7 @@
             setText('todayQuality', [winRate, avg, pf, streakText].filter(Boolean).join(' • '));
 
             setText('weekNet', `$${formatNumber(week.net_pnl)} net`);
+            setPnlClass('weekNet', week.net_pnl);
             const weekWin = week.win_rate === null || week.win_rate === undefined ? '-' : `${(week.win_rate * 100).toFixed(1)}% win`;
             setText('weekWin', weekWin);
         }
@@ -197,16 +235,19 @@
                     { value: row.size || '' },
                     { value: formatNumber(row.entry_price) },
                     { value: formatNumber(row.exit_price) },
-                    { value: row.pnl !== null && row.pnl !== undefined ? `$${formatNumber(row.pnl)}` : '' },
+                    { value: row.pnl !== null && row.pnl !== undefined ? `$${formatNumber(row.pnl)}` : '', kind: 'pnl' },
                     { value: row.ai_decision_id || '' },
                     { value: isFlattenExit ? (row.exit_ai_decision_id || '') : '' },
-                    { value: row.reason || '' },
-                    { value: isFlattenExit ? (row.exit_reason || '') : '' },
+                    { value: row.reason || '', kind: 'reason' },
+                    { value: isFlattenExit ? (row.exit_reason || '') : '', kind: 'reason' },
                     { value: row.screenshot || '', kind: 'link' },
                     { value: row.strategy || '' }
                 ];
                 cells.forEach(cell => {
                     const td = document.createElement('td');
+                    if (cell.kind === 'reason') {
+                        td.classList.add('reason-cell');
+                    }
                     if (cell.kind === 'link' && cell.value) {
                         const link = document.createElement('a');
                         link.className = 'btn btn-sm btn-outline-primary';
@@ -217,6 +258,12 @@
                         td.appendChild(link);
                     } else {
                         td.textContent = cell.value;
+                    }
+                    if (cell.kind === 'pnl') {
+                        const value = Number(row.pnl);
+                        td.classList.add(
+                            value > 0 ? 'pnl-positive' : value < 0 ? 'pnl-negative' : 'pnl-neutral'
+                        );
                     }
                     tr.appendChild(td);
                 });
