@@ -103,6 +103,23 @@ def _resolve_reason(record: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _resolve_exit_reason(record: Dict[str, Any]) -> Optional[str]:
+    reason = record.get("exit_reason")
+    if isinstance(reason, str) and reason.strip():
+        return reason.strip()
+    return None
+
+
+def _is_flatten_exit(record: Dict[str, Any]) -> bool:
+    exit_signal = record.get("exit_signal")
+    if isinstance(exit_signal, str) and exit_signal.strip().upper() == "FLAT":
+        return True
+    exit_trigger = record.get("exit_trigger")
+    if isinstance(exit_trigger, str) and "flatten" in exit_trigger.lower():
+        return True
+    return False
+
+
 def _resolve_screenshot(record: Dict[str, Any]) -> Optional[str]:
     screenshot_url = record.get("screenshot_url") or None
     if isinstance(screenshot_url, str) and screenshot_url.strip():
@@ -188,7 +205,8 @@ def _fetch_ai_trade_feed(
         columns = (
             "ai_decision_id,decision_time,entry_time,exit_time,account,symbol,signal,size,"
             "strategy,reason,screenshot_url,urls,total_pnl,fees_total,net_pnl,"
-            "entry_price,exit_price,decision_json,updated_at"
+            "entry_price,exit_price,decision_json,updated_at,exit_ai_decision_id,exit_reason,"
+            "exit_signal,exit_trigger"
         )
         query = sb.table("ai_trade_feed").select(columns)
         if account != "all":
@@ -232,6 +250,11 @@ def _fetch_ai_trade_feed(
             "entry_price": record.get("entry_price"),
             "exit_price": record.get("exit_price"),
             "reason": _resolve_reason(record),
+            "exit_reason": _resolve_exit_reason(record),
+            "exit_ai_decision_id": record.get("exit_ai_decision_id"),
+            "exit_signal": record.get("exit_signal"),
+            "exit_trigger": record.get("exit_trigger"),
+            "is_flatten_exit": _is_flatten_exit(record),
             "screenshot": _resolve_screenshot(record),
         }
         rows.append(resolved)
