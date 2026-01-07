@@ -111,8 +111,10 @@
                             <th>Entry Px</th>
                             <th>Exit Px</th>
                             <th>PnL</th>
-                            <th>Decision ID</th>
-                            <th>Reason</th>
+                            <th>Entry Decision ID</th>
+                            <th>Exit Decision ID (Flat)</th>
+                            <th>Entry Reason</th>
+                            <th>Exit Reason (Flat)</th>
                             <th>Screenshot</th>
                             <th>Strategy</th>
                         </tr>
@@ -184,6 +186,9 @@
             setText('rowCount', `${rows.length} rows`);
             rows.forEach(row => {
                 const tr = document.createElement('tr');
+                const exitSignal = (row.exit_signal || '').toString().toUpperCase();
+                const exitTrigger = (row.exit_trigger || '').toString().toLowerCase();
+                const isFlattenExit = exitSignal === 'FLAT' || exitTrigger.includes('flat');
                 const cells = [
                     formatDate(row.decision_time),
                     formatDate(row.entry_time),
@@ -196,7 +201,9 @@
                     formatNumber(row.exit_price),
                     row.pnl !== null && row.pnl !== undefined ? `$${formatNumber(row.pnl)}` : '',
                     row.ai_decision_id || '',
+                    isFlattenExit ? (row.exit_ai_decision_id || '') : '',
                     row.reason || '',
+                    isFlattenExit ? (row.exit_reason || '') : '',
                     row.screenshot ? `<a class="btn btn-sm btn-outline-primary" href="${row.screenshot}" target="_blank">Open</a>` : '',
                     row.strategy || ''
                 ];
