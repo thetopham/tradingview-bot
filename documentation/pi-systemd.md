@@ -148,6 +148,13 @@ sudo systemctl restart tradingview_bot.service
 sudo systemctl status tradingview_bot.service
 ```
 
+##after github updates
+```bash
+git pull
+sudo systemctl daemon-reload
+sudo systemctl restart tradingview_bot.service
+```
+
 ### Logs (systemd journal)
 ```bash
 sudo journalctl -u tradingview_bot.service -f
