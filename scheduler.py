@@ -187,20 +187,36 @@ def start_scheduler(app):
         id="chart_prefetch_job_30m",
         args=[{"30m"}],
         replace_existing=True,
-    )
+    )   
 
-    for account in ("alpha", "beta", "gamma"):
-        if account not in ACCOUNTS:
-            logging.info("[APScheduler] Skipping overseer setup for missing account %s", account)
-            continue
+    '''
+    if "alpha" in ACCOUNTS:
         scheduler.add_job(
             trigger_overseer,
             CronTrigger(minute="0,5,10,15,20,25,30,35,40,45,50,55", second=15, timezone=LOCAL_TZ),
-            id=f"overseer_job_5m_{account}",
-            args=[account, "5m"],
+            id="overseer_job_5m_alpha",
+            args=["alpha", "5m"],
             replace_existing=True,
         )
-
+        
+    if "gamma" in ACCOUNTS:
+        scheduler.add_job(
+            trigger_overseer,
+            CronTrigger(minute="0,5,10,15,20,25,30,35,40,45,50,55", second=15, timezone=LOCAL_TZ),
+            id="overseer_job_5m_alpha",
+            args=["gamma", "5m"],
+            replace_existing=True,
+        )
+      ''' 
+    if "beta" in ACCOUNTS:
+        scheduler.add_job(
+            trigger_overseer,
+            CronTrigger(minute="0,5,10,15,20,25,30,35,40,45,50,55", second=15, timezone=LOCAL_TZ),
+            id="overseer_job_5m_beta",
+            args=["beta", "5m"],
+            replace_existing=True,
+        )
+    
     if "delta" in ACCOUNTS:
         scheduler.add_job(
             trigger_overseer,
