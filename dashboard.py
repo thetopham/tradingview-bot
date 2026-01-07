@@ -103,6 +103,51 @@ def _resolve_reason(record: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _clean_text(value: Any) -> Optional[str]:
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned if cleaned else None
+    return None
+
+
+def _resolve_exit_details(record: Dict[str, Any]) -> Tuple[Optional[Any], Optional[str], Optional[str]]:
+    exit_decision_id = record.get("exit_decision_id") or record.get("flatten_decision_id")
+    exit_reason = record.get("exit_reason") or record.get("flatten_reason")
+    exit_signal = record.get("exit_signal") or record.get("flatten_signal")
+
+    decision_json = record.get("decision_json") or {}
+    if isinstance(decision_json, str):
+        decision_json = _safe_json_loads(decision_json) or {}
+
+    if isinstance(decision_json, dict):
+        exit_signal = exit_signal or decision_json.get("exit_signal") or decision_json.get("flatten_signal")
+        exit_decision_id = exit_decision_id or decision_json.get("exit_decision_id") or decision_json.get(
+            "exit_ai_decision_id"
+        )
+        exit_reason = exit_reason or decision_json.get("exit_reason") or decision_json.get("flatten_reason")
+        for key in ("exit", "flatten"):
+            exit_payload = decision_json.get(key)
+            if isinstance(exit_payload, dict):
+                exit_signal = exit_signal or exit_payload.get("signal")
+                exit_decision_id = exit_decision_id or exit_payload.get("ai_decision_id") or exit_payload.get(
+                    "decision_id"
+                ) or exit_payload.get("id")
+                exit_reason = exit_reason or exit_payload.get("reason")
+
+    exit_reason = _clean_text(exit_reason)
+    exit_signal = _clean_text(exit_signal)
+
+    is_flatten = False
+    if exit_signal:
+        is_flatten = exit_signal.upper() in {"FLAT", "FLATTEN"}
+    if exit_decision_id or exit_reason:
+        is_flatten = True
+
+    if not is_flatten:
+        return None, None, exit_signal
+    return exit_decision_id, exit_reason, exit_signal
+
+
 def _resolve_screenshot(record: Dict[str, Any]) -> Optional[str]:
     screenshot_url = record.get("screenshot_url") or None
     if isinstance(screenshot_url, str) and screenshot_url.strip():
@@ -185,12 +230,7 @@ def _fetch_ai_trade_feed(
     errors: Optional[Dict[str, str]] = None
     try:
         sb = get_supabase_client()
-        columns = (
-            "ai_decision_id,decision_time,entry_time,exit_time,account,symbol,signal,size,"
-            "strategy,reason,screenshot_url,urls,total_pnl,fees_total,net_pnl,"
-            "entry_price,exit_price,decision_json,updated_at"
-        )
-        query = sb.table("ai_trade_feed").select(columns)
+        query = sb.table("ai_trade_feed").select("*")
         if account != "all":
             query = query.eq("account", account)
 
@@ -215,6 +255,7 @@ def _fetch_ai_trade_feed(
         entry_dt = _coerce_dt(record.get("entry_time"))
         exit_dt = _coerce_dt(record.get("exit_time"))
 
+        exit_decision_id, exit_reason, exit_signal = _resolve_exit_details(record)
         resolved = {
             "ai_decision_id": record.get("ai_decision_id"),
             "decision_time": decision_dt.isoformat() if decision_dt else None,
@@ -231,7 +272,10 @@ def _fetch_ai_trade_feed(
             "fees_total": record.get("fees_total"),
             "entry_price": record.get("entry_price"),
             "exit_price": record.get("exit_price"),
-            "reason": _resolve_reason(record),
+            "entry_reason": _resolve_reason(record),
+            "exit_reason": exit_reason,
+            "exit_decision_id": exit_decision_id,
+            "exit_signal": exit_signal,
             "screenshot": _resolve_screenshot(record),
         }
         rows.append(resolved)

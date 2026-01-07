@@ -111,8 +111,10 @@
                             <th>Entry Px</th>
                             <th>Exit Px</th>
                             <th>PnL</th>
-                            <th>Decision ID</th>
-                            <th>Reason</th>
+                            <th>Entry Decision ID</th>
+                            <th>Exit Decision ID</th>
+                            <th>Entry Reason</th>
+                            <th>Exit Reason (Flatten)</th>
                             <th>Screenshot</th>
                             <th>Strategy</th>
                         </tr>
@@ -196,7 +198,9 @@
                     formatNumber(row.exit_price),
                     row.pnl !== null && row.pnl !== undefined ? `$${formatNumber(row.pnl)}` : '',
                     row.ai_decision_id || '',
-                    row.reason || '',
+                    row.exit_decision_id || '',
+                    row.entry_reason || '',
+                    row.exit_reason || '',
                     row.screenshot ? `<a class="btn btn-sm btn-outline-primary" href="${row.screenshot}" target="_blank">Open</a>` : '',
                     row.strategy || ''
                 ];
