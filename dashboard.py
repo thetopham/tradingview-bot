@@ -168,12 +168,19 @@ def _coerce_dt(raw_val: Any) -> Optional[datetime]:
 def _range_start_iso(range_key: str) -> Optional[str]:
     now_mt = datetime.now(MOUNTAIN_TZ)
     if range_key == "today":
-        start_mt = now_mt.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_mt = _trading_day_start(now_mt, MOUNTAIN_TZ)
     elif range_key == "30d":
         start_mt = now_mt - timedelta(days=30)
     else:
         start_mt = now_mt - timedelta(days=7)
     return start_mt.astimezone(timezone.utc).isoformat()
+
+
+def _trading_day_start(now_tz: datetime, tz) -> datetime:
+    start_today = now_tz.astimezone(tz).replace(hour=16, minute=0, second=0, microsecond=0)
+    if now_tz < start_today:
+        return start_today - timedelta(days=1)
+    return start_today
 
 
 def _resolve_pnl(record: Dict[str, Any]) -> Optional[float]:
@@ -305,7 +312,7 @@ def _compute_metrics(
     rows: List[Dict[str, Any]], range_key: str, tz, open_positions: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     now_tz = datetime.now(tz)
-    start_today = now_tz.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_today = _trading_day_start(now_tz, tz)
     start_7d = now_tz - timedelta(days=7)
 
     today_trades = _filter_closed_trades(rows, start_today, tz)
