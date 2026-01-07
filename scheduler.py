@@ -189,7 +189,7 @@ def start_scheduler(app):
         replace_existing=True,
     )
 
-    for account in ("alpha", "beta", "gamma"):
+    for account in ("beta"):
         if account not in ACCOUNTS:
             logging.info("[APScheduler] Skipping overseer setup for missing account %s", account)
             continue
