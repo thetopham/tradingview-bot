@@ -1,0 +1,56 @@
+//@version=6
+indicator("1-Minute Interval Alert", overlay=true)
+alertcondition(bar_index % 1 == 0, title="Trigger Every 1 Min", message="1 min alert")
+
+// Price/Volume
+o = open
+h = high
+l = low
+c = close
+v = volume
+
+// Trend
+sma20 = ta.sma(c, 20)
+sma50 = ta.sma(c, 50)
+ema8 = ta.ema(c, 8)
+ema21 = ta.ema(c, 21)
+vwap = ta.vwap
+
+// Volatility
+atr = ta.atr(14)
+[bb_upper, bb_middle, bb_lower] = ta.bb(c, 20, 2)
+
+// Momentum
+rsi = ta.rsi(c, 14)
+[macd, macd_signal, macd_hist] = ta.macd(c, 12, 26, 9)
+k = ta.stoch(close, high, low, 14)
+d = ta.sma(k, 3)  // Typical smoothing for Stoch D is 3
+
+
+// Proxies
+phobos_momentum = macd_hist
+vzo = 100 * (ta.ema(v * (c > c[1] ? 1 : c < c[1] ? -1 : 0), 14) / ta.ema(v, 14))
+atr_upper = c + atr
+atr_lower = c - atr
+
+// Plot for alert access only
+plot(sma20,           title="sma20", display=display.none         )
+plot(sma50,           title="sma50",         display=display.none)
+plot(ema8,            title="ema8",          display=display.none)
+plot(ema21,           title="ema21",         display=display.none)
+plot(vwap,            title="vwap",          display=display.none)
+plot(atr,             title="atr",           display=display.none)
+plot(bb_upper,        title="bb_upper",      display=display.none)
+plot(bb_middle,       title="bb_middle",     display=display.none)
+plot(bb_lower,        title="bb_lower",      display=display.none)
+plot(rsi,             title="rsi",           display=display.none)
+plot(macd,            title="macd",          display=display.none)
+plot(macd_signal,     title="macd_signal",   display=display.none)
+plot(macd_hist,       title="macd_hist",     display=display.none)
+plot(k,               title="stoch_k",       display=display.none)
+plot(d,               title="stoch_d",       display=display.none)
+plot(phobos_momentum, title="phobos_momentum",display=display.none)
+plot(vzo,             title="vzo",           display=display.none)
+plot(atr_upper,       title="atr_upper",     display=display.none)
+plot(atr_lower,       title="atr_lower",     display=display.none)
+
