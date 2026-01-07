@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Report {{ day }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <style>
+    body { padding: 24px; background: #f3f5f9; color: #0f172a; }
+    .page-header {
+      background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 60%, #38bdf8 100%);
+      border-radius: 16px;
+      color: #f8fafc;
+      padding: 20px 24px;
+      box-shadow: 0 18px 45px rgba(15, 23, 42, 0.2);
+      margin-bottom: 18px;
+    }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-radius: 999px;
+      background: rgba(248, 250, 252, 0.16);
+      font-size: 0.85rem;
+      color: rgba(248, 250, 252, 0.95);
+      text-decoration: none;
+    }
+    .card { border-radius: 14px; border: 1px solid rgba(15, 23, 42, 0.08); }
+    pre {
+      background: #0b1220;
+      color: #e2e8f0;
+      padding: 14px;
+      border-radius: 12px;
+      overflow: auto;
+      max-height: 60vh;
+      font-size: 0.85rem;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .small-muted { color: #64748b; font-size: 0.9rem; }
+    img.chart {
+      width: 100%;
+      border-radius: 14px;
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+    }
+  </style>
+</head>
+<body>
+  <div class="page-header">
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+      <div>
+        <h1 class="h4 mb-1">Report: {{ day }}</h1>
+        <div class="small" style="color: rgba(248,250,252,0.8);">
+          {{ summary.generated_at or "" }}
+        </div>
+      </div>
+      <div class="d-flex flex-wrap gap-2">
+        <a class="pill" href="/dashboard/reports">← All Reports</a>
+        <a class="pill" href="/dashboard">Live Feed</a>
+        {% if bundle_url %}
+          <a class="pill" href="{{ bundle_url }}">⬇ bundle.zip</a>
+        {% endif %}
+        {% if summary_url %}
+          <a class="pill" href="{{ summary_url }}">summary.json</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-lg-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <div class="h6 mb-2">Meta</div>
+          <div class="small-muted">Report TZ: {{ summary.report_tz or "-" }}</div>
+          <div class="small-muted">Session start local: {{ summary.session_start_local or "-" }}</div>
+          <div class="small-muted">Session start UTC: {{ summary.session_start_utc or "-" }}</div>
+          <hr>
+          <div class="h6 mb-2">Script Status</div>
+          {% set scripts = summary.scripts or [] %}
+          {% if not scripts %}
+            <div class="small-muted">No script status found.</div>
+          {% else %}
+            <ul class="mb-0">
+              {% for s in scripts %}
+                <li class="small">
+                  {% if s.ok %}✅{% elif s.ran %}⚠️{% else %}⏭️{% endif %}
+                  <code>{{ s.script }}</code>
+                  <span class="small-muted">(rc={{ s.rc }})</span>
+                </li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-8">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <div class="h6 mb-2">Charts</div>
+          {% if not charts %}
+            <div class="small-muted">No charts found in <code>charts/</code>.</div>
+          {% else %}
+            <div class="row g-3">
+              {% for c in charts %}
+              <div class="col-md-4">
+                <div class="small fw-semibold mb-1">{{ c.tf }}</div>
+                <a href="{{ c.url }}" target="_blank" rel="noopener">
+                  <img class="chart" src="{{ c.url }}" alt="{{ c.tf }} chart">
+                </a>
+              </div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if outputs %}
+    {% for o in outputs %}
+      <div class="card shadow-sm mb-3">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="h6 mb-0">{{ o.label }}</div>
+            <a class="btn btn-sm btn-outline-secondary"
+               href="/dashboard/reports/{{ day }}/files/{{ o.filename }}">Open raw</a>
+          </div>
+          <pre>{{ o.content }}</pre>
+        </div>
+      </div>
+    {% endfor %}
+  {% endif %}
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="h6 mb-0">daily_report.md</div>
+        <a class="btn btn-sm btn-outline-secondary"
+           href="/dashboard/reports/{{ day }}/files/daily_report.md">Open raw</a>
+      </div>
+      {% if daily_md %}
+        <pre>{{ daily_md }}</pre>
+      {% else %}
+        <div class="small-muted">No daily_report.md found.</div>
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>
