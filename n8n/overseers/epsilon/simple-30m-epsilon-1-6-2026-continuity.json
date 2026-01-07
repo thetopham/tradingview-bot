@@ -1,0 +1,1128 @@
+{
+  "name": "simple-30m-epsilon-1-6-2026-continuity",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Start here: Step-by Step Youtube Tutorial :star:\n\n[![Technical Analyst AI Agent using LLM Vision](https://img.youtube.com/vi/yjBHheCB6Ek/sddefault.jpg)](https://youtu.be/yjBHheCB6Ek)\n",
+        "height": 550,
+        "width": 507,
+        "color": 7
+      },
+      "id": "690c5aef-020d-4abc-9f52-3d6361882de3",
+      "name": "Sticky Note5",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        160,
+        -608
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "simple30m",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1088,
+        368
+      ],
+      "id": "cb652a81-0c3b-4464-a396-bf4942a24e73",
+      "name": "Webhook",
+      "webhookId": "7bdb63e6-7f1a-4ad8-bd71-accd6733ae0a"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1088,
+        544
+      ],
+      "id": "a05b0564-9b0b-41b0-8248-2c39418a2bbd",
+      "name": "When clicking ‘Test workflow’"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1088,
+        144
+      ],
+      "id": "9287bd62-0e1e-4c21-b198-b8141e54e518",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.2,
+      "position": [
+        3344,
+        368
+      ],
+      "id": "e08520a2-97ad-4b9b-bba5-59fa38b63de7",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-5-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        2192,
+        560
+      ],
+      "id": "db92ca46-47e5-4362-970b-67f52ab08fb4",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "hOvrgCZvpztkucKb",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "ai_trading_log",
+        "dataToSend": "autoMapInputData"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2800,
+        368
+      ],
+      "id": "8243c9d5-f608-4a9b-b1c7-29bfc577c014",
+      "name": "Supabase",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $input.first().json.text;\n\n// Normalize to string\nraw = String(raw ?? \"\").trim();\n\n// Strip code fences if present\nraw = raw\n  .replace(/^```json\\s*/i, \"\")\n  .replace(/^```\\s*/i, \"\")\n  .replace(/```$/i, \"\")\n  .trim();\n\n// Try parse directly; if it fails, extract first {...} JSON block\nlet obj;\ntry {\n  obj = JSON.parse(raw);\n} catch (e) {\n  const start = raw.indexOf(\"{\");\n  const end = raw.lastIndexOf(\"}\");\n  if (start >= 0 && end > start) {\n    obj = JSON.parse(raw.slice(start, end + 1));\n  } else {\n    throw e;\n  }\n}\n\n// Hardening: make reason single-line\nif (typeof obj.reason === \"string\") {\n  obj.reason = obj.reason.replace(/\\r?\\n|\\r/g, \" \").replace(/\\s+/g, \" \").trim();\n}\n\n// Optional: enforce size as integer\nif (obj.size !== undefined) {\n  obj.size = Number.parseInt(obj.size, 10);\n}\n\n// Return as a proper n8n item\nreturn [{ json: obj }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2560,
+        368
+      ],
+      "id": "ae191602-6ccb-44e5-96f8-7f32df0a613d",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-pro-preview-05-06",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        2384,
+        736
+      ],
+      "id": "1548c09d-f585-4b75-96d1-47d5df007dbb",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "F4FVFeD0uuK5mXJ7",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "object",
+        "operation": "create",
+        "bucketName": "tradingview-chart",
+        "objectName": "=charts/{{ $json.ai_decision_id }}/30m.jpg",
+        "createData": {},
+        "createQuery": {},
+        "encryptionHeaders": {},
+        "requestOptions": {}
+      },
+      "name": "Upload to GCS",
+      "type": "n8n-nodes-base.googleCloudStorage",
+      "typeVersion": 1,
+      "position": [
+        3232,
+        560
+      ],
+      "id": "9f72c6ec-4a8b-4587-a1ab-17e6050fdb62",
+      "retryOnFail": true,
+      "credentials": {
+        "googleCloudStorageOAuth2Api": {
+          "id": "kT6LnTnLCRqZwDOj",
+          "name": "Google Cloud Storage account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('set url').item.json.url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3008,
+        560
+      ],
+      "id": "3035a1f4-fdfb-401a-a4b2-4adc95af4a41",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "27b01d5c-b00a-4266-b6aa-ae9a2472d2db",
+              "name": "url",
+              "value": "=https://storage.googleapis.com/tradingview-chart/charts/{{ $('Supabase').item.json.ai_decision_id }}/30m.jpg",
+              "type": "string"
+            },
+            {
+              "id": "6d0b4721-0211-4acb-9d58-882bd7bfe0a8",
+              "name": "timeframe",
+              "value": "=30m",
+              "type": "string"
+            },
+            {
+              "id": "45c55a40-6d76-4234-9217-b249ec4d4656",
+              "name": "id",
+              "value": "={{ $('Supabase').item.json.ai_decision_id }}",
+              "type": "number"
+            },
+            {
+              "id": "b5c9f6f5-0d42-4303-9716-9c88bf061b12",
+              "name": "chart_time",
+              "value": "={{ $now }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3472,
+        560
+      ],
+      "id": "07c57cce-c301-4d46-aff4-7f74a105ba53",
+      "name": "Edit Fields2"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "ai_trading_log",
+        "filterType": "string",
+        "filterString": "=ai_decision_id=eq.{{ $json.id }}",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "urls",
+              "fieldValue": "={{ $json.url }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        3712,
+        560
+      ],
+      "id": "f363a28a-e0fa-4509-85a4-600495384447",
+      "name": "Supabase1",
+      "retryOnFail": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the trading overseer for MES (30-minute loop).\n\nYou ONLY decide:\n1) signal: BUY | SELL | HOLD | FLAT\n2) reason: plain English, no fluff\n3) size: 1 | 2 | 3\n4) next check message to future self\n\nDefinitions:\n- BUY/SELL = enter or reverse position\n- HOLD = no action\n- FLAT = flatten current position (exit)\n\nRe-occuring process:\n- This process runs every 30 minutes.\n- Your decision should assume you will be asked again in ~30 minutes.\n- If uncertain, prefer HOLD and reassess next run.\n- If you include a “future self” note, keep it short and relevant for the next_check.\n- next_check must be ≤120 characters (one sentence).\n- next_check should describe what to look for next process, not a summary.\n\nCHART LEGEND (30m):\n- EMA 9 (Close) = BLUE\n- EMA 21 (Close) = YELLOW\n- VWAP (Session) = RED\n- MACD (12,26,9) = histogram + lines in MACD pane\n- ATR (14, RMA) = red line in ATR pane\n\nRisk/Bracket (informational):\nSL = -$30 \nTP = +$60 \n(Topstep changes point distance with size; risk stays ~$30) Use larger size only if tighter sl/tp fits current volatility/structure.\nSize meaning: choose bracket tightness (TP/SL distance), not leverage.\n\nBracket distances by size (SOURCE OF TRUTH = datafeed snapshot fields):\n- See: brackets (points + $) and bracket_summary in the JSON below.\n- You MUST choose size based on these exact distances. Do not invent SL/TP.\n\nDATAFEED + DERIVED (5m numeric, source of truth):\n{{ JSON.stringify($('5m derived snapshot').item.json, null, 2) }}\n\n\nCURRENT POSITION (source of truth):\nhas_position={{ $('Webhook').item.json.body.position_context.current_position.has_position }}\nside={{ $('Webhook').item.json.body.position_context.current_position.side || 'none' }}\ncontracts={{ $('Webhook').item.json.body.position_context.current_position.size }}\nunrealized_pnl=${{ $('Webhook').item.json.body.position_context.current_position.unrealized_pnl }}\nduration_mins={{ $('Webhook').item.json.body.position_context.current_position.duration_minutes }}\nwarnings={{ JSON.stringify($('Webhook').item.json.body.position_context.warnings || []) }}\n\n\nACCOUNT METRICS\naccount_balance={{ $('Webhook').item.json.body.position_context.account_metrics.account_balance }}\naccount_peak={{ $('Webhook').item.json.body.position_context.topstep.equity_peak_usd }}\ndrawdown_used={{ $('Webhook').item.json.body.position_context.topstep.trailing_dd_used_usd }}\ndrawdown_remaining={{ $('Webhook').item.json.body.position_context.topstep.trailing_dd_remaining_usd }}\ndaily_pnl={{ $('Webhook').item.json.body.position_context.account_metrics.daily_pnl }}\nwin_rate={{ $('Webhook').item.json.body.position_context.account_metrics.win_rate }}\nconsecutive_losses={{ $('Webhook').item.json.body.position_context.account_metrics.consecutive_losses }}\n\nACCOUNT RULES: Start $50k. If account_balance < $48k => failed. If account_balance > $50k, a $2k trailing stop applies (fail if drawdown_remaining <= $0). If drawdown_remaining is low, be selective about entries).\n\nCONTINUITY (last closed trade):\nminutes_since_last_close={{ $('Continuity Context').item.json.minutes_since_last_close || 'null' }}\nlast_trade_outcome={{ $('Continuity Context').item.json.last_trade_outcome || 'none' }}\nlast_trade_pnl={{ $('Continuity Context').item.json.last_trade_pnl || 'null' }}\nlast_trade_signal={{ $('Continuity Context').item.json.last_trade_signal || 'none' }}\n\nmomentum_improved_long={{ $('5m derived snapshot').item.json.momentum_improved_long }}\nmomentum_improved_short={{ $('5m derived snapshot').item.json.momentum_improved_short }}\n\nContinuity rule (LOSS cooldown):\nIf last_trade_outcome=LOSS and minutes_since_last_close < 60:\n- if last_trade_signal=BUY then do not BUY unless momentum_improved_long=true\n- if last_trade_signal=SELL then do not SELL unless momentum_improved_short=true\nIf the continuity rule blocks repeating the direction, choose HOLD unless the opposite side is clearly supported.\n\nIf previous_next_check is non-empty, briefly state whether it is now satisfied; then proceed with the new decision. Do not copy it forward unless it still applies.\nIf signal is HOLD and you’re already in a position, next_check should focus on exit/flatten triggers (not entries).\nprevious_next_check={{ $('Edit Fields3').item.json.next_check || '' }}\n\nReason format (required):\n- reason: current thesis + current position/account data (NO invalidation here)\n- invalidation: one sentence describing what would make this wrong by next run \n- next_check: optional, ≤120 chars, one sentence\nIf previous_next_check is non-empty, respond with \"Prev check: satisfied/unsatisfied\"\n\n\nRETURN ONLY THIS JSON:\n{\n  \"timestamp\":\"{{ $now }}\",\n  \"strategy\":\"simple\",\n  \"timeframe\":\"30m\",\n  \"signal\":\"HOLD\",\n  \"symbol\":\"CON.F.US.MES.H26\",\n  \"account\":\"{{ $('Webhook').item.json.body.account }}\",\n  \"size\": 1,\n  \"reason\":\"\",\n  \"invalidation\":\"\",\n  \"next_check\":\"\",\n  \"urls\":\"{{ $('set url').item.json.url }}\",\n  \"prompt_version\":\"simple-30m-epsilon-1-6-2026-continuity\"\n}\n\n",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "messageType": "imageBinary"
+            }
+          ]
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [
+        2192,
+        368
+      ],
+      "id": "5d159646-d31d-4164-818f-39311d2a62ab",
+      "name": "Basic LLM Chain",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-opus-4-20250514",
+          "mode": "list",
+          "cachedResultName": "Claude Opus 4"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        2176,
+        736
+      ],
+      "id": "a10cc85f-465b-4d0b-9f9e-0699a2cdc698",
+      "name": "Anthropic Chat Model",
+      "credentials": {
+        "anthropicApi": {
+          "id": "SYGdKwRCUXN1yoB4",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "ai_trading_log",
+        "limit": 1,
+        "filterType": "string",
+        "filterString": "=account=eq.{{ $json.body.account }}&order=ai_decision_id.desc&limit=1"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -800,
+        368
+      ],
+      "id": "b6f6bcb8-f091-49b2-8384-d7c81c440205",
+      "name": "Get many rows",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a91f16c2-6718-4c9a-b64e-14605fbf446a",
+              "name": "ai_decision_id",
+              "value": "={{ $json.ai_decision_id }}",
+              "type": "number"
+            },
+            {
+              "id": "27962e82-7e85-47ec-8768-7d9e9ad684fa",
+              "name": "signal",
+              "value": "={{ $json.signal }}",
+              "type": "string"
+            },
+            {
+              "id": "89685755-83de-4be6-9fbc-6e6a2f4aac88",
+              "name": "reason",
+              "value": "={{ $json.reason }}",
+              "type": "string"
+            },
+            {
+              "id": "111a91a0-86b9-4d6c-8386-2d29b295e6a5",
+              "name": "timestamp",
+              "value": "={{ $json.timestamp }}",
+              "type": "string"
+            },
+            {
+              "id": "02222c54-6f7f-4fe9-a384-5396a4c90d2d",
+              "name": "next_check",
+              "value": "={{ $json.next_check }}",
+              "type": "string"
+            },
+            {
+              "id": "5e6fd031-196d-4b15-8fa3-82bc50ebf52a",
+              "name": "invalidation",
+              "value": "={{ $json.invalidation }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -592,
+        368
+      ],
+      "id": "c308275a-f8cc-47dc-968a-21eaefd0e5ac",
+      "name": "Edit Fields3"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Expect the most recent CLOSED 30m bar (align to 30-minute boundary)\nconst now = new Date();\nconst ms = now.getTime();\nconst thirtyMin = 30 * 60 * 1000;\n\n// use the previous completed bar close time\nconst expected = new Date(Math.floor(ms / thirtyMin) * thirtyMin);\n\nreturn [{ json: { expected_ts: expected.toISOString() } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -304,
+        368
+      ],
+      "id": "f84e713b-0e34-47ef-ac3c-1246c90371c6",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 5m derived snapshot (n8n Code node)\n// Expects input shaped like: { data: [ ...rows... ] } where rows are from tv_datafeed (limit=5)\n\nconst rows = ($input.first().json.data || []).filter(Boolean);\nif (!rows.length) return [{ json: { error: \"No tv_datafeed rows\" } }];\n\n// Supabase returns ts DESC (newest first). Normalize to ASC for slope/momentum.\nrows.sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts));\n\nconst N = rows.length;\nconst first = rows[0];\nconst last = rows[N - 1];\nconst prev = rows[Math.max(N - 2, 0)];\n\nconst num = (x) => (x === null || x === undefined ? null : Number(x));\nconst r = (x) =>\n  (x === null || x === undefined || Number.isNaN(Number(x)))\n    ? null\n    : Math.round(Number(x) * 100) / 100;\n\n// Latest bar core values\nconst c = num(last.c);\nconst vwap = num(last.vwap);\nconst ema9 = num(last.ema9);\nconst ema21 = num(last.ema21);\nconst atr = num(last.atr);\n\nconst macd_last = num(last.macd_hist);\nconst macd_prev = num(prev.macd_hist);\nconst macd_first = num(first.macd_hist);\n\n// Deltas vs value / structure\nconst c_minus_vwap_pts = (c != null && vwap != null) ? (c - vwap) : null;\nconst c_minus_ema21_pts = (c != null && ema21 != null) ? (c - ema21) : null;\n\n// Slopes over N bars (oldest -> newest)\nconst first_c = num(first.c);\nconst last_c = num(last.c);\nconst first_ema9 = num(first.ema9);\nconst last_ema9 = num(last.ema9);\nconst first_ema21 = num(first.ema21);\nconst last_ema21 = num(last.ema21);\n\nconst c_slope_n = (last_c != null && first_c != null) ? (last_c - first_c) : null;\nconst ema9_slope_n = (last_ema9 != null && first_ema9 != null) ? (last_ema9 - first_ema9) : null;\nconst ema21_slope_n = (last_ema21 != null && first_ema21 != null) ? (last_ema21 - first_ema21) : null;\n\n// MACD deltas\nconst macd_delta_1 = (macd_last != null && macd_prev != null) ? (macd_last - macd_prev) : null;\nconst macd_delta_n = (macd_last != null && macd_first != null) ? (macd_last - macd_first) : null;\n\n// Rounded deltas for stable boolean logic\nconst macd_delta_1_r = r(macd_delta_1);\nconst macd_delta_n_r = r(macd_delta_n);\n\n// Flags\nconst macd_falling = (macd_delta_1_r != null) ? (macd_delta_1_r < 0) : null;\nconst macd_below_zero = (macd_last != null) ? (macd_last < 0) : null;\nconst ema_bearish = (ema9 != null && ema21 != null) ? (ema9 < ema21) : null;\n\n// Simple trend strength score (-3..+3)\nconst trend_score = Number(\n  (ema9 != null && ema21 != null ? Math.sign(ema9 - ema21) : 0) +\n  (ema9_slope_n != null ? Math.sign(ema9_slope_n) : 0) +\n  (macd_delta_n_r != null ? Math.sign(macd_delta_n_r) : 0)\n);\n\n// Direction-aware “momentum improved” booleans\nconst momentum_improved_long =\n  (macd_delta_1_r != null && macd_delta_1_r > 0) &&\n  (trend_score >= 2) &&\n  (ema_bearish === false);\n\nconst momentum_improved_short =\n  (macd_delta_1_r != null && macd_delta_1_r < 0) &&\n  (trend_score <= -2) &&\n  (ema_bearish === true);\n\n// Optional extra context (cheap + useful)\nconst ema_spread = (ema9 != null && ema21 != null) ? (ema9 - ema21) : null;\n\n// Brackets (points + $) — TP $60, SL $30, sized by contract count\nconst POINT_VALUE_USD = 5;\nconst brackets = {\n  1: { sl_pts: 6, tp_pts: 12 },\n  2: { sl_pts: 3, tp_pts: 6 },\n  3: { sl_pts: 2, tp_pts: 4 },\n};\n\nfor (const k of Object.keys(brackets)) {\n  const size = Number(k);\n  brackets[size].sl_usd = brackets[size].sl_pts * POINT_VALUE_USD * size;\n  brackets[size].tp_usd = brackets[size].tp_pts * POINT_VALUE_USD * size;\n}\n\n// ATR multiples\nconst atr_ok = (atr != null && atr > 0);\nconst tp_to_atr_size1 = atr_ok ? (brackets[1].tp_pts / atr) : null;\nconst sl_to_atr_size1 = atr_ok ? (brackets[1].sl_pts / atr) : null;\nconst tp_to_atr_size2 = atr_ok ? (brackets[2].tp_pts / atr) : null;\nconst sl_to_atr_size2 = atr_ok ? (brackets[2].sl_pts / atr) : null;\nconst tp_to_atr_size3 = atr_ok ? (brackets[3].tp_pts / atr) : null;\nconst sl_to_atr_size3 = atr_ok ? (brackets[3].sl_pts / atr) : null;\n\n// 5-bar series (transparent context; oldest->newest)\nconst series_n = rows.map(x => ({\n  ts: x.ts ?? null,\n  o: num(x.o),\n  h: num(x.h),\n  l: num(x.l),\n  c: num(x.c),\n  v: num(x.v),\n  ema9: num(x.ema9),\n  ema21: num(x.ema21),\n  vwap: num(x.vwap),\n  atr: num(x.atr),\n  macd_hist: num(x.macd_hist),\n}));\n\nreturn [{\n  json: {\n    // latest bar fields\n    ts: last.ts,\n    c,\n    ema9,\n    ema21,\n    vwap,\n    atr,\n    macd_hist: macd_last,\n\n    // continuity helpers\n    momentum_improved_long,\n    momentum_improved_short,\n\n    // short history\n    series_n,\n    series_len: N,\n\n    // slopes / deltas / flags\n    c_slope_n: r(c_slope_n),\n    ema9_slope_n: r(ema9_slope_n),\n    ema21_slope_n: r(ema21_slope_n),\n\n    macd_delta_1: macd_delta_1_r,\n    macd_delta_n: macd_delta_n_r,\n    macd_falling,\n    macd_below_zero,\n\n    ema_bearish,\n    trend_score,\n    ema_spread: r(ema_spread),\n\n    c_minus_vwap_pts: r(c_minus_vwap_pts),\n    c_minus_ema21_pts: r(c_minus_ema21_pts),\n\n    // ATR multiples\n    tp_to_atr_size1: r(tp_to_atr_size1),\n    sl_to_atr_size1: r(sl_to_atr_size1),\n    tp_to_atr_size2: r(tp_to_atr_size2),\n    sl_to_atr_size2: r(sl_to_atr_size2),\n    tp_to_atr_size3: r(tp_to_atr_size3),\n    sl_to_atr_size3: r(sl_to_atr_size3),\n\n    // bracket metadata\n    point_value_usd: POINT_VALUE_USD,\n    brackets,\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        368
+      ],
+      "id": "9f69f8e5-5bd8-4723-a873-115036d35880",
+      "name": "5m derived snapshot"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7d733105-b0e5-4590-ba13-b908adce16f5",
+              "name": "ai_decision_id",
+              "value": "={{ $json.ai_decision_id }}",
+              "type": "number"
+            },
+            {
+              "id": "3e67b373-ce51-4c87-8289-696bf7fb3967",
+              "name": "strategy",
+              "value": "={{ $json.strategy }}",
+              "type": "string"
+            },
+            {
+              "id": "4dde2ce1-3ee9-4aea-a062-05f7f4c0cbc4",
+              "name": "signal",
+              "value": "={{ $json.signal }}",
+              "type": "string"
+            },
+            {
+              "id": "ccfff928-1534-4361-9503-869da76ddb84",
+              "name": "symbol",
+              "value": "={{ $json.symbol }}",
+              "type": "string"
+            },
+            {
+              "id": "dab5ee6a-35c8-43b2-833c-cc9dc6abc9e1",
+              "name": "account",
+              "value": "={{ $json.account }}",
+              "type": "string"
+            },
+            {
+              "id": "442178dc-509b-438c-96cd-83b5b7de5070",
+              "name": "size",
+              "value": "={{ $json.size }}",
+              "type": "string"
+            },
+            {
+              "id": "03ac8761-f64a-4b19-a875-a23712f08924",
+              "name": "reason",
+              "value": "={{ $json.reason }}",
+              "type": "string"
+            },
+            {
+              "id": "708379d8-d8ad-4fcc-8ce6-8d5047af084d",
+              "name": "prompt_version",
+              "value": "={{ $json.prompt_version }}",
+              "type": "string"
+            },
+            {
+              "id": "df320b9d-4eb1-47bc-8a1e-720bfc323d04",
+              "name": "next_check",
+              "value": "={{ $json.next_check }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3088,
+        368
+      ],
+      "id": "b371c849-f8c6-4012-85ad-5d1d983f9691",
+      "name": "Build Response"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "04a3fd08-7396-47d6-830d-da9165fa0bc0",
+              "leftValue": "={{ (new Date().getTime() - new Date($json[\"updated_at\"]).getTime()) / 60000 }}",
+              "rightValue": 28.8,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1088,
+        368
+      ],
+      "id": "3898881c-209f-4da9-91d2-9ce48644fc09",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "charts",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "timeframe",
+              "keyValue": "30m"
+            },
+            {
+              "keyName": "symbol",
+              "keyValue": "MES"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        912,
+        368
+      ],
+      "id": "4620a851-f3b8-487f-aab8-87ea57b23baa",
+      "name": "Supabase3",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "694cc668-54e1-4b18-94e7-51a381764295",
+              "name": "url",
+              "value": "={{ $json.chart_url }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "includeBinary": true
+        }
+      },
+      "id": "f9661589-b752-400e-b957-095cb26962a3",
+      "name": "set url",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1984,
+        368
+      ],
+      "typeVersion": 3.3
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        128,
+        368
+      ],
+      "id": "2a69230b-57a8-412f-bee5-f8c4a0714495",
+      "name": "Aggregate1"
+    },
+    {
+      "parameters": {
+        "url": "https://nlwcoonenivfxxmcvhmi.supabase.co/rest/v1/ai_trade_feed",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "account",
+              "value": "=eq.{{ $('Webhook').item.json.body.account }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            },
+            {
+              "name": "order",
+              "value": "exit_time.desc"
+            },
+            {
+              "name": "select",
+              "value": "exit_time,net_pnl,signal,size,ai_decision_id"
+            },
+            {
+              "name": "exit_time",
+              "value": "not.is.null"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        528,
+        368
+      ],
+      "id": "fc656fae-85f5-4ced-8d04-1a2926f97594",
+      "name": "HTTP Request5",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const nowMs = Date.now();\nconst row = $input.first().json || null;\n\nconst parseTs = (t) => {\n  const ms = t ? Date.parse(t) : NaN;\n  return Number.isFinite(ms) ? ms : null;\n};\n\nconst exit_time = row?.exit_time ?? null;\nconst exitMs = parseTs(exit_time);\n\nconst minutes_since_last_close =\n  exitMs == null ? null : Math.round(((nowMs - exitMs) / 60000) * 10) / 10;\n\nconst pnlNum = row?.net_pnl == null ? null : Number(row.net_pnl);\n\nlet last_trade_outcome = null; // WIN | LOSS | BE | null\nif (pnlNum != null && Number.isFinite(pnlNum)) {\n  last_trade_outcome = pnlNum > 0 ? \"WIN\" : (pnlNum < 0 ? \"LOSS\" : \"BE\");\n}\n\nreturn [{\n  json: {\n    minutes_since_last_close,\n    last_trade_outcome,\n    last_trade_pnl: pnlNum,\n    last_trade_signal: row?.signal ?? null,\n    last_trade_size: row?.size ?? null,\n    last_trade_ai_decision_id: row?.ai_decision_id ?? null,\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        368
+      ],
+      "id": "607e2c15-39e8-4dc9-82f1-731955ef0542",
+      "name": "Continuity Context"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "tv_datafeed_30m",
+        "limit": 5,
+        "filterType": "string",
+        "filterString": "=symbol=eq.MES&order=ts.desc&limit=5"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        368
+      ],
+      "id": "1e18d0d8-55bd-42c0-b4cb-238a13c6f862",
+      "name": "Get datafeed_5m",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Supabase3').item.json.chart_url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1520,
+        304
+      ],
+      "id": "59399e56-ec79-4765-a7f1-9f2c2e1f676c",
+      "name": "HTTP Request2"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "charts",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "symbol",
+              "condition": "eq",
+              "keyValue": "MES"
+            },
+            {
+              "keyName": "timeframe",
+              "condition": "eq",
+              "keyValue": "30m"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "chart_url",
+              "fieldValue": "={{ $json.url }}"
+            },
+            {
+              "fieldId": "updated_at",
+              "fieldValue": "={{ $now }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        480
+      ],
+      "id": "7678f084-f1a2-45f7-a88d-c69a760ab9a3",
+      "name": "Supabase4",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.chart_url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        480
+      ],
+      "id": "13a0b806-0632-424a-8f4b-0522d005a156",
+      "name": "HTTP Request3"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.chart-img.com/v2/tradingview/layout-chart/storage/xxGKgfiq",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "tradingview-session-id",
+              "value": "xpy37kx3hnmae3v1s5ef6x7daimwi9j8"
+            },
+            {
+              "name": "tradingview-session-id-sign",
+              "value": "v3:ACiGDw6hGbRCPE1XPmC3F8Ui41D7L6BSb/zqECFveFE="
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "format",
+              "value": "jpeg"
+            },
+            {
+              "name": "interval",
+              "value": "30m"
+            },
+            {
+              "name": "width",
+              "value": "1920"
+            },
+            {
+              "name": "height",
+              "value": "1080"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "91f0904d-37bf-449a-be90-f40383db485d",
+      "name": "Tradingview Chart1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1344,
+        480
+      ],
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ZleHrixI7F5TA8Yb",
+          "name": "chart-img"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get many rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Test workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get many rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Get many rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to GCS": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Upload to GCS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields2": {
+      "main": [
+        [
+          {
+            "node": "Supabase1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many rows": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields3": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Get datafeed_5m",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5m derived snapshot": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tradingview Chart1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase3": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "set url": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate1": {
+      "main": [
+        [
+          {
+            "node": "5m derived snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request5": {
+      "main": [
+        [
+          {
+            "node": "Continuity Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continuity Context": {
+      "main": [
+        [
+          {
+            "node": "Supabase3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get datafeed_5m": {
+      "main": [
+        [
+          {
+            "node": "Aggregate1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase4": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tradingview Chart1": {
+      "main": [
+        [
+          {
+            "node": "Supabase4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "set url",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request3": {
+      "main": [
+        [
+          {
+            "node": "set url",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "OpjLMCnGpfwKeXLW"
+  },
+  "versionId": "fba61cb6-5bd5-40c5-8599-33fa6ababec5",
+  "meta": {
+    "templateId": "2569",
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9783a33f8d5600da0ff08d35d1dc9051c104e0a37fceb74a2ffe1557dcda02bc"
+  },
+  "id": "fNd6C2AqGbFvGRED",
+  "tags": []
+}
