@@ -42,6 +42,16 @@
             z-index: 1;
             box-shadow: inset 0 -1px 0 var(--card-border);
         }
+        .account-metrics-table thead th {
+            position: sticky;
+            top: 0;
+            background: #ffffff;
+            z-index: 2;
+            box-shadow: inset 0 -1px 0 var(--card-border);
+        }
+        .account-metrics-table td, .account-metrics-table th { white-space: nowrap; }
+        .account-metrics-table .account-label { font-weight: 600; }
+        .account-metrics-table .metric-subtext { color: #64748b; font-size: 0.8rem; }
         .refresh-note { font-size: 0.9rem; color: #6c757d; }
         .filter-card { border: 1px solid var(--card-border); }
         .filter-bar .form-select, .filter-bar .form-check-input { max-width: 220px; }
@@ -104,6 +114,36 @@
                 <div class="col-md-3 d-flex align-items-end">
                     <button id="refreshBtn" class="btn btn-primary w-100 btn-refresh">Refresh feed</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 class="card-title mb-0">Account Performance Snapshot</h5>
+                <div class="refresh-note">Glanceable metrics per account</div>
+            </div>
+            <div class="table-responsive" style="max-height: 32vh;">
+                <table class="table table-sm table-striped align-middle account-metrics-table" id="accountMetricsTable">
+                    <thead>
+                        <tr>
+                            <th>Account</th>
+                            <th>Open PnL</th>
+                            <th>Open Details</th>
+                            <th>Today Net</th>
+                            <th>Today Gross</th>
+                            <th>Fees</th>
+                            <th>Trades</th>
+                            <th>Win Rate</th>
+                            <th>Avg Trade</th>
+                            <th>Profit Factor</th>
+                            <th>7D Net</th>
+                            <th>7D Win</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -254,6 +294,70 @@
             setText('weekWin', weekWin);
         }
 
+        function renderAccountMetrics(payload) {
+            const tbody = document.querySelector('#accountMetricsTable tbody');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            const accountMetrics = payload.account_metrics || [];
+            accountMetrics.forEach(item => {
+                const metrics = item.metrics || {};
+                const open = metrics.open_positions || {};
+                const today = metrics.today || {};
+                const week = metrics.seven_day || {};
+                const tr = document.createElement('tr');
+
+                const openDetails = [];
+                if (open.side) openDetails.push(open.side);
+                if (open.size) openDetails.push(`size ${open.size}`);
+                if (open.duration_minutes) openDetails.push(`${formatNumber(open.duration_minutes, 1)} min`);
+
+                const winRate = today.win_rate === null || today.win_rate === undefined
+                    ? '-'
+                    : `${(today.win_rate * 100).toFixed(1)}%`;
+                const avgTrade = today.avg_trade === null || today.avg_trade === undefined
+                    ? '-'
+                    : `$${formatNumber(today.avg_trade)}`;
+                const pf = today.profit_factor === null || today.profit_factor === undefined
+                    ? '-'
+                    : formatNumber(today.profit_factor, 2);
+                const weekWin = week.win_rate === null || week.win_rate === undefined
+                    ? '-'
+                    : `${(week.win_rate * 100).toFixed(1)}%`;
+
+                const cells = [
+                    { value: item.account || '' },
+                    { value: `$${formatNumber(open.unrealized_pnl)}`, kind: 'pnl', raw: open.unrealized_pnl },
+                    { value: openDetails.join(' • ') || 'No open positions', kind: 'subtext' },
+                    { value: `$${formatNumber(today.net_pnl)}`, kind: 'pnl', raw: today.net_pnl },
+                    { value: `$${formatNumber(today.gross_pnl)}` },
+                    { value: `$${formatNumber(today.fees)}` },
+                    { value: today.trade_count || 0 },
+                    { value: winRate },
+                    { value: avgTrade },
+                    { value: pf },
+                    { value: `$${formatNumber(week.net_pnl)}`, kind: 'pnl', raw: week.net_pnl },
+                    { value: weekWin }
+                ];
+
+                cells.forEach((cell, index) => {
+                    const td = document.createElement('td');
+                    td.textContent = cell.value;
+                    if (index === 0) {
+                        td.classList.add('account-label');
+                    }
+                    if (cell.kind === 'pnl') {
+                        setPnlClass(td, cell.raw);
+                    }
+                    if (cell.kind === 'subtext') {
+                        td.classList.add('metric-subtext');
+                    }
+                    tr.appendChild(td);
+                });
+
+                tbody.appendChild(tr);
+            });
+        }
+
         function renderTable(payload) {
             const tbody = document.querySelector('#feedTable tbody');
             tbody.innerHTML = '';
@@ -317,6 +421,7 @@
         function render(payload) {
             if (!payload) return;
             renderMetrics(payload);
+            renderAccountMetrics(payload);
             renderTable(payload);
             setText('lastUpdated', `Last updated ${formatDate(payload.updated_at)}`);
         }

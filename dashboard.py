@@ -438,12 +438,35 @@ def _dashboard_payload(account: str, range_key: str, include_open: bool) -> Dict
     rows, fetch_error = _fetch_ai_trade_feed(account=account, range_key=range_key, include_open=include_open)
     open_positions, open_totals = _fetch_open_positions_snapshot(account=account)
     metrics = _compute_metrics(rows, range_key, MOUNTAIN_TZ, open_positions=open_positions)
+    if account == "all":
+        all_rows = rows
+        all_open_positions = open_positions
+    else:
+        all_rows, _ = _fetch_ai_trade_feed(account="all", range_key=range_key, include_open=include_open)
+        all_open_positions, _ = _fetch_open_positions_snapshot(account="all")
+
+    account_metrics: List[Dict[str, Any]] = []
+    for acct_name in ["all", *ACCOUNTS.keys()]:
+        acct_rows = all_rows if acct_name == "all" else [row for row in all_rows if row.get("account") == acct_name]
+        acct_open_positions = (
+            all_open_positions
+            if acct_name == "all"
+            else [pos for pos in all_open_positions if pos.get("account") == acct_name]
+        )
+        acct_metrics = _compute_metrics(acct_rows, range_key, MOUNTAIN_TZ, open_positions=acct_open_positions)
+        account_metrics.append(
+            {
+                "account": "All" if acct_name == "all" else acct_name,
+                "metrics": acct_metrics,
+            }
+        )
 
     payload: Dict[str, Any] = {
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "metrics": metrics,
         "open_positions": open_positions,
         "open_totals": open_totals,
+        "account_metrics": account_metrics,
         "rows": rows,
     }
     if fetch_error:
