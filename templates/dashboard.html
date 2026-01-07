@@ -6,105 +6,49 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
     <style>
-        :root {
-            --dashboard-bg: #f3f5f9;
-            --card-border: rgba(15, 23, 42, 0.08);
-            --positive: #0f766e;
-            --negative: #b42318;
-            --neutral: #334155;
-        }
-        body { padding: 24px; background: var(--dashboard-bg); color: #0f172a; }
-        .page-header {
-            background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 60%, #38bdf8 100%);
-            border-radius: 16px;
-            color: #f8fafc;
-            padding: 20px 24px;
-            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.2);
-        }
-        .header-title { font-weight: 700; letter-spacing: 0.2px; }
-        .header-meta { font-size: 0.9rem; color: rgba(248, 250, 252, 0.8); }
-        .pill {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 6px 12px;
-            border-radius: 999px;
-            background: rgba(248, 250, 252, 0.16);
-            font-size: 0.85rem;
-        }
-        .card-metric { min-height: 120px; border: 1px solid var(--card-border); }
-        .metric-value { font-size: 1.6rem; font-weight: 700; }
-        .metric-subtle { color: #64748b; font-size: 0.9rem; }
-        .table thead th {
-            position: sticky;
-            top: 0;
-            background: #f8fafc;
-            z-index: 1;
-            box-shadow: inset 0 -1px 0 var(--card-border);
-        }
+        body { padding: 20px; background-color: #f8f9fa; }
+        .card-metric { min-height: 120px; }
+        .metric-value { font-size: 1.5rem; font-weight: 700; }
+        .table thead th { position: sticky; top: 0; background: #fff; z-index: 1; }
         .refresh-note { font-size: 0.9rem; color: #6c757d; }
-        .filter-card { border: 1px solid var(--card-border); }
-        .filter-bar .form-select, .filter-bar .form-check-input { max-width: 220px; }
-        .pnl-positive { color: var(--positive); }
-        .pnl-negative { color: var(--negative); }
-        .pnl-neutral { color: var(--neutral); }
-        .badge-soft {
-            background: rgba(15, 23, 42, 0.06);
-            color: #1e293b;
-            border: 1px solid rgba(15, 23, 42, 0.08);
-            font-weight: 600;
-        }
-        .table tbody tr:hover { background: rgba(59, 130, 246, 0.08); }
-        .reason-cell { min-width: 320px; }
-        .badge-signal { font-weight: 600; }
-        .btn-refresh { font-weight: 600; letter-spacing: 0.2px; }
+        .filter-bar .form-select, .filter-bar .form-check-input { max-width: 200px; }
     </style>
 </head>
 <body>
-    <div class="page-header mb-4">
-        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
-            <div>
-                <h1 class="h3 mb-1 header-title">AI Trade Feed</h1>
-                <div class="header-meta" id="lastUpdated"></div>
-            </div>
-            <div class="d-flex flex-wrap gap-2">
-                <div class="pill">⏱ Auto-refresh every 15s</div>
-                <div class="pill" id="rangePill">📅 Range: Today</div>
-                <div class="pill" id="accountPill">👤 Account: All</div>
-            </div>
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <div>
+            <h1 class="h3 mb-0">AI Trade Feed</h1>
+            <div class="refresh-note" id="lastUpdated"></div>
         </div>
+        <div class="refresh-note">Auto-refreshes every 15s</div>
     </div>
 
-    <div class="card shadow-sm filter-card mb-4">
-        <div class="card-body">
-            <div class="row g-3 filter-bar">
-                <div class="col-md-3">
-                    <label class="form-label">Account</label>
-                    <select id="accountFilter" class="form-select">
-                        <option value="all" {% if default_account == 'all' %}selected{% endif %}>All</option>
-                        {% for acct in accounts %}
-                        <option value="{{ acct }}" {% if acct == default_account %}selected{% endif %}>{{ acct }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">Range</label>
-                    <select id="rangeFilter" class="form-select">
-                        <option value="today" {% if default_range == 'today' %}selected{% endif %}>Today</option>
-                        <option value="7d" {% if default_range == '7d' %}selected{% endif %}>Last 7d</option>
-                        <option value="30d" {% if default_range == '30d' %}selected{% endif %}>Last 30d</option>
-                    </select>
-                </div>
-                <div class="col-md-3 d-flex align-items-end">
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" id="includeOpen" {% if default_include_open %}checked{% endif %}>
-                        <label class="form-check-label" for="includeOpen">Include open positions</label>
-                    </div>
-                </div>
-                <div class="col-md-3 d-flex align-items-end">
-                    <button id="refreshBtn" class="btn btn-primary w-100 btn-refresh">Refresh feed</button>
-                </div>
+    <div class="row g-3 mb-3 filter-bar">
+        <div class="col-md-3">
+            <label class="form-label">Account</label>
+            <select id="accountFilter" class="form-select">
+                <option value="all" {% if default_account == 'all' %}selected{% endif %}>All</option>
+                {% for acct in accounts %}
+                <option value="{{ acct }}" {% if acct == default_account %}selected{% endif %}>{{ acct }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Range</label>
+            <select id="rangeFilter" class="form-select">
+                <option value="today" {% if default_range == 'today' %}selected{% endif %}>Today</option>
+                <option value="7d" {% if default_range == '7d' %}selected{% endif %}>Last 7d</option>
+                <option value="30d" {% if default_range == '30d' %}selected{% endif %}>Last 30d</option>
+            </select>
+        </div>
+        <div class="col-md-3 d-flex align-items-end">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="includeOpen" {% if default_include_open %}checked{% endif %}>
+                <label class="form-check-label" for="includeOpen">Include open positions</label>
             </div>
+        </div>
+        <div class="col-md-3 d-flex align-items-end">
+            <button id="refreshBtn" class="btn btn-primary w-100">Refresh</button>
         </div>
     </div>
 
@@ -114,7 +58,7 @@
                 <div class="card-body">
                     <div class="text-muted">Open Position PnL</div>
                     <div class="metric-value" id="openPnl">-</div>
-                    <div class="small metric-subtle" id="openMeta"></div>
+                    <div class="small" id="openMeta"></div>
                 </div>
             </div>
         </div>
@@ -123,7 +67,7 @@
                 <div class="card-body">
                     <div class="text-muted">Today Realized (Net / Gross / Fees)</div>
                     <div class="metric-value" id="todayNet">-</div>
-                    <div class="small metric-subtle" id="todayGross">-</div>
+                    <div class="small" id="todayGross">-</div>
                 </div>
             </div>
         </div>
@@ -132,7 +76,7 @@
                 <div class="card-body">
                     <div class="text-muted">Today Trades</div>
                     <div class="metric-value" id="todayTrades">-</div>
-                    <div class="small metric-subtle" id="todayQuality">-</div>
+                    <div class="small" id="todayQuality">-</div>
                 </div>
             </div>
         </div>
@@ -141,7 +85,7 @@
                 <div class="card-body">
                     <div class="text-muted">7D Performance</div>
                     <div class="metric-value" id="weekNet">-</div>
-                    <div class="small metric-subtle" id="weekWin">-</div>
+                    <div class="small" id="weekWin">-</div>
                 </div>
             </div>
         </div>
@@ -205,22 +149,6 @@
             if (el) el.textContent = value;
         }
 
-        function setPnlClass(el, value) {
-            if (!el) return;
-            el.classList.remove('pnl-positive', 'pnl-negative', 'pnl-neutral');
-            if (value === null || value === undefined || isNaN(value)) {
-                el.classList.add('pnl-neutral');
-                return;
-            }
-            if (Number(value) > 0) {
-                el.classList.add('pnl-positive');
-            } else if (Number(value) < 0) {
-                el.classList.add('pnl-negative');
-            } else {
-                el.classList.add('pnl-neutral');
-            }
-        }
-
         function renderMetrics(payload) {
             const metrics = payload.metrics || {};
             const open = metrics.open_positions || {};
@@ -229,7 +157,6 @@
             const streak = metrics.streak;
 
             setText('openPnl', `$${formatNumber(open.unrealized_pnl)}`);
-            setPnlClass(document.getElementById('openPnl'), open.unrealized_pnl);
             const openDetails = [];
             if (open.side) openDetails.push(open.side);
             if (open.size) openDetails.push(`size ${open.size}`);
@@ -237,7 +164,6 @@
             setText('openMeta', openDetails.join(' • ') || 'No open positions');
 
             setText('todayNet', `$${formatNumber(today.net_pnl)} net`);
-            setPnlClass(document.getElementById('todayNet'), today.net_pnl);
             const gross = `$${formatNumber(today.gross_pnl)} gross / fees $${formatNumber(today.fees)}`;
             setText('todayGross', gross);
 
@@ -249,7 +175,6 @@
             setText('todayQuality', [winRate, avg, pf, streakText].filter(Boolean).join(' • '));
 
             setText('weekNet', `$${formatNumber(week.net_pnl)} net`);
-            setPnlClass(document.getElementById('weekNet'), week.net_pnl);
             const weekWin = week.win_rate === null || week.win_rate === undefined ? '-' : `${(week.win_rate * 100).toFixed(1)}% win`;
             setText('weekWin', weekWin);
         }
@@ -259,10 +184,6 @@
             tbody.innerHTML = '';
             const rows = payload.rows || [];
             setText('rowCount', `${rows.length} rows`);
-            const rangeLabel = document.querySelector('#rangeFilter option:checked')?.textContent || '';
-            const accountLabel = document.querySelector('#accountFilter option:checked')?.textContent || '';
-            setText('rangePill', `📅 Range: ${rangeLabel}`);
-            setText('accountPill', `👤 Account: ${accountLabel}`);
             rows.forEach(row => {
                 const tr = document.createElement('tr');
                 const isFlattenExit = row.is_flatten_exit || false;
@@ -276,13 +197,13 @@
                     { value: row.size || '' },
                     { value: formatNumber(row.entry_price) },
                     { value: formatNumber(row.exit_price) },
-                    { value: row.pnl !== null && row.pnl !== undefined ? `$${formatNumber(row.pnl)}` : '', kind: 'pnl', raw: row.pnl },
+                    { value: row.pnl !== null && row.pnl !== undefined ? `$${formatNumber(row.pnl)}` : '' },
                     { value: row.ai_decision_id || '' },
                     { value: isFlattenExit ? (row.exit_ai_decision_id || '') : '' },
-                    { value: row.reason || '', kind: 'reason' },
-                    { value: isFlattenExit ? (row.exit_reason || '') : '', kind: 'reason' },
+                    { value: row.reason || '' },
+                    { value: isFlattenExit ? (row.exit_reason || '') : '' },
                     { value: row.screenshot || '', kind: 'link' },
-                    { value: row.strategy || '', kind: 'badge' }
+                    { value: row.strategy || '' }
                 ];
                 cells.forEach(cell => {
                     const td = document.createElement('td');
@@ -294,17 +215,6 @@
                         link.rel = 'noopener noreferrer';
                         link.textContent = 'Open';
                         td.appendChild(link);
-                    } else if (cell.kind === 'badge' && cell.value) {
-                        const badge = document.createElement('span');
-                        badge.className = 'badge badge-soft';
-                        badge.textContent = cell.value;
-                        td.appendChild(badge);
-                    } else if (cell.kind === 'pnl') {
-                        td.textContent = cell.value;
-                        setPnlClass(td, cell.raw);
-                    } else if (cell.kind === 'reason') {
-                        td.textContent = cell.value;
-                        td.classList.add('reason-cell');
                     } else {
                         td.textContent = cell.value;
                     }
