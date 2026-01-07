@@ -4,6 +4,16 @@
 
 This is written as a **build-from-zero reference**, not marketing copy.
 
+## Documentation index (authoritative)
+
+This file is the **canonical entry point** for documentation. Link here from other docs
+to avoid duplication.
+
+- **Setup**: [Accounts & Market Access](#2-accounts--market-access), [Infrastructure](#4-infrastructure), [Environment Variables](#16-environment-variables)
+- **Architecture**: [System Overview](#1-system-overview), [Core Components](#5-core-components), [Chart Image Pipeline](#5-3-chart-image-pipeline)
+- **Operations**: [Scheduler](#13-scheduler-apscheduler), [Dashboard](#14-dashboard), [Logging & Observability](#15-logging--observability)
+- **TradingView alert configs**: [`documentation/tradingview/`](tradingview/)
+
 ---
 
 ## 1. System Overview
@@ -360,4 +370,3 @@ Its real value is the **dataset it produces**.
 ---
 
 *End of documentation*
-
