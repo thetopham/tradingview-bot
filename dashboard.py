@@ -507,3 +507,175 @@ def dashboard_data():
     include_open = request.args.get("include_open", "true").lower() != "false"
     payload = _dashboard_payload(account, range_key, include_open)
     return jsonify(payload)
+
+# ─── Daily Reports Dashboard ────────────────────────────────────────────────
+
+REPORTS_DAILY_DIR = (Path(__file__).resolve().parent / "reports" / "daily").resolve()
+
+
+def _safe_day_dir(day: str) -> Path:
+    """
+    Prevent path traversal. Only allow directories directly under reports/daily.
+    """
+    if not day or "/" in day or "\\" in day or ".." in day:
+        abort(400, "Invalid day")
+    day_dir = (REPORTS_DAILY_DIR / day).resolve()
+    if REPORTS_DAILY_DIR not in day_dir.parents:
+        abort(400, "Invalid day")
+    if not day_dir.exists() or not day_dir.is_dir():
+        abort(404, "Report day not found")
+    return day_dir
+
+
+def _list_report_days() -> List[Dict[str, Any]]:
+    """
+    Returns newest-first list of report day folders with lightweight metadata.
+    """
+    days: List[Dict[str, Any]] = []
+    if not REPORTS_DAILY_DIR.exists():
+        return days
+
+    for d in sorted([p for p in REPORTS_DAILY_DIR.iterdir() if p.is_dir()], reverse=True):
+        summary_path = d / "summary.json"
+        daily_md_path = d / "daily_report.md"
+        bundle_path = d / "bundle.zip"
+
+        summary = {}
+        if summary_path.exists():
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            except Exception:
+                summary = {}
+
+        scripts = summary.get("scripts") or []
+        ok_count = sum(1 for s in scripts if s.get("ok"))
+        ran_count = sum(1 for s in scripts if s.get("ran"))
+
+        days.append(
+            {
+                "day": d.name,
+                "generated_at": summary.get("generated_at"),
+                "session_start_local": summary.get("session_start_local"),
+                "session_start_utc": summary.get("session_start_utc"),
+                "report_tz": summary.get("report_tz"),
+                "script_ok_count": ok_count,
+                "script_ran_count": ran_count,
+                "bundle_exists": bundle_path.exists(),
+                "daily_md_exists": daily_md_path.exists(),
+                "has_charts": (d / "charts").exists(),
+            }
+        )
+
+    return days
+
+
+def _read_text_file(path: Path, max_chars: int = 80_000) -> str:
+    """
+    Read a text file safely, truncate to avoid giant pages.
+    """
+    try:
+        txt = path.read_text(encoding="utf-8", errors="replace")
+        if len(txt) > max_chars:
+            return txt[:max_chars] + "\n\n…(truncated)…\n"
+        return txt
+    except Exception as exc:
+        return f"(unable to read {path.name}: {exc})"
+
+
+@dashboard_bp.route(f"{dashboard_path}/reports")
+def dashboard_reports():
+    """
+    List page of daily reports.
+    """
+    days = _list_report_days()
+    selected = request.args.get("day") or (days[0]["day"] if days else None)
+    return render_template(
+        "reports.html",
+        days=days,
+        selected_day=selected,
+    )
+
+
+@dashboard_bp.route(f"{dashboard_path}/reports/<day>")
+def dashboard_report_detail(day: str):
+    """
+    Detail page for a single report day.
+    """
+    day_dir = _safe_day_dir(day)
+
+    summary_path = day_dir / "summary.json"
+    daily_md_path = day_dir / "daily_report.md"
+
+    summary = {}
+    if summary_path.exists():
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except Exception:
+            summary = {"error": "Failed to parse summary.json"}
+
+    # Load common outputs if they exist
+    files_to_show = [
+        ("session_report.txt", "Session Report"),
+        ("tod_analysis.txt", "Time-of-Day Analysis"),
+        ("performance_attribution.txt", "Performance Attribution"),
+        ("equity_drawdown_report.txt", "Equity / Drawdown"),
+        ("data_quality_report.txt", "Data Quality"),
+    ]
+    outputs = []
+    for fname, label in files_to_show:
+        p = day_dir / fname
+        if p.exists():
+            outputs.append(
+                {
+                    "filename": fname,
+                    "label": label,
+                    "content": _read_text_file(p),
+                }
+            )
+
+    daily_md = _read_text_file(daily_md_path) if daily_md_path.exists() else None
+
+    # chart filenames (served via /dashboard/reports/<day>/files/...)
+    charts = []
+    chart_dir = day_dir / "charts"
+    for tf in ("5m", "15m", "30m"):
+        img = chart_dir / f"{tf}.jpg"
+        if img.exists():
+            charts.append(
+                {
+                    "tf": tf,
+                    "url": f"{dashboard_path}/reports/{day}/files/charts/{tf}.jpg",
+                }
+            )
+
+    return render_template(
+        "report_detail.html",
+        day=day,
+        summary=summary,
+        outputs=outputs,
+        daily_md=daily_md,
+        charts=charts,
+        bundle_url=f"{dashboard_path}/reports/{day}/files/bundle.zip" if (day_dir / "bundle.zip").exists() else None,
+        summary_url=f"{dashboard_path}/reports/{day}/files/summary.json" if (day_dir / "summary.json").exists() else None,
+    )
+
+
+@dashboard_bp.route(f"{dashboard_path}/reports/<day>/files/<path:filename>")
+def dashboard_report_file(day: str, filename: str):
+    """
+    Serve files from a report day directory safely (bundle.zip, summary.json, charts/*.jpg, *.txt, *.md).
+    """
+    day_dir = _safe_day_dir(day)
+
+    # Basic allowlist to reduce risk of serving secrets:
+    allowed_ext = (".zip", ".json", ".txt", ".md", ".jpg", ".jpeg", ".png")
+    if not any(filename.lower().endswith(ext) for ext in allowed_ext):
+        abort(403, "File type not allowed")
+
+    # Prevent traversal inside the day dir
+    if ".." in filename or filename.startswith("/") or filename.startswith("\\"):
+        abort(400, "Invalid filename")
+
+    # send_from_directory handles safe joining internally for Flask, but we still validated above
+    return send_from_directory(day_dir, filename, as_attachment=filename.endswith(".zip"))
+
