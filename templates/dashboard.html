@@ -188,26 +188,36 @@
                 const tr = document.createElement('tr');
                 const isFlattenExit = row.is_flatten_exit || false;
                 const cells = [
-                    formatDate(row.decision_time),
-                    formatDate(row.entry_time),
-                    formatDate(row.exit_time),
-                    row.account || '',
-                    row.symbol || '',
-                    row.signal || '',
-                    row.size || '',
-                    formatNumber(row.entry_price),
-                    formatNumber(row.exit_price),
-                    row.pnl !== null && row.pnl !== undefined ? `$${formatNumber(row.pnl)}` : '',
-                    row.ai_decision_id || '',
-                    isFlattenExit ? (row.exit_ai_decision_id || '') : '',
-                    row.reason || '',
-                    isFlattenExit ? (row.exit_reason || '') : '',
-                    row.screenshot ? `<a class="btn btn-sm btn-outline-primary" href="${row.screenshot}" target="_blank">Open</a>` : '',
-                    row.strategy || ''
+                    { value: formatDate(row.decision_time) },
+                    { value: formatDate(row.entry_time) },
+                    { value: formatDate(row.exit_time) },
+                    { value: row.account || '' },
+                    { value: row.symbol || '' },
+                    { value: row.signal || '' },
+                    { value: row.size || '' },
+                    { value: formatNumber(row.entry_price) },
+                    { value: formatNumber(row.exit_price) },
+                    { value: row.pnl !== null && row.pnl !== undefined ? `$${formatNumber(row.pnl)}` : '' },
+                    { value: row.ai_decision_id || '' },
+                    { value: isFlattenExit ? (row.exit_ai_decision_id || '') : '' },
+                    { value: row.reason || '' },
+                    { value: isFlattenExit ? (row.exit_reason || '') : '' },
+                    { value: row.screenshot || '', kind: 'link' },
+                    { value: row.strategy || '' }
                 ];
-                cells.forEach(html => {
+                cells.forEach(cell => {
                     const td = document.createElement('td');
-                    td.innerHTML = html;
+                    if (cell.kind === 'link' && cell.value) {
+                        const link = document.createElement('a');
+                        link.className = 'btn btn-sm btn-outline-primary';
+                        link.href = cell.value;
+                        link.target = '_blank';
+                        link.rel = 'noopener noreferrer';
+                        link.textContent = 'Open';
+                        td.appendChild(link);
+                    } else {
+                        td.textContent = cell.value;
+                    }
                     tr.appendChild(td);
                 });
                 tbody.appendChild(tr);
