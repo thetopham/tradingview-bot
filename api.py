@@ -1038,6 +1038,11 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         "trace_id": trace_id,
         "session_id": meta.get("session_id"),
         "prompt_version": meta.get("prompt_version"),
+        "exit_ai_decision_id": meta.get("exit_ai_decision_id"),
+        "exit_reason": meta.get("exit_reason"),
+        "exit_signal": meta.get("exit_signal"),
+        "exit_trigger": meta.get("exit_trigger"),
+        "exit_requested_at": meta.get("exit_requested_at"),
     }
 
     # ---------------------------------------------------------------------
@@ -1088,6 +1093,11 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
                 "order_id": payload["order_id"],
                 "comment": payload["comment"],
                 "prompt_version": payload.get("prompt_version"),
+                "exit_ai_decision_id": payload.get("exit_ai_decision_id"),
+                "exit_reason": payload.get("exit_reason"),
+                "exit_signal": payload.get("exit_signal"),
+                "exit_trigger": payload.get("exit_trigger"),
+                "exit_requested_at": payload.get("exit_requested_at"),
             }
             if payload.get("ai_decision_id") is not None and existing.get("ai_decision_id") in (None, ""):
                 updates["ai_decision_id"] = payload["ai_decision_id"]

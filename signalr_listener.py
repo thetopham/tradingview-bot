@@ -129,6 +129,66 @@ def _build_trace_id(entry_time, ai_decision_id, order_id=None, session_id=None):
     return f"{base}-{suffix}-{ts}"
 
 
+def annotate_trade_exit_intent(
+    acct_id,
+    cid,
+    *,
+    exit_ai_decision_id=None,
+    exit_reason=None,
+    exit_signal="FLAT",
+    exit_trigger="ai_flatten",
+    exit_requested_at=None,
+):
+    key = _tm_key(acct_id, cid)
+    meta = trade_meta.get(key)
+
+    if meta is None:
+        import uuid
+
+        account_name = "unknown"
+        for name, acct in ACCOUNTS.items():
+            if acct == acct_id:
+                account_name = name
+                break
+
+        session_id = str(uuid.uuid4())[:8]
+        entry_time = exit_requested_at or time.time()
+        meta = {
+            "entry_time": entry_time,
+            "ai_decision_id": None,
+            "strategy": "unknown",
+            "signal": "UNKNOWN",
+            "size": 0,
+            "order_id": None,
+            "sl_id": None,
+            "tp_ids": None,
+            "alert": "Exit intent recorded without metadata",
+            "account": account_name,
+            "symbol": cid,
+            "trades": None,
+            "regime": "unknown",
+            "comment": "Exit intent captured without prior metadata",
+            "session_id": session_id,
+        }
+        trade_meta[key] = meta
+
+    meta["exit_ai_decision_id"] = exit_ai_decision_id
+    meta["exit_reason"] = exit_reason
+    meta["exit_signal"] = exit_signal
+    meta["exit_trigger"] = exit_trigger
+    meta["exit_requested_at"] = exit_requested_at or _now_iso()
+
+    if not meta.get("trace_id"):
+        meta["trace_id"] = _build_trace_id(
+            meta.get("entry_time"),
+            meta.get("ai_decision_id"),
+            order_id=meta.get("order_id"),
+            session_id=meta.get("session_id"),
+        )
+
+    _save_trade_state(force=True)
+
+
 def track_trade(
     acct_id,
     cid,

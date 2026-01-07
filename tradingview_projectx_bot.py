@@ -16,7 +16,7 @@ from position_manager import PositionManager
 from strategies import run_simple
 from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token, auth_lock
-from signalr_listener import launch_signalr_listener
+from signalr_listener import launch_signalr_listener, annotate_trade_exit_intent
 from dashboard import dashboard_bp
 from threading import Thread
 from datetime import datetime
@@ -82,6 +82,13 @@ def handle_webhook_logic(data):
 
         # Manual flatten (close all) signal
         if sig == "FLAT":
+            annotate_trade_exit_intent(
+                acct_id,
+                cid,
+                exit_trigger="manual_flatten_webhook",
+                exit_reason=data.get("reason"),
+                exit_ai_decision_id=data.get("ai_decision_id"),
+            )
             flatten_contract(acct_id, cid, timeout=10)
             logging.info(f"Manual flatten signal processed for {acct_id} {cid}")
             return
@@ -149,6 +156,13 @@ def handle_webhook_logic(data):
                 ai_sym = ai_decision.get("symbol", sym)
                 ai_cid = get_contract(ai_sym)
                 logging.info(f"AI signaled FLAT: {ai_decision.get('reason', 'No reason')}")
+                annotate_trade_exit_intent(
+                    acct_id,
+                    ai_cid,
+                    exit_trigger="ai_flatten",
+                    exit_reason=ai_decision.get("reason"),
+                    exit_ai_decision_id=ai_decision.get("ai_decision_id"),
+                )
                 logging.info(f"AI flatten signal processed for {acct_id} {ai_cid}")
                 flatten_contract(acct_id, ai_cid, timeout=10)
                 return
