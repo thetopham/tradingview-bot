@@ -125,6 +125,7 @@ Type=notify
 ExecStart=/usr/bin/cloudflared --no-autoupdate --config /etc/cloudflared/config.yml tunnel run
 Restart=on-failure
 RestartSec=5s
+StartLimitIntervalSec=0
 
 [Install]
 WantedBy=multi-user.target
