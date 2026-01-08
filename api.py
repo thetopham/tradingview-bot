@@ -50,7 +50,7 @@ def _timeframe_filters(max_minutes: int = 1) -> List[str]:
 
 def _infer_timeframe(alert: Optional[str]) -> str:
     if alert:
-        match = re.search(r"(\\d+)\\s*m", alert, re.IGNORECASE)
+        match = re.search(r"(\d+)\s*m", alert, re.IGNORECASE)
         if match:
             minutes = match.group(1)
             return f"{minutes}m"

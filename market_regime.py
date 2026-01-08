@@ -255,7 +255,28 @@ def get_market_state(
 ) -> Dict[str, Any]:
     settings = _get_settings()
     timeframe = timeframe or settings.default_timeframe
-    table = settings.table_map.get(timeframe, settings.table_map[settings.default_timeframe])
+    table = settings.table_map.get(timeframe)
+    if table is None:
+        default_table = settings.table_map.get(settings.default_timeframe)
+        if default_table is None:
+            default_key = next(iter(settings.table_map), None)
+            if default_key is None:
+                raise RuntimeError("Market regime tables are not configured")
+            logging.warning(
+                "Market regime: default timeframe %s not in table map; using %s",
+                settings.default_timeframe,
+                default_key,
+            )
+            timeframe = default_key
+            table = settings.table_map[default_key]
+        else:
+            logging.warning(
+                "Market regime: timeframe %s not in table map; falling back to %s",
+                timeframe,
+                settings.default_timeframe,
+            )
+            timeframe = settings.default_timeframe
+            table = default_table
     symbol = _normalize_symbol(symbol)
     now = now or datetime.now(timezone.utc)
 
