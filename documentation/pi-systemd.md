@@ -46,6 +46,7 @@ Environment=LOG_LEVEL=INFO
 ExecStart=/home/thetopham/tradingview-bot/venv/bin/python3 /home/thetopham/tradingview-bot/tradingview_projectx_bot.py
 Restart=always
 RestartSec=5s
+StartLimitIntervalSec=0
 Type=simple
 StandardOutput=journal
 StandardError=inherit
