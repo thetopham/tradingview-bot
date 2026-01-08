@@ -4,7 +4,6 @@ import logging
 import json
 import time
 from typing import Dict, List, Optional, Tuple
-
 from datetime import datetime, timezone
 from auth import ensure_token, get_token, in_get_flat, session
 from config import load_config
@@ -28,6 +27,9 @@ _PRICE_CACHE: Dict[str, Optional[Tuple[float, str]]] = {
 }
 _SUPABASE_CLIENT = None
 
+def reset_supabase_client():
+    global _SUPABASE_CLIENT
+    _SUPABASE_CLIENT = None
 
 def _timeframe_filters(max_minutes: int = 1) -> List[str]:
     """Return timeframes up to the requested minute window (defaults to 1m)."""
