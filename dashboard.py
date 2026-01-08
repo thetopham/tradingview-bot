@@ -10,7 +10,7 @@ except Exception:
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from dateutil import parser
-from api import get_contract, get_supabase_client
+from api import get_contract, get_supabase_client, search_accounts
 from config import load_config
 from position_manager import PositionManager
 from flask import Blueprint, Response, jsonify, render_template, request, send_from_directory, abort
@@ -483,11 +483,37 @@ def _fetch_open_positions_snapshot(account: str = "all") -> Tuple[List[Dict[str,
     return open_positions, {"total_unrealized_pnl": total_unrealized}
 
 
+def _fetch_account_balances() -> Tuple[Dict[str, Optional[float]], Optional[str]]:
+    balances: Dict[str, Optional[float]] = {}
+    try:
+        records = search_accounts(only_active_accounts=True)
+    except Exception as exc:
+        logger.warning("Failed to fetch account balances: %s", exc)
+        return balances, str(exc)
+
+    by_id = {record.get("id"): record for record in records if record.get("id") is not None}
+    by_name = {record.get("name"): record for record in records if record.get("name")}
+
+    for acct_name, acct_id in ACCOUNTS.items():
+        record = by_id.get(acct_id) or by_name.get(acct_name)
+        if record is None:
+            balances[acct_name] = None
+            continue
+        try:
+            balance = record.get("balance")
+            balances[acct_name] = float(balance) if balance is not None else None
+        except Exception:
+            balances[acct_name] = None
+    return balances, None
+
+
 # ─── Payload Builders ────────────────────────────────────────────────────────
 
 def _dashboard_payload(account: str, range_key: str, include_open: bool) -> Dict[str, Any]:
     all_rows, fetch_error = _fetch_ai_trade_feed(account="all", range_key=range_key, include_open=include_open)
     all_open_positions, all_open_totals = _fetch_open_positions_snapshot(account="all")
+    account_balances, balance_error = _fetch_account_balances()
+    total_balance = sum(balance or 0 for balance in account_balances.values()) if account_balances else None
     rows = all_rows if account == "all" else [row for row in all_rows if row.get("account") == account]
     open_positions = (
         all_open_positions
@@ -523,10 +549,19 @@ def _dashboard_payload(account: str, range_key: str, include_open: bool) -> Dict
         "open_positions": open_positions,
         "open_totals": open_totals,
         "account_metrics": account_metrics,
+        "account_balances": account_balances,
+        "account_balance_total": total_balance,
         "rows": rows,
     }
     if fetch_error:
         payload["errors"] = fetch_error
+    if balance_error:
+        if "errors" not in payload or payload["errors"] is None:
+            payload["errors"] = {"balance": balance_error}
+        elif isinstance(payload["errors"], dict):
+            payload["errors"]["balance"] = balance_error
+        else:
+            payload["errors"] = {"fetch": str(payload["errors"]), "balance": balance_error}
     return payload
 
 

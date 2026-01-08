@@ -130,6 +130,7 @@
                     <thead>
                         <tr>
                             <th>Account</th>
+                            <th>Balance</th>
                             <th>Open PnL</th>
                             <th>Open Details</th>
                             <th>Today Net</th>
@@ -300,12 +301,15 @@
             if (!tbody) return;
             tbody.innerHTML = '';
             const accountMetrics = payload.account_metrics || [];
+            const balances = payload.account_balances || {};
+            const totalBalance = payload.account_balance_total;
             accountMetrics.forEach(item => {
                 const metrics = item.metrics || {};
                 const open = metrics.open_positions || {};
                 const today = metrics.today || {};
                 const week = metrics.seven_day || {};
                 const tr = document.createElement('tr');
+                const balanceValue = item.account === 'All' ? totalBalance : balances[item.account];
 
                 const openDetails = [];
                 if (open.side) openDetails.push(open.side);
@@ -327,6 +331,7 @@
 
                 const cells = [
                     { value: item.account || '' },
+                    { value: balanceValue === null || balanceValue === undefined ? '-' : `$${formatNumber(balanceValue)}` },
                     { value: `$${formatNumber(open.unrealized_pnl)}`, kind: 'pnl', raw: open.unrealized_pnl },
                     { value: openDetails.join(' • ') || 'No open positions', kind: 'subtext' },
                     { value: `$${formatNumber(today.net_pnl)}`, kind: 'pnl', raw: today.net_pnl },
