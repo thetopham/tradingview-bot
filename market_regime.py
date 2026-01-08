@@ -11,7 +11,10 @@ from supabase import create_client
 
 @dataclass
 class RegimeSettings:
+    # NOTE: state_path is now a *format string*.
+    # Example: "./market_state_{symbol}_{timeframe}.json"
     state_path: str
+
     refresh_seconds: int
     trend_lookback: int
     vol_lookback: int
@@ -31,7 +34,11 @@ _SUPABASE_CLIENT = None
 
 
 def _get_settings() -> RegimeSettings:
-    state_path = os.getenv("MARKET_STATE_PATH", "./market_state.json")
+    # IMPORTANT: include {symbol} and {timeframe} so multiple timeframes don't overwrite each other's state.
+    # If you set MARKET_STATE_PATH yourself, set it like:
+    #   MARKET_STATE_PATH=./market_state_{symbol}_{timeframe}.json
+    state_path = os.getenv("MARKET_STATE_PATH", "./market_state_{symbol}_{timeframe}.json")
+
     refresh_seconds = int(os.getenv("REGIME_REFRESH_SECONDS", "20"))
     trend_lookback = int(os.getenv("REGIME_TREND_LOOKBACK", "30"))
     vol_lookback = int(os.getenv("REGIME_VOL_LOOKBACK", "120"))
@@ -84,6 +91,28 @@ def _normalize_symbol(symbol: Optional[str]) -> str:
     return symbol
 
 
+def _format_state_path(state_path_fmt: str, symbol: str, timeframe: str) -> str:
+    """
+    Resolve a per-(symbol,timeframe) state path. If the env var doesn't include placeholders,
+    we fallback to a safe derived filename so timeframes don't overwrite each other.
+    """
+    try:
+        rendered = state_path_fmt.format(symbol=symbol, timeframe=timeframe)
+        # If the user passed a template without placeholders, format() returns same string.
+        # Detect that and auto-suffix to avoid collisions.
+        if rendered == state_path_fmt and ("{symbol}" not in state_path_fmt and "{timeframe}" not in state_path_fmt):
+            base, ext = os.path.splitext(state_path_fmt)
+            ext = ext or ".json"
+            rendered = f"{base}_{symbol}_{timeframe}{ext}"
+        return rendered
+    except Exception:
+        # Very defensive: if format string is invalid, fall back to a safe default.
+        base, ext = os.path.splitext(state_path_fmt)
+        ext = ext or ".json"
+        base = base or "./market_state"
+        return f"{base}_{symbol}_{timeframe}{ext}"
+
+
 def _load_state(path: str) -> Optional[Dict[str, Any]]:
     if not os.path.exists(path):
         return None
@@ -91,7 +120,7 @@ def _load_state(path: str) -> Optional[Dict[str, Any]]:
         with open(path, "r", encoding="utf-8") as handle:
             return json.load(handle)
     except Exception as exc:
-        logging.warning("Failed to read market regime state: %s", exc)
+        logging.warning("Failed to read market regime state (%s): %s", path, exc)
         return None
 
 
@@ -118,8 +147,7 @@ def _fetch_bars(table: str, symbol: str, limit: int) -> List[Dict[str, Any]]:
     """
     supabase = _get_supabase_client()
     result = (
-        supabase
-        .table(table)
+        supabase.table(table)
         .select("ts,o,h,l,c,atr")
         .eq("symbol", symbol)
         .order("ts", desc=True)
@@ -132,7 +160,7 @@ def _fetch_bars(table: str, symbol: str, limit: int) -> List[Dict[str, Any]]:
 def _compute_efficiency_ratio(closes: List[float], lookback: int) -> Optional[float]:
     if len(closes) < lookback + 1:
         return None
-    recent = closes[-(lookback + 1):]
+    recent = closes[-(lookback + 1) :]
     change = abs(recent[-1] - recent[0])
     volatility = sum(abs(recent[i] - recent[i - 1]) for i in range(1, len(recent)))
     if volatility == 0:
@@ -151,12 +179,7 @@ def _compute_atr_ratio(atrs: List[float], lookback: int) -> Optional[float]:
     return current_atr / median_atr
 
 
-def _true_range(
-    prev_close: float,
-    high: Optional[float],
-    low: Optional[float],
-    close: float,
-) -> float:
+def _true_range(prev_close: float, high: Optional[float], low: Optional[float], close: float) -> float:
     # If we have high/low, use real TR. Otherwise, fallback to close-to-close move.
     if high is None or low is None:
         return abs(close - prev_close)
@@ -212,6 +235,7 @@ def _detect_regime(
             "phase": "normal",
             "trade_allowed": True,
             "risk_mode": "selective",
+            "digestion_left": int(prev_state.get("digestion_left") or 0) if prev_state else 0,
         }
 
     er_fast = _compute_efficiency_ratio(closes, lookback_fast)
@@ -240,7 +264,7 @@ def _detect_regime(
     # Phase: detect impulse via TR spike vs ATR, then hold "digestion" for N bars
     phase = "normal"
     impulse_detected = False
-    # compute last bar TR if possible
+
     if len(ohlc) >= 2:
         prev_close = float(ohlc[-2]["c"])
         last = ohlc[-1]
@@ -250,16 +274,12 @@ def _detect_regime(
             low=(float(last["l"]) if last.get("l") is not None else None),
             close=float(last["c"]),
         )
-        atr_now = float(ohlc[-1]["atr"]) if ohlc[-1].get("atr") is not None else atrs[-1]
+        atr_now = float(last["atr"]) if last.get("atr") is not None else atrs[-1]
         if atr_now and tr_last >= impulse_tr_mult * atr_now:
             impulse_detected = True
             phase = "impulse"
 
-    # If we didn't detect impulse this bar, we may still be in digestion window
-    digestion_left = 0
-    if prev_state:
-        digestion_left = int(prev_state.get("digestion_left") or 0)
-
+    digestion_left = int(prev_state.get("digestion_left") or 0) if prev_state else 0
     if impulse_detected:
         digestion_left = digestion_bars
     else:
@@ -384,12 +404,19 @@ def get_market_state(
     symbol = _normalize_symbol(symbol)
     now = now or datetime.now(timezone.utc)
 
-    state = _load_state(settings.state_path)
+    # ✅ PER-TIMEFRAME PERSISTENCE
+    path = _format_state_path(settings.state_path, symbol=symbol, timeframe=timeframe)
+
+    state = _load_state(path)
     if state:
         last_updated = state.get("last_updated")
+        # We no longer discard on timeframe mismatch because the path is per-timeframe.
+        # Still sanity-check symbol/timeframe if present.
         last_timeframe = state.get("timeframe")
         last_symbol = state.get("symbol")
-        if last_timeframe != timeframe or last_symbol != symbol:
+        if last_timeframe and last_timeframe != timeframe:
+            state = None
+        elif last_symbol and last_symbol != symbol:
             state = None
         elif last_updated:
             try:
@@ -419,6 +446,7 @@ def get_market_state(
             "confidence": 0.0,
             "metrics": {},
             "phase": "normal",
+            "digestion_left": int(state.get("digestion_left") or 0) if state else 0,
             "trade_allowed": True,
             "risk_mode": "selective",
         }
@@ -444,6 +472,7 @@ def get_market_state(
             "confidence": 0.0,
             "metrics": {},
             "phase": "normal",
+            "digestion_left": int(state.get("digestion_left") or 0) if state else 0,
             "trade_allowed": True,
             "risk_mode": "selective",
         }
@@ -469,7 +498,7 @@ def get_market_state(
         symbol=symbol,
         confirmations=settings.confirmations,
     )
-    _write_state(settings.state_path, updated_state)
+    _write_state(path, updated_state)
     return updated_state
 
 
