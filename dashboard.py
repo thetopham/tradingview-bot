@@ -513,7 +513,11 @@ def _dashboard_payload(account: str, range_key: str, include_open: bool) -> Dict
     all_rows, fetch_error = _fetch_ai_trade_feed(account="all", range_key=range_key, include_open=include_open)
     all_open_positions, all_open_totals = _fetch_open_positions_snapshot(account="all")
     account_balances, balance_error = _fetch_account_balances()
-    total_balance = sum(balance or 0 for balance in account_balances.values()) if account_balances else None
+    total_balance = (
+        sum(balance or 0 for acct_name, balance in account_balances.items() if acct_name != "practice")
+        if account_balances
+        else None
+    )
     rows = all_rows if account == "all" else [row for row in all_rows if row.get("account") == account]
     open_positions = (
         all_open_positions
