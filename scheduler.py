@@ -189,7 +189,7 @@ def start_scheduler(app):
         replace_existing=True,
     )   
 
-    '''
+    
     if "alpha" in ACCOUNTS:
         scheduler.add_job(
             trigger_overseer,
@@ -207,7 +207,7 @@ def start_scheduler(app):
             args=["gamma", "5m"],
             replace_existing=True,
         )
-      ''' 
+       
     if "beta" in ACCOUNTS:
         scheduler.add_job(
             trigger_overseer,
