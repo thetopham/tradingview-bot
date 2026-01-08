@@ -486,15 +486,20 @@ def _fetch_open_positions_snapshot(account: str = "all") -> Tuple[List[Dict[str,
 # ─── Payload Builders ────────────────────────────────────────────────────────
 
 def _dashboard_payload(account: str, range_key: str, include_open: bool) -> Dict[str, Any]:
-    rows, fetch_error = _fetch_ai_trade_feed(account=account, range_key=range_key, include_open=include_open)
-    open_positions, open_totals = _fetch_open_positions_snapshot(account=account)
+    all_rows, fetch_error = _fetch_ai_trade_feed(account="all", range_key=range_key, include_open=include_open)
+    all_open_positions, all_open_totals = _fetch_open_positions_snapshot(account="all")
+    rows = all_rows if account == "all" else [row for row in all_rows if row.get("account") == account]
+    open_positions = (
+        all_open_positions
+        if account == "all"
+        else [pos for pos in all_open_positions if pos.get("account") == account]
+    )
+    open_totals = (
+        all_open_totals
+        if account == "all"
+        else {"total_unrealized_pnl": sum(float(p.get("unrealized_pnl") or 0) for p in open_positions)}
+    )
     metrics = _compute_metrics(rows, range_key, MOUNTAIN_TZ, open_positions=open_positions)
-    if account == "all":
-        all_rows = rows
-        all_open_positions = open_positions
-    else:
-        all_rows, _ = _fetch_ai_trade_feed(account="all", range_key=range_key, include_open=include_open)
-        all_open_positions, _ = _fetch_open_positions_snapshot(account="all")
 
     account_metrics: List[Dict[str, Any]] = []
     for acct_name in ["all", *ACCOUNTS.keys()]:
@@ -729,4 +734,3 @@ def dashboard_report_file(day: str, filename: str):
 
     # send_from_directory handles safe joining internally for Flask, but we still validated above
     return send_from_directory(day_dir, filename, as_attachment=filename.endswith(".zip"))
-
