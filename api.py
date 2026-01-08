@@ -466,7 +466,18 @@ def _compute_simple_position_context(
     }
 
 
-def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=None, position_context=None):
+def ai_trade_decision(
+    account,
+    strat,
+    sig,
+    sym,
+    size,
+    alert,
+    ai_url,
+    positions=None,
+    position_context=None,
+    market_state=None,
+):
     position_summary = _summarize_positions(positions or [])
     simple_position_context = position_context or _compute_simple_position_context(positions or [], sym)
 
@@ -484,6 +495,7 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=N
             "account": account,
             "symbol": sym,
             "reason": "In get-flat window; trade blocked before AI call.",
+            "market_state": market_state,
         }
 
     payload = {
@@ -496,6 +508,7 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=N
         "positions": positions or [],
         "position_summary": position_summary,
         "position_context": simple_position_context,
+        "market_state": market_state,
     }
     try:
         resp = session.post(ai_url, json=payload, timeout=150)

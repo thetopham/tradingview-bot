@@ -18,6 +18,7 @@ from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token, auth_lock
 from signalr_listener import launch_signalr_listener, annotate_trade_exit_intent
 from dashboard import dashboard_bp
+from market_regime import get_market_regime_state
 from threading import Thread
 from datetime import datetime
 import logging
@@ -79,6 +80,11 @@ def handle_webhook_logic(data):
 
         acct_id = ACCOUNTS[acct]
         cid = get_contract(sym)
+        market_state = None
+        try:
+            market_state = get_market_regime_state(symbol=sym)
+        except Exception as exc:
+            logging.warning("Failed to compute market regime for %s: %s", sym, exc)
 
         # Manual flatten (close all) signal
         if sig == "FLAT":
@@ -133,6 +139,7 @@ def handle_webhook_logic(data):
                 ai_url,
                 positions=positions,
                 position_context=position_context,
+                market_state=market_state,
             )
 
             ai_signal = ai_decision.get("signal", "").upper()
@@ -186,7 +193,16 @@ def handle_webhook_logic(data):
             logging.error("Strategy '%s' is not implemented in this build (supported: simple)", strat)
             return
 
-        run_simple(acct_id, sym, sig, size, alert, ai_decision_id, prompt_version=prompt_version)
+        run_simple(
+            acct_id,
+            sym,
+            sig,
+            size,
+            alert,
+            ai_decision_id,
+            prompt_version=prompt_version,
+            regime=market_state.get("state") if market_state else None,
+        )
     except Exception as e:
         import traceback
         logging.error(f"Exception in handle_webhook_logic: {e}\n{traceback.format_exc()}")
