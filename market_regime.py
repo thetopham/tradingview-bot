@@ -21,6 +21,11 @@ class RegimeSettings:
     er_threshold: float
     atr_ratio_threshold: float
 
+    # New (but safe defaults)
+    fast_trend_lookback: int
+    impulse_tr_mult: float
+    digestion_bars: int
+
 
 _SUPABASE_CLIENT = None
 
@@ -37,6 +42,12 @@ def _get_settings() -> RegimeSettings:
         "15m": os.getenv("REGIME_TABLE_15M", "tv_datafeed_15m"),
         "30m": os.getenv("REGIME_TABLE_30M", "tv_datafeed_30m"),
     }
+
+    # New knobs
+    fast_trend_lookback = int(os.getenv("REGIME_FAST_TREND_LOOKBACK", str(max(10, trend_lookback // 3))))
+    impulse_tr_mult = float(os.getenv("REGIME_IMPULSE_TR_MULT", "2.5"))
+    digestion_bars = int(os.getenv("REGIME_DIGESTION_BARS", "8"))
+
     return RegimeSettings(
         state_path=state_path,
         refresh_seconds=refresh_seconds,
@@ -47,6 +58,9 @@ def _get_settings() -> RegimeSettings:
         table_map=table_map,
         er_threshold=float(os.getenv("REGIME_ER_THRESHOLD", "0.4")),
         atr_ratio_threshold=float(os.getenv("REGIME_ATR_RATIO_THRESHOLD", "1.5")),
+        fast_trend_lookback=fast_trend_lookback,
+        impulse_tr_mult=impulse_tr_mult,
+        digestion_bars=digestion_bars,
     )
 
 
@@ -99,11 +113,14 @@ def _write_state(path: str, state: Dict[str, Any]) -> None:
 
 
 def _fetch_bars(table: str, symbol: str, limit: int) -> List[Dict[str, Any]]:
+    """
+    Prefer OHLC+ATR. If your table doesn't have o/h/l, Supabase will return nulls; we handle that.
+    """
     supabase = _get_supabase_client()
     result = (
         supabase
         .table(table)
-        .select("ts,c,atr")
+        .select("ts,o,h,l,c,atr")
         .eq("symbol", symbol)
         .order("ts", desc=True)
         .limit(limit)
@@ -134,54 +151,146 @@ def _compute_atr_ratio(atrs: List[float], lookback: int) -> Optional[float]:
     return current_atr / median_atr
 
 
+def _true_range(
+    prev_close: float,
+    high: Optional[float],
+    low: Optional[float],
+    close: float,
+) -> float:
+    # If we have high/low, use real TR. Otherwise, fallback to close-to-close move.
+    if high is None or low is None:
+        return abs(close - prev_close)
+    return max(
+        float(high) - float(low),
+        abs(float(high) - prev_close),
+        abs(float(low) - prev_close),
+    )
+
+
+def _derive_action(trend_dim: str, vol_dim: str, phase: str) -> Tuple[bool, str]:
+    """
+    Deterministic "what to do" mapping. Keep it tiny and opinionated.
+    """
+    if phase in ("impulse", "digestion"):
+        # Post-impulse chop is where bots get shredded.
+        return False, "cooldown"
+
+    if trend_dim.startswith("trending") and vol_dim == "normal":
+        return True, "normal"
+
+    if trend_dim.startswith("trending") and vol_dim == "high":
+        return True, "reduced"
+
+    if trend_dim == "ranging" and vol_dim == "normal":
+        return True, "selective"
+
+    if trend_dim == "ranging" and vol_dim == "high":
+        return False, "skip"
+
+    return True, "selective"
+
+
 def _detect_regime(
-    closes: List[float],
-    atrs: List[float],
-    lookback_trend: int,
+    ohlc: List[Dict[str, Any]],
+    lookback_fast: int,
+    lookback_slow: int,
     lookback_vol: int,
     er_threshold: float,
     atr_ratio_threshold: float,
+    impulse_tr_mult: float,
+    digestion_bars: int,
+    prev_state: Optional[Dict[str, Any]],
 ) -> Tuple[str, Dict[str, Any]]:
-    er = _compute_efficiency_ratio(closes, lookback_trend)
+    closes = [float(r["c"]) for r in ohlc if r.get("c") is not None]
+    atrs = [float(r["atr"]) for r in ohlc if r.get("atr") is not None]
+    if len(closes) < max(lookback_slow + 1, 3) or len(atrs) < lookback_vol:
+        return "unknown", {
+            "trend_dimension": "unknown",
+            "volatility_dimension": "unknown",
+            "confidence": 0.0,
+            "metrics": {},
+            "phase": "normal",
+            "trade_allowed": True,
+            "risk_mode": "selective",
+        }
+
+    er_fast = _compute_efficiency_ratio(closes, lookback_fast)
+    er_slow = _compute_efficiency_ratio(closes, lookback_slow)
     atr_ratio = _compute_atr_ratio(atrs, lookback_vol)
 
+    # Trend dimension: allow fast ER to declare trend early (helps transitions)
     trend_label = "ranging"
-    price_change = None
-    if len(closes) >= lookback_trend + 1:
-        price_change = closes[-1] - closes[-(lookback_trend + 1)]
-    if er is not None and er >= er_threshold:
-        if price_change is not None and price_change > 0:
+    price_change_fast = closes[-1] - closes[-(lookback_fast + 1)] if len(closes) >= lookback_fast + 1 else None
+    price_change_slow = closes[-1] - closes[-(lookback_slow + 1)] if len(closes) >= lookback_slow + 1 else None
+
+    er_for_direction = er_fast if (er_fast is not None and er_fast >= er_threshold) else er_slow
+    price_change_for_direction = price_change_fast if er_for_direction == er_fast else price_change_slow
+
+    if er_for_direction is not None and er_for_direction >= er_threshold:
+        if price_change_for_direction is not None and price_change_for_direction > 0:
             trend_label = "trending_up"
-        elif price_change is not None and price_change < 0:
+        elif price_change_for_direction is not None and price_change_for_direction < 0:
             trend_label = "trending_down"
 
+    # Vol dimension
     volatility_label = "normal"
     if atr_ratio is not None and atr_ratio >= atr_ratio_threshold:
         volatility_label = "high"
 
+    # Phase: detect impulse via TR spike vs ATR, then hold "digestion" for N bars
+    phase = "normal"
+    impulse_detected = False
+    # compute last bar TR if possible
+    if len(ohlc) >= 2:
+        prev_close = float(ohlc[-2]["c"])
+        last = ohlc[-1]
+        tr_last = _true_range(
+            prev_close=prev_close,
+            high=(float(last["h"]) if last.get("h") is not None else None),
+            low=(float(last["l"]) if last.get("l") is not None else None),
+            close=float(last["c"]),
+        )
+        atr_now = float(ohlc[-1]["atr"]) if ohlc[-1].get("atr") is not None else atrs[-1]
+        if atr_now and tr_last >= impulse_tr_mult * atr_now:
+            impulse_detected = True
+            phase = "impulse"
+
+    # If we didn't detect impulse this bar, we may still be in digestion window
+    digestion_left = 0
+    if prev_state:
+        digestion_left = int(prev_state.get("digestion_left") or 0)
+
+    if impulse_detected:
+        digestion_left = digestion_bars
+    else:
+        if digestion_left > 0:
+            digestion_left -= 1
+            phase = "digestion"
+
+    # Regime label: keep old behavior, but you also have 2D dims + phase
     if volatility_label == "high":
         regime_label = "high_volatility"
     else:
         regime_label = trend_label
 
-    trend_strength = min(1.0, (er or 0.0) / er_threshold) if er_threshold else 0.0
+    # Confidence: combine trend + vol (don’t let one dimension always saturate)
+    trend_strength = min(1.0, (er_for_direction or 0.0) / er_threshold) if er_threshold else 0.0
     vol_strength = min(1.0, (atr_ratio or 0.0) / atr_ratio_threshold) if atr_ratio_threshold else 0.0
+    confidence = round((0.6 * vol_strength + 0.4 * trend_strength), 3)
 
-    if regime_label == "high_volatility":
-        confidence = round(vol_strength, 3)
-    elif trend_label == "ranging":
-        confidence = round(1.0 - trend_strength, 3)
-    else:
-        confidence = round(trend_strength, 3)
+    trade_allowed, risk_mode = _derive_action(trend_label, volatility_label, phase)
 
     metrics = {
-        "efficiency_ratio": None if er is None else round(er, 4),
+        "efficiency_ratio_fast": None if er_fast is None else round(er_fast, 4),
+        "efficiency_ratio_slow": None if er_slow is None else round(er_slow, 4),
         "atr_ratio": None if atr_ratio is None else round(atr_ratio, 4),
-        "trend_lookback": lookback_trend,
+        "trend_lookback_fast": lookback_fast,
+        "trend_lookback_slow": lookback_slow,
         "vol_lookback": lookback_vol,
         "er_threshold": er_threshold,
         "atr_ratio_threshold": atr_ratio_threshold,
-        "price_change": None if price_change is None else round(price_change, 4),
+        "price_change_fast": None if price_change_fast is None else round(price_change_fast, 4),
+        "price_change_slow": None if price_change_slow is None else round(price_change_slow, 4),
     }
 
     return regime_label, {
@@ -189,6 +298,10 @@ def _detect_regime(
         "volatility_dimension": volatility_label,
         "confidence": confidence,
         "metrics": metrics,
+        "phase": phase,
+        "digestion_left": digestion_left,
+        "trade_allowed": trade_allowed,
+        "risk_mode": risk_mode,
     }
 
 
@@ -202,12 +315,16 @@ def _apply_hysteresis(
     confirmations: int,
 ) -> Dict[str, Any]:
     now_iso = now.astimezone(timezone.utc).isoformat()
+
+    # Backward compat defaults
     if not state or state.get("regime") is None:
         return {
             "regime": detected_regime,
             "current_since": now_iso,
             "pending_regime": None,
-            "consecutive_same": 0,
+            "pending_count": 0,
+            "stable_count": 0,
+            "consecutive_same": 0,  # alias of pending_count (legacy)
             "last_updated": now_iso,
             "timeframe": timeframe,
             "symbol": symbol,
@@ -216,35 +333,43 @@ def _apply_hysteresis(
 
     current_regime = state.get("regime")
     pending_regime = state.get("pending_regime")
-    consecutive_same = int(state.get("consecutive_same") or 0)
+    pending_count = int(state.get("pending_count") or state.get("consecutive_same") or 0)
+    stable_count = int(state.get("stable_count") or 0)
 
     if detected_regime == current_regime:
         pending_regime = None
-        consecutive_same = 0
+        pending_count = 0
+        stable_count += 1
     else:
+        stable_count = 0
         if pending_regime == detected_regime:
-            consecutive_same += 1
+            pending_count += 1
         else:
             pending_regime = detected_regime
-            consecutive_same = 1
+            pending_count = 1
 
-        if consecutive_same >= confirmations:
+        if pending_count >= confirmations:
             current_regime = detected_regime
             pending_regime = None
-            consecutive_same = 0
+            pending_count = 0
+            stable_count = 0
             state["current_since"] = now_iso
 
     state.update(
         {
             "regime": current_regime,
             "pending_regime": pending_regime,
-            "consecutive_same": consecutive_same,
+            "pending_count": pending_count,
+            "stable_count": stable_count,
+            "consecutive_same": pending_count,  # keep legacy field
             "last_updated": now_iso,
             "timeframe": timeframe,
             "symbol": symbol,
             **detected_meta,
         }
     )
+    if state.get("current_since") is None:
+        state["current_since"] = now_iso
     return state
 
 
@@ -255,20 +380,7 @@ def get_market_state(
 ) -> Dict[str, Any]:
     settings = _get_settings()
     timeframe = timeframe or settings.default_timeframe
-    table = settings.table_map.get(timeframe)
-    if not table:
-        fallback_key = (
-            settings.default_timeframe
-            if settings.default_timeframe in settings.table_map
-            else next(iter(settings.table_map), None)
-        )
-        if fallback_key:
-            logging.warning(
-                "Market regime: unsupported timeframe %s; falling back to %s",
-                timeframe,
-                fallback_key,
-            )
-            table = settings.table_map[fallback_key]
+    table = settings.table_map.get(timeframe, settings.table_map[settings.default_timeframe])
     symbol = _normalize_symbol(symbol)
     now = now or datetime.now(timezone.utc)
 
@@ -288,7 +400,7 @@ def get_market_state(
             except Exception:
                 pass
 
-    limit = max(settings.trend_lookback + 1, settings.vol_lookback)
+    limit = max(settings.trend_lookback + 2, settings.vol_lookback + 2, settings.fast_trend_lookback + 2)
     bars = _fetch_bars(table, symbol, limit)
     if not bars:
         logging.warning("Market regime: no bars found for %s in %s", symbol, table)
@@ -296,6 +408,8 @@ def get_market_state(
             "regime": None,
             "current_since": None,
             "pending_regime": None,
+            "pending_count": 0,
+            "stable_count": 0,
             "consecutive_same": 0,
             "last_updated": now.astimezone(timezone.utc).isoformat(),
             "timeframe": timeframe,
@@ -304,18 +418,23 @@ def get_market_state(
             "volatility_dimension": None,
             "confidence": 0.0,
             "metrics": {},
+            "phase": "normal",
+            "trade_allowed": True,
+            "risk_mode": "selective",
         }
 
     bars_sorted = sorted(bars, key=lambda row: row.get("ts") or "")
-    closes = [float(row["c"]) for row in bars_sorted if row.get("c") is not None]
-    atrs = [float(row["atr"]) for row in bars_sorted if row.get("atr") is not None]
 
-    if not closes or not atrs:
+    # Filter out rows missing c/atr
+    ohlc = [r for r in bars_sorted if r.get("c") is not None and r.get("atr") is not None]
+    if len(ohlc) < max(settings.trend_lookback + 1, settings.vol_lookback):
         logging.warning("Market regime: insufficient data for %s in %s", symbol, table)
         return state or {
             "regime": None,
             "current_since": None,
             "pending_regime": None,
+            "pending_count": 0,
+            "stable_count": 0,
             "consecutive_same": 0,
             "last_updated": now.astimezone(timezone.utc).isoformat(),
             "timeframe": timeframe,
@@ -324,15 +443,21 @@ def get_market_state(
             "volatility_dimension": None,
             "confidence": 0.0,
             "metrics": {},
+            "phase": "normal",
+            "trade_allowed": True,
+            "risk_mode": "selective",
         }
 
     detected_regime, detected_meta = _detect_regime(
-        closes=closes,
-        atrs=atrs,
-        lookback_trend=settings.trend_lookback,
+        ohlc=ohlc,
+        lookback_fast=settings.fast_trend_lookback,
+        lookback_slow=settings.trend_lookback,
         lookback_vol=settings.vol_lookback,
         er_threshold=settings.er_threshold,
         atr_ratio_threshold=settings.atr_ratio_threshold,
+        impulse_tr_mult=settings.impulse_tr_mult,
+        digestion_bars=settings.digestion_bars,
+        prev_state=state,
     )
 
     updated_state = _apply_hysteresis(
