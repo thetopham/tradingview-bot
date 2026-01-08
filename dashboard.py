@@ -1,6 +1,12 @@
 import json
 import logging
 import pytz
+import time
+
+try:
+    import httpx
+except Exception:
+    httpx = None
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from dateutil import parser
@@ -224,7 +230,52 @@ def _fetch_ai_trade_feed(
             query = query.gte("decision_time", start_iso)
 
         query = query.order("decision_time", desc=True).order("ai_decision_id", desc=True).limit(limit)
-        resp = query.execute()
+                # Retry transient network/protocol hiccups (common with HTTP/2)
+        last_exc = None
+        for attempt in range(3):
+            try:
+                resp = query.execute()
+                data = resp.data or []
+                break
+            except Exception as exc:
+                last_exc = exc
+                msg = str(exc).lower()
+                retryable = (
+                    "server disconnected" in msg
+                    or "remoteprotocolerror" in msg
+                    or (httpx and isinstance(exc, (
+                        httpx.RemoteProtocolError,
+                        httpx.ReadError,
+                        httpx.ConnectError,
+                        httpx.TimeoutException,
+                    )))
+                )
+                if attempt < 2 and retryable:
+                    logger.warning(
+                        "ai_trade_feed fetch failed (%s). Retrying %d/3...",
+                        exc, attempt + 1
+                    )
+                    # Drop any stale pooled connection by rebuilding the client
+                    from api import reset_supabase_client
+                    reset_supabase_client()
+                    sb = get_supabase_client()
+
+                    # Rebuild the query object (it’s tied to the old client)
+                    query = sb.table("ai_trade_feed").select(columns)
+                    if account != "all":
+                        query = query.eq("account", account)
+                    start_iso = _range_start_iso(range_key)
+                    if start_iso:
+                        query = query.gte("decision_time", start_iso)
+                    query = query.order("decision_time", desc=True).order("ai_decision_id", desc=True).limit(limit)
+
+                    time.sleep(0.5 * (2 ** attempt))
+                    continue
+
+                raise
+        else:
+            raise last_exc
+
         data = resp.data or []
     except Exception as exc:  # noqa: PERF203
         logger.exception("Error fetching ai_trade_feed: %s", exc)
