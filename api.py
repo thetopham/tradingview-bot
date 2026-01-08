@@ -3,12 +3,15 @@ import requests
 import logging
 import json
 import time
+import re
+import os
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 from auth import ensure_token, get_token, in_get_flat, session
 from config import load_config
 from dateutil import parser
 from supabase import create_client
+from market_regime import get_market_state
 
 
 config = load_config()
@@ -44,6 +47,14 @@ def _timeframe_filters(max_minutes: int = 1) -> List[str]:
     if window <= 5:
         return ["1m", "1", "5m", "5"]
     return ["1m", "1", "5m", "5", "15m", "15"]
+
+def _infer_timeframe(alert: Optional[str]) -> str:
+    if alert:
+        match = re.search(r"(\\d+)\\s*m", alert, re.IGNORECASE)
+        if match:
+            minutes = match.group(1)
+            return f"{minutes}m"
+    return os.getenv("REGIME_DEFAULT_TIMEFRAME", "5m")
 
 
 def get_supabase_client():
@@ -471,6 +482,21 @@ def _compute_simple_position_context(
 def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=None, position_context=None):
     position_summary = _summarize_positions(positions or [])
     simple_position_context = position_context or _compute_simple_position_context(positions or [], sym)
+    timeframe = _infer_timeframe(alert)
+    market_state = None
+    market_regime = None
+    try:
+        market_state = get_market_state(timeframe=timeframe, symbol=sym)
+        market_regime = market_state.get("regime") if market_state else None
+    except Exception as exc:
+        logging.warning("Market regime lookup failed: %s", exc)
+
+    if isinstance(simple_position_context, dict):
+        position_context_payload = dict(simple_position_context)
+    else:
+        position_context_payload = {"context": simple_position_context}
+    position_context_payload["market_state"] = market_state
+    position_context_payload["market_regime"] = market_regime
 
     now = datetime.now(MT)
     if in_get_flat(now):
@@ -497,7 +523,10 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=N
         "alert": alert,
         "positions": positions or [],
         "position_summary": position_summary,
-        "position_context": simple_position_context,
+        "position_context": position_context_payload,
+        "timeframe": timeframe,
+        "market_state": market_state,
+        "market_regime": market_regime,
     }
     try:
         resp = session.post(ai_url, json=payload, timeout=150)
