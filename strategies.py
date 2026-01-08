@@ -35,7 +35,17 @@ def _compute_entry_fill(acct_id: int, oid: int) -> float | None:
         time.sleep(0.25)
     return price
 
-def run_simple(acct_id: int, sym: str, sig: str, size: int, alert: str, ai_decision_id=None, prompt_version=None):
+def run_simple(
+    acct_id: int,
+    sym: str,
+    sig: str,
+    size: int,
+    alert: str,
+    ai_decision_id=None,
+    *,
+    prompt_version=None,
+    market_state=None,
+):
     """Execute a simple market order; server-side brackets handled by broker."""
     cid = get_contract(sym)
     sig = (sig or "").upper()
@@ -90,7 +100,23 @@ def run_simple(acct_id: int, sym: str, sig: str, size: int, alert: str, ai_decis
         sl_id=None,
         tp_ids=None,
         trades=[entry],
-        regime=None,
+        # Persisted market regime label for later analysis (best-effort).
+        # We compress it into a single string so it can be safely stored anywhere.
+        regime=(
+            (
+                (
+                    f"{market_state.get('regime')}_{market_state.get('trend')}"
+                    if isinstance(market_state, dict)
+                    and market_state.get("regime") in {"trending", "high_volatility"}
+                    and market_state.get("trend") in {"up", "down"}
+                    else market_state.get("regime")
+                )
+                if isinstance(market_state, dict)
+                else str(market_state)
+            )
+            if market_state is not None
+            else None
+        ),
         prompt_version=prompt_version,
     )
 

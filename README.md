@@ -80,6 +80,22 @@ Optional:
 
 - `OVERRIDE_CONTRACT_ID=CON.F.US.MES.H26` (forces MES contract; see `api.get_contract`)
 
+### Market regime / market state (optional but recommended)
+
+The bot can compute a coarse market regime (trending / ranging / high volatility) from the
+TradingView datafeed rows stored in Supabase and inject it into the AI request payload as
+`market_state`.
+
+Configuration (see `.env.example`):
+
+- `MARKET_STATE_PATH` – where the persisted state is stored (default: `./market_state.json`)
+- `MARKET_STATE_TABLES` – fallback priority for Supabase tables to read (default: `tv_datafeed_30m,tv_datafeed_15m,tv_datafeed_5m`)
+- Thresholds: `MARKET_STATE_TREND_THRESHOLD`, `MARKET_STATE_VOL_RATIO_THRESHOLD`, etc.
+
+You can view the current persisted state (dashboard auth applies) at:
+
+- `GET /market_state`
+
 ### 3) Run
 
 ```bash

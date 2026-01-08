@@ -4,6 +4,7 @@ import logging
 import json
 import time
 from typing import Dict, List, Optional, Tuple
+
 from datetime import datetime, timezone
 from auth import ensure_token, get_token, in_get_flat, session
 from config import load_config
@@ -27,9 +28,6 @@ _PRICE_CACHE: Dict[str, Optional[Tuple[float, str]]] = {
 }
 _SUPABASE_CLIENT = None
 
-def reset_supabase_client():
-    global _SUPABASE_CLIENT
-    _SUPABASE_CLIENT = None
 
 def _timeframe_filters(max_minutes: int = 1) -> List[str]:
     """Return timeframes up to the requested minute window (defaults to 1m)."""
@@ -468,7 +466,19 @@ def _compute_simple_position_context(
     }
 
 
-def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=None, position_context=None):
+def ai_trade_decision(
+    account,
+    strat,
+    sig,
+    sym,
+    size,
+    alert,
+    ai_url,
+    *,
+    positions=None,
+    position_context=None,
+    market_state=None,
+):
     position_summary = _summarize_positions(positions or [])
     simple_position_context = position_context or _compute_simple_position_context(positions or [], sym)
 
@@ -499,6 +509,11 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=N
         "position_summary": position_summary,
         "position_context": simple_position_context,
     }
+
+    # Optional but useful context for the AI prompt.
+    # Keep this object small/stable (trend/range/vol + a few key metrics).
+    if market_state is not None:
+        payload["market_state"] = market_state
     try:
         resp = session.post(ai_url, json=payload, timeout=150)
         resp.raise_for_status()
@@ -1007,6 +1022,7 @@ def log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta
         part
         for part in [
             base_comment,
+            f"regime={meta.get('regime')}" if meta.get("regime") else None,
             f"trace_id={trace_id}" if trace_id else None,
             ai_decision_note or None,
             "pnl_missing" if not pnl_values else None,

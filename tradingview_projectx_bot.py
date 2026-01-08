@@ -14,6 +14,7 @@ from api import (
     )
 from position_manager import PositionManager
 from strategies import run_simple
+from market_regime import MarketRegimeService
 from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token, auth_lock
 from signalr_listener import launch_signalr_listener, annotate_trade_exit_intent
@@ -43,6 +44,9 @@ AI_TEST_ENDPOINTS = {
 }
 
 POSITION_MANAGER = PositionManager(ACCOUNTS)
+
+# Market regime detection (persisted to disk, injected into AI payload)
+MARKET_REGIME = MarketRegimeService()
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.register_blueprint(dashboard_bp)
@@ -79,6 +83,13 @@ def handle_webhook_logic(data):
 
         acct_id = ACCOUNTS[acct]
         cid = get_contract(sym)
+
+        # Compute persistent market regime / state (best-effort).
+        market_state = None
+        try:
+            market_state = MARKET_REGIME.get_market_state(sym)
+        except Exception as exc:
+            logging.warning("Market regime detection failed (symbol=%s): %s", sym, exc)
 
         # Manual flatten (close all) signal
         if sig == "FLAT":
@@ -133,6 +144,7 @@ def handle_webhook_logic(data):
                 ai_url,
                 positions=positions,
                 position_context=position_context,
+                market_state=market_state,
             )
 
             ai_signal = ai_decision.get("signal", "").upper()
@@ -186,7 +198,16 @@ def handle_webhook_logic(data):
             logging.error("Strategy '%s' is not implemented in this build (supported: simple)", strat)
             return
 
-        run_simple(acct_id, sym, sig, size, alert, ai_decision_id, prompt_version=prompt_version)
+        run_simple(
+            acct_id,
+            sym,
+            sig,
+            size,
+            alert,
+            ai_decision_id,
+            prompt_version=prompt_version,
+            market_state=market_state,
+        )
     except Exception as e:
         import traceback
         logging.error(f"Exception in handle_webhook_logic: {e}\n{traceback.format_exc()}")
