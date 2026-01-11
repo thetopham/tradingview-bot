@@ -54,7 +54,7 @@ def load_config():
         # -----------------------------------------------------------------
         # Regime filter (blocks trades in chop / high-vol; allows LV trends)
         # -----------------------------------------------------------------
-        # Enable/disable the execution-side regime gate
+        # Enable/disable the regime gate
         'REGIME_FILTER_ENABLED': _env_bool("REGIME_FILTER_ENABLED", True),
         # If enabled and we cannot classify (no data / error), block trades
         'REGIME_FAIL_CLOSED': _env_bool("REGIME_FAIL_CLOSED", True),
