@@ -66,19 +66,19 @@ WantedBy=multi-user.target
 **Purpose:** Restarts `tradingview_bot.service` on a schedule (health/hygiene).
 
 **Schedule:**
-- Mon–Fri at **15:35:00 America/Denver**
-- Sun at **15:35:00 America/Denver**
+- Mon–Fri at **15:45:00 America/Denver**
+- Sun at **15:45:00 America/Denver**
 - `Persistent=true` (if the Pi was off, it runs the missed schedule on boot)
 - `AccuracySec=1s`
 
 **Timer content:**
 ```ini
 [Unit]
-Description=Restart tradingview_bot.service at 15:35 (America/Denver) on trading days
+Description=Restart tradingview_bot.service at 15:45 (America/Denver) on trading days
 
 [Timer]
-OnCalendar=Mon..Fri *-*-* 15:35:00
-OnCalendar=Sun *-*-* 15:35:00
+OnCalendar=Mon..Fri *-*-* 15:45:00
+OnCalendar=Sun *-*-* 15:45:00
 Persistent=true
 AccuracySec=1s
 
