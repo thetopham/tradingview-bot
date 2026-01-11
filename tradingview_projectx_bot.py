@@ -18,6 +18,7 @@ from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token, auth_lock
 from signalr_listener import launch_signalr_listener, annotate_trade_exit_intent
 from dashboard import dashboard_bp
+from regime_classifier import RegimeClassifier
 from threading import Thread
 from datetime import datetime
 import logging
@@ -40,10 +41,30 @@ AI_TEST_ENDPOINTS = {
     "gamma": config.get("N8N_OVERSEER_URL_TEST3"),
     "delta": config.get("N8N_OVERSEER_URL_TEST4"),
     "epsilon": config.get("N8N_OVERSEER_URL_TEST5"),
-    "practice": config.get("N8N_OVERSEER_URL_TEST6"),
 }
 
 POSITION_MANAGER = PositionManager(ACCOUNTS)
+
+# --- Regime Classifier (execution-side gate) ---
+REGIME_CLASSIFIER = RegimeClassifier(
+    supabase_url=config.get("SUPABASE_URL"),
+    supabase_key=config.get("SUPABASE_KEY"),
+    table_5m=config.get("REGIME_TABLE_5M", "tv_datafeed_5m"),
+    table_htf=config.get("REGIME_TABLE_HTF", "tv_datafeed_30m"),
+    table_htf_fallback=config.get("REGIME_TABLE_HTF_FALLBACK", "tv_datafeed_15m"),
+    lookback_bars=config.get("REGIME_LOOKBACK_BARS", 140),
+    er_lookback=config.get("REGIME_ER_LOOKBACK", 12),
+    atr_pctl_lookback=config.get("REGIME_ATR_PCTL_LOOKBACK", 50),
+    er_min=config.get("REGIME_ER_MIN", 0.35),
+    atr_pctl_max=config.get("REGIME_ATR_PCTL_MAX", 0.25),
+    ema_spread_atr_min=config.get("REGIME_EMA_SPREAD_ATR_MIN", 0.30),
+    slope_atr_min=config.get("REGIME_SLOPE_ATR_MIN", 0.50),
+    atr_min_points=config.get("REGIME_ATR_MIN_POINTS"),
+    atr_max_points=config.get("REGIME_ATR_MAX_POINTS"),
+    require_htf_align=config.get("REGIME_REQUIRE_HTF_ALIGN", True),
+    fail_closed=config.get("REGIME_FAIL_CLOSED", True),
+    cache_ttl_s=10,
+)
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.register_blueprint(dashboard_bp)
@@ -120,8 +141,6 @@ def handle_webhook_logic(data):
                 route_label = "TEST4"
             elif acct == "epsilon":
                 route_label = "TEST5"
-            elif acct == "practice":
-                route_label = "TEST6"
 
             safe_url = ai_url.split("?")[0] if ai_url else "unset"
             logging.info("[AI ROUTE] account=%s -> %s url=%s", acct, route_label, safe_url)
@@ -184,12 +203,64 @@ def handle_webhook_logic(data):
             cid = get_contract(sym)
             
         
+        # --- Execution-side regime gate ---
+        regime_label = None
+        if config.get("REGIME_FILTER_ENABLED", True) and sig in {"BUY", "SELL"}:
+            rr = REGIME_CLASSIFIER.classify(sym, desired_signal=sig)
+            regime_label = rr.regime
+            if not rr.ok:
+                logging.info(
+                    "[REGIME BLOCK] %s %s | %s | metrics=%s",
+                    sig,
+                    sym,
+                    rr.reason,
+                    {
+                        k: rr.metrics.get(k)
+                        for k in (
+                            "direction",
+                            "er",
+                            "atr",
+                            "atr_pctl",
+                            "ema_spread_atr",
+                            "slope_norm",
+                            "macd_ok",
+                            "bb_width",
+                            "htf_ok",
+                            "htf_table",
+                            "ts",
+                        )
+                    },
+                )
+                return
+            logging.info(
+                "[REGIME OK] %s %s | regime=%s | metrics=%s",
+                sig,
+                sym,
+                regime_label,
+                {
+                    k: rr.metrics.get(k)
+                    for k in (
+                        "direction",
+                        "er",
+                        "atr",
+                        "atr_pctl",
+                        "ema_spread_atr",
+                        "slope_norm",
+                        "macd_ok",
+                        "bb_width",
+                        "htf_ok",
+                        "htf_table",
+                        "ts",
+                    )
+                },
+            )
+
         # --- Strategy Dispatch ---
         if strat != "simple":
             logging.error("Strategy '%s' is not implemented in this build (supported: simple)", strat)
             return
 
-        run_simple(acct_id, sym, sig, size, alert, ai_decision_id, prompt_version=prompt_version)
+        run_simple(acct_id, sym, sig, size, alert, ai_decision_id, prompt_version=prompt_version, regime=regime_label)
     except Exception as e:
         import traceback
         logging.error(f"Exception in handle_webhook_logic: {e}\n{traceback.format_exc()}")
