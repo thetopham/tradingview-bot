@@ -440,5 +440,8 @@ class RegimeClassifier:
             reason = "; ".join(reasons)
 
         res = RegimeResult(ok=ok, regime=regime, direction=direction, reason=reason, metrics=metrics)
-        self._cache[cache_key] = (now, res)
+
+        if self.cache_ttl_s > 0:
+            self._cache[cache_key] = (now, res)
+
         return res
