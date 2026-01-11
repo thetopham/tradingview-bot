@@ -13,6 +13,7 @@ config = load_config()
 PX_BASE = config['PX_BASE']
 USER_NAME = config['USER_NAME']
 API_KEY = config['API_KEY']
+BROKER_MODE = config.get('BROKER_MODE', 'live')
 GET_FLAT_START = config['GET_FLAT_START']
 GET_FLAT_END = config['GET_FLAT_END']
 MT = config['MT']
@@ -55,6 +56,11 @@ def in_get_flat(now=None):
 
 def authenticate():
     global _token, _token_expiry
+    if BROKER_MODE == "sim":
+        _token = "SIM_TOKEN"
+        _token_expiry = time.time() + 23 * 3600
+        logging.info("Sim broker mode enabled; using simulated token.")
+        return
     logging.info("Authenticating to Topstep API...")
     resp = session.post(
         f"{PX_BASE}/api/Auth/loginKey",

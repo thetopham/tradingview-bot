@@ -25,6 +25,7 @@ def load_config():
             return default
 
     config = {
+        'BROKER_MODE': os.getenv("BROKER_MODE", "live").strip().lower(),
         'TV_PORT': int(os.getenv("TV_PORT", 5000)),
         'PX_BASE': os.getenv("PROJECTX_BASE_URL"),
         'USER_NAME': os.getenv("PROJECTX_USERNAME"),
@@ -46,6 +47,11 @@ def load_config():
         'SUPABASE_URL': os.getenv("SUPABASE_URL"),
         'SUPABASE_KEY': os.getenv("SUPABASE_KEY"),
         'WEBHOOK': os.getenv("WEBHOOK"),
+        'SIM_BRACKET_SL_USD': float(os.getenv("SIM_BRACKET_SL_USD", 30)),
+        'SIM_BRACKET_TP_USD': float(os.getenv("SIM_BRACKET_TP_USD", 60)),
+        'SIM_TICK_SIZE': float(os.getenv("SIM_TICK_SIZE", 0.25)),
+        'SIM_TICK_VALUE': float(os.getenv("SIM_TICK_VALUE", 1.25)),
+        'SIM_FILL_POLICY': os.getenv("SIM_FILL_POLICY", "worst").strip().lower(),
         # Risk params
         'DAILY_PROFIT_TARGET': float(os.getenv("DAILY_PROFIT_TARGET", 99999.0)),
         'MAX_DAILY_LOSS': float(os.getenv("MAX_DAILY_LOSS", -250.0)),

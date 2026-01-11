@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 from auth import ensure_token, get_token, in_get_flat, session
 from config import load_config
+from simbroker import get_broker
 from dateutil import parser
 from supabase import create_client
 from market_regime import get_market_state
@@ -70,6 +71,16 @@ def get_supabase_client():
 
 # ─── API Functions ────────────────────────────────────
 def post(path, payload):
+    if config.get("BROKER_MODE") == "sim":
+        broker = get_broker()
+        account_id = payload.get("accountId")
+        contract_id = payload.get("contractId")
+        if account_id is not None:
+            broker.sim_update(account_id, contract_id)
+        data = broker.handle_request(path, payload)
+        logging.debug("SIM Response JSON: %s", data)
+        return data
+
     ensure_token()
     url = f"{PX_BASE}{path}"
     logging.debug("POST %s payload=%s", url, payload)
