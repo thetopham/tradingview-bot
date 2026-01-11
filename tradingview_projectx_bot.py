@@ -194,6 +194,8 @@ def handle_webhook_logic(data):
                 route_label = "TEST4"
             elif acct == "epsilon":
                 route_label = "TEST5"
+            elif acct == "practice":
+                route_label = "TEST6"
 
             safe_url = ai_url.split("?")[0] if ai_url else "unset"
             logging.info("[AI ROUTE] account=%s -> %s url=%s", acct, route_label, safe_url)
