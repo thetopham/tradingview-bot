@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-'''
+
 """
 market_scanner_breakout_retest.py
 
