@@ -46,7 +46,7 @@ AI_TEST_ENDPOINTS = {
 
 POSITION_MANAGER = PositionManager(ACCOUNTS)
 
-# --- Regime Classifier (execution-side gate) ---
+# --- Regime Classifier ---
 REGIME_CLASSIFIER = RegimeClassifier(
     supabase_url=config.get("SUPABASE_URL"),
     supabase_key=config.get("SUPABASE_KEY"),
@@ -206,7 +206,7 @@ def handle_webhook_logic(data):
             cid = get_contract(sym)
             
         
-        # --- Execution-side regime gate ---
+        # --- regime ---
         regime_label = None
         if config.get("REGIME_FILTER_ENABLED", True) and sig in {"BUY", "SELL"}:
             rr = REGIME_CLASSIFIER.classify(sym, desired_signal=sig)
