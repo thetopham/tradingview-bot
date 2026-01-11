@@ -46,7 +46,7 @@ AI_TEST_ENDPOINTS = {
 
 POSITION_MANAGER = PositionManager(ACCOUNTS)
 
-# --- Regime Classifier ---
+# --- Regime Classifier (execution-side gate) ---
 REGIME_CLASSIFIER = RegimeClassifier(
     supabase_url=config.get("SUPABASE_URL"),
     supabase_key=config.get("SUPABASE_KEY"),
@@ -121,10 +121,62 @@ def handle_webhook_logic(data):
             logging.info("In get-flat window, no trades processed")
             return
 
+        # --- Regime prefilter (prevents AI calls in chop/range) ---
+        pre_rr = None
+        regime_label = None
+        regime_blocked = False
+
+        if config.get("REGIME_FILTER_ENABLED", True):
+            desired = sig if sig in {"BUY", "SELL"} else None
+            pre_rr = REGIME_CLASSIFIER.classify(sym, desired_signal=desired)
+            regime_label = pre_rr.regime
+            if not pre_rr.ok:
+                regime_blocked = True
+                logging.info(
+                    "[REGIME PREFILTER BLOCK] %s %s | %s | metrics=%s",
+                    desired or "ANY",
+                    sym,
+                    pre_rr.reason,
+                    {
+                        k: pre_rr.metrics.get(k)
+                        for k in (
+                            "direction",
+                            "er",
+                            "atr",
+                            "atr_pctl",
+                            "ema_spread_atr",
+                            "slope_norm",
+                            "macd_ok",
+                            "bb_width",
+                            "htf_ok",
+                            "htf_table",
+                            "ts",
+                        )
+                    },
+                )
+                # If the webhook explicitly requests BUY/SELL, block immediately.
+                if desired is not None:
+                    return
+
+
         # --- AI Overseer Routing ---
         ai_url = AI_TEST_ENDPOINTS.get(acct)
         if ai_url:
             positions = search_pos(acct_id)
+            has_position = any(
+                (p.get("contractId") == cid) and (p.get("size") or 0) > 0
+                for p in (positions or [])
+            )
+
+            # If regime is blocked and we do NOT have a position to manage,
+            # skip the AI call entirely (saves tokens and prevents chop overtrading).
+            if regime_blocked and not has_position:
+                logging.info(
+                    "[REGIME PREFILTER] blocked -> skipping AI call (no open position) | %s | %s",
+                    sym,
+                    pre_rr.reason if pre_rr else "unknown",
+                )
+                return
 
             try:
                 position_context = POSITION_MANAGER.get_position_context_for_ai(acct_id, cid)
@@ -162,6 +214,23 @@ def handle_webhook_logic(data):
 
             ai_signal = ai_decision.get("signal", "").upper()
             allowed_signals = {"BUY", "SELL", "HOLD", "FLAT"}
+
+            # If regime is blocked but we have an open position, allow only HOLD/FLAT.
+            if regime_blocked and ai_signal in {"BUY", "SELL"}:
+                logging.info(
+                    "[REGIME BLOCK] In blocked regime; ignoring AI entry signal %s and forcing HOLD (position_management_only)",
+                    ai_signal,
+                )
+                return
+
+            # If regime is OK, ensure AI entry aligns with detected direction.
+            if (not regime_blocked) and pre_rr is not None and ai_signal in {"BUY", "SELL"}:
+                if ai_signal == "BUY" and pre_rr.direction != "UP":
+                    logging.info("[REGIME BLOCK] AI BUY conflicts with regime direction=%s; blocking", pre_rr.direction)
+                    return
+                if ai_signal == "SELL" and pre_rr.direction != "DOWN":
+                    logging.info("[REGIME BLOCK] AI SELL conflicts with regime direction=%s; blocking", pre_rr.direction)
+                    return
 
             if ai_signal not in allowed_signals:
                 logging.info(f"AI blocked trade: {ai_decision.get('reason', 'No reason')}")
@@ -204,13 +273,14 @@ def handle_webhook_logic(data):
             ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
             prompt_version = ai_decision.get("prompt_version")
             cid = get_contract(sym)
-            
-        
-        # --- regime ---
-        regime_label = None
+
+        # --- Regime enforcement (final signal) ---
         if config.get("REGIME_FILTER_ENABLED", True) and sig in {"BUY", "SELL"}:
-            rr = REGIME_CLASSIFIER.classify(sym, desired_signal=sig)
-            regime_label = rr.regime
+            rr = pre_rr
+            if rr is None:
+                rr = REGIME_CLASSIFIER.classify(sym, desired_signal=sig)
+                regime_label = rr.regime
+
             if not rr.ok:
                 logging.info(
                     "[REGIME BLOCK] %s %s | %s | metrics=%s",
@@ -235,11 +305,20 @@ def handle_webhook_logic(data):
                     },
                 )
                 return
+
+            # Extra safety: ensure final signal matches detected direction.
+            if sig == "BUY" and rr.direction != "UP":
+                logging.info("[REGIME BLOCK] BUY %s | direction=%s mismatch", sym, rr.direction)
+                return
+            if sig == "SELL" and rr.direction != "DOWN":
+                logging.info("[REGIME BLOCK] SELL %s | direction=%s mismatch", sym, rr.direction)
+                return
+
             logging.info(
                 "[REGIME OK] %s %s | regime=%s | metrics=%s",
                 sig,
                 sym,
-                regime_label,
+                rr.regime,
                 {
                     k: rr.metrics.get(k)
                     for k in (
