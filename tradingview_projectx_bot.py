@@ -349,13 +349,17 @@ def handle_webhook_logic(data):
 
 if __name__ == "__main__":
     try:
-        authenticate()
-        signalr_listener = launch_signalr_listener(
-            get_token=get_token,
-            get_token_expiry=get_token_expiry,
-            authenticate=authenticate,
-            auth_lock=auth_lock
-        )
+        if str(config.get("BROKER_MODE", "live")).strip().lower() == "sim":
+            logging.info("BROKER_MODE=sim; skipping ProjectX authentication and SignalR listener.")
+            signalr_listener = None
+        else:
+            authenticate()
+            signalr_listener = launch_signalr_listener(
+                get_token=get_token,
+                get_token_expiry=get_token_expiry,
+                authenticate=authenticate,
+                auth_lock=auth_lock
+            )
         scheduler = start_scheduler(app)
         app.logger.info("Starting server.")
         app.run(host="0.0.0.0", port=TV_PORT, threaded=True)

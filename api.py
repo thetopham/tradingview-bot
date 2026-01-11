@@ -12,6 +12,7 @@ from config import load_config
 from dateutil import parser
 from supabase import create_client
 from market_regime import get_market_state
+from simbroker import handle_post as sim_post
 
 
 
@@ -23,6 +24,7 @@ SUPABASE_URL = config['SUPABASE_URL']
 SUPABASE_KEY = config['SUPABASE_KEY']
 MT = config['MT']
 MES = "MES"
+BROKER_MODE = str(config.get("BROKER_MODE", "live")).strip().lower()
 
 _PRICE_CACHE: Dict[str, Optional[Tuple[float, str]]] = {
     "symbol": None,
@@ -70,6 +72,9 @@ def get_supabase_client():
 
 # ─── API Functions ────────────────────────────────────
 def post(path, payload):
+    if BROKER_MODE == "sim":
+        return sim_post(path, payload)
+
     ensure_token()
     url = f"{PX_BASE}{path}"
     logging.debug("POST %s payload=%s", url, payload)
