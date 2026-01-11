@@ -73,6 +73,17 @@ def load_config():
 
         'REGIME_ATR_MIN_POINTS': _env_float_opt("REGIME_ATR_MIN_POINTS", None),
         'REGIME_ATR_MAX_POINTS': _env_float_opt("REGIME_ATR_MAX_POINTS", None),
+
+        # Broker mode (live or sim)
+        'BROKER_MODE': os.getenv("BROKER_MODE", "live").strip().lower(),
+
+        # SimBroker configuration
+        'SIM_BRACKET_SL_USD': float(os.getenv("SIM_BRACKET_SL_USD", 30)),
+        'SIM_BRACKET_TP_USD': float(os.getenv("SIM_BRACKET_TP_USD", 60)),
+        'SIM_TICK_SIZE': float(os.getenv("SIM_TICK_SIZE", 0.25)),
+        'SIM_TICK_VALUE': float(os.getenv("SIM_TICK_VALUE", 1.25)),
+        'SIM_FILL_POLICY': os.getenv("SIM_FILL_POLICY", "worst").strip().lower(),
+        'SIM_START_BALANCE': float(os.getenv("SIM_START_BALANCE", 100000.0)),
     }
 
     config['ACCOUNTS'] = {
