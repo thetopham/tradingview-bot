@@ -41,11 +41,12 @@ AI_TEST_ENDPOINTS = {
     "gamma": config.get("N8N_OVERSEER_URL_TEST3"),
     "delta": config.get("N8N_OVERSEER_URL_TEST4"),
     "epsilon": config.get("N8N_OVERSEER_URL_TEST5"),
+    "practice": config.get("N8N_OVERSEER_URL_TEST6"),
 }
 
 POSITION_MANAGER = PositionManager(ACCOUNTS)
 
-# --- Regime Classifier (execution-side gate) ---
+# --- Regime Classifier ---
 REGIME_CLASSIFIER = RegimeClassifier(
     supabase_url=config.get("SUPABASE_URL"),
     supabase_key=config.get("SUPABASE_KEY"),
