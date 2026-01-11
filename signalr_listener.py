@@ -14,6 +14,8 @@ from api import ACCOUNTS, search_pos, log_trade_results_to_supabase
 
 MT = pytz.timezone("America/Denver")
 USER_HUB_URL_BASE = "wss://rtc.topstepx.com/hubs/user?access_token={}"
+TOPSTEP_DOWNTIME_START = (14, 15)
+TOPSTEP_DOWNTIME_END = (15, 45)
 
 STATE_PATH = Path(os.environ.get("TRADE_STATE_PATH", "./trade_state.json"))
 STATE_BAK_PATH = STATE_PATH.with_suffix(STATE_PATH.suffix + ".bak")
@@ -37,6 +39,21 @@ def _tm_split(key):
 
 def _now_iso():
     return datetime.now(MT).isoformat()
+
+
+def _downtime_window(now=None):
+    now = now or datetime.now(MT)
+    start = now.replace(hour=TOPSTEP_DOWNTIME_START[0], minute=TOPSTEP_DOWNTIME_START[1], second=0, microsecond=0)
+    end = now.replace(hour=TOPSTEP_DOWNTIME_END[0], minute=TOPSTEP_DOWNTIME_END[1], second=0, microsecond=0)
+    return start, end
+
+
+def _seconds_until_market_open(now=None):
+    now = now or datetime.now(MT)
+    start, end = _downtime_window(now)
+    if start <= now < end:
+        return max((end - now).total_seconds(), 0)
+    return 0
 
 
 def _load_trade_state():
@@ -361,6 +378,24 @@ class SignalRTradingListener(threading.Thread):
 
         while not self.stop_event.is_set():
             try:
+                downtime_wait = _seconds_until_market_open()
+                if downtime_wait > 0:
+                    if self.hub:
+                        logging.info("Market closed for Topstep maintenance window; stopping SignalR hub.")
+                        try:
+                            self.hub.stop()
+                        except Exception:
+                            pass
+                        self.hub = None
+                    reopen_time = datetime.now(MT) + timedelta(seconds=downtime_wait)
+                    logging.info(
+                        "Market closed; waiting %.0fs until reconnect window at %s",
+                        downtime_wait,
+                        reopen_time.strftime("%H:%M:%S"),
+                    )
+                    self.stop_event.wait(timeout=downtime_wait)
+                    continue
+
                 self.ensure_token_valid()
                 token = self.token_getter()
 
@@ -372,6 +407,17 @@ class SignalRTradingListener(threading.Thread):
                 consecutive_failures = 0
 
                 while not self.stop_event.is_set():
+                    downtime_wait = _seconds_until_market_open()
+                    if downtime_wait > 0:
+                        logging.info("Entering Topstep maintenance window; disconnecting SignalR.")
+                        if self.hub:
+                            try:
+                                self.hub.stop()
+                            except Exception:
+                                pass
+                            self.hub = None
+                        break
+
                     if self.reconnect_event.wait(timeout=1):
                         self.reconnect_event.clear()
                         logging.info("Reconnect event triggered")
@@ -386,6 +432,14 @@ class SignalRTradingListener(threading.Thread):
 
             except Exception as e:
                 consecutive_failures += 1
+                downtime_wait = _seconds_until_market_open()
+                if downtime_wait > 0:
+                    logging.info(
+                        "SignalR error during maintenance window; waiting %.0fs until reopen.",
+                        downtime_wait,
+                    )
+                    self.stop_event.wait(timeout=downtime_wait)
+                    continue
                 wait_time = min(60 * consecutive_failures, 300)
                 logging.error(f"SignalRListener error (attempt {consecutive_failures}): {e}", exc_info=True)
                 logging.info(f"Waiting {wait_time}s before retry...")
