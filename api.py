@@ -12,6 +12,7 @@ from config import load_config
 from dateutil import parser
 from supabase import create_client
 from market_regime import get_market_state
+from simbroker import get_sim_broker
 
 
 
@@ -19,6 +20,7 @@ config = load_config()
 ACCOUNTS = config['ACCOUNTS']
 OVERRIDE_CONTRACT_ID = config['OVERRIDE_CONTRACT_ID']
 PX_BASE = config['PX_BASE']
+BROKER_MODE = config.get("BROKER_MODE", "live").lower()
 SUPABASE_URL = config['SUPABASE_URL']
 SUPABASE_KEY = config['SUPABASE_KEY']
 MT = config['MT']
@@ -70,6 +72,13 @@ def get_supabase_client():
 
 # ─── API Functions ────────────────────────────────────
 def post(path, payload):
+    if BROKER_MODE == "sim":
+        broker = get_sim_broker()
+        logging.debug("SIM POST %s payload=%s", path, payload)
+        data = broker.handle_request(path, payload)
+        logging.debug("SIM response JSON: %s", data)
+        return data
+
     ensure_token()
     url = f"{PX_BASE}{path}"
     logging.debug("POST %s payload=%s", url, payload)

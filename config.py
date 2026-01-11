@@ -26,6 +26,7 @@ def load_config():
 
     config = {
         'TV_PORT': int(os.getenv("TV_PORT", 5000)),
+        'BROKER_MODE': os.getenv("BROKER_MODE", "live").strip().lower(),
         'PX_BASE': os.getenv("PROJECTX_BASE_URL"),
         'USER_NAME': os.getenv("PROJECTX_USERNAME"),
         'API_KEY': os.getenv("PROJECTX_API_KEY"),
@@ -50,6 +51,15 @@ def load_config():
         'DAILY_PROFIT_TARGET': float(os.getenv("DAILY_PROFIT_TARGET", 99999.0)),
         'MAX_DAILY_LOSS': float(os.getenv("MAX_DAILY_LOSS", -250.0)),
         'MAX_CONSECUTIVE_LOSSES': int(os.getenv("MAX_CONSECUTIVE_LOSSES", 99999)),
+        # Sim broker defaults (USD brackets + tick config)
+        'SIM_BRACKET_SL_USD': _env_float_opt("SIM_BRACKET_SL_USD", 30.0),
+        'SIM_BRACKET_TP_USD': _env_float_opt("SIM_BRACKET_TP_USD", 60.0),
+        'SIM_TICK_SIZE': _env_float_opt("SIM_TICK_SIZE", 0.25),
+        'SIM_TICK_VALUE': _env_float_opt("SIM_TICK_VALUE", 1.25),
+        'SIM_FILL_POLICY': os.getenv("SIM_FILL_POLICY", "worst").strip().lower(),
+        'SIM_STATE_PATH': os.getenv("SIM_STATE_PATH", "/mnt/data/simbroker_state.json"),
+        'SIM_DATA_PATHS': os.getenv("SIM_DATA_PATHS"),
+        'SIM_START_BALANCE': _env_float_opt("SIM_START_BALANCE", 50000.0),
 
         # -----------------------------------------------------------------
         # Regime filter (blocks trades in chop / high-vol; allows LV trends)

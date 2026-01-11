@@ -34,6 +34,7 @@ DEFAULT_ACCOUNT = config['DEFAULT_ACCOUNT']
 LOCAL_TZ        = config['MT']
 GET_FLAT_START  = config['GET_FLAT_START']
 GET_FLAT_END    = config['GET_FLAT_END']
+BROKER_MODE     = config.get("BROKER_MODE", "live").lower()
 
 AI_TEST_ENDPOINTS = {
     "beta": config.get("N8N_OVERSEER_URL_TEST1"),
@@ -349,13 +350,16 @@ def handle_webhook_logic(data):
 
 if __name__ == "__main__":
     try:
-        authenticate()
-        signalr_listener = launch_signalr_listener(
-            get_token=get_token,
-            get_token_expiry=get_token_expiry,
-            authenticate=authenticate,
-            auth_lock=auth_lock
-        )
+        if BROKER_MODE != "sim":
+            authenticate()
+            signalr_listener = launch_signalr_listener(
+                get_token=get_token,
+                get_token_expiry=get_token_expiry,
+                authenticate=authenticate,
+                auth_lock=auth_lock
+            )
+        else:
+            logging.info("Sim broker mode enabled; skipping ProjectX auth + SignalR.")
         scheduler = start_scheduler(app)
         app.logger.info("Starting server.")
         app.run(host="0.0.0.0", port=TV_PORT, threaded=True)
