@@ -1,4 +1,3 @@
-# config.py
 import os
 from dotenv import load_dotenv
 from datetime import time as dtime
@@ -24,6 +23,7 @@ def load_config():
             return float(raw)
         except Exception:
             return default
+
     config = {
         'TV_PORT': int(os.getenv("TV_PORT", 5000)),
         'PX_BASE': os.getenv("PROJECTX_BASE_URL"),
@@ -42,7 +42,6 @@ def load_config():
         'N8N_OVERSEER_URL_TEST3': os.getenv("N8N_OVERSEER_URL_TEST3"),
         'N8N_OVERSEER_URL_TEST4': os.getenv("N8N_OVERSEER_URL_TEST4"),
         'N8N_OVERSEER_URL_TEST5': os.getenv("N8N_OVERSEER_URL_TEST5"),
-        'N8N_OVERSEER_URL_TEST6': os.getenv("N8N_OVERSEER_URL_TEST6"),
         'SUPABASE_URL': os.getenv("SUPABASE_URL"),
         'SUPABASE_KEY': os.getenv("SUPABASE_KEY"),
         'WEBHOOK': os.getenv("WEBHOOK"),
@@ -54,33 +53,27 @@ def load_config():
         # -----------------------------------------------------------------
         # Regime filter (blocks trades in chop / high-vol; allows LV trends)
         # -----------------------------------------------------------------
-        # Enable/disable the regime gate
         'REGIME_FILTER_ENABLED': _env_bool("REGIME_FILTER_ENABLED", True),
-        # If enabled and we cannot classify (no data / error), block trades
         'REGIME_FAIL_CLOSED': _env_bool("REGIME_FAIL_CLOSED", True),
 
-        # Supabase tables (defaults match the scanner/n8n conventions)
         'REGIME_TABLE_5M': os.getenv("REGIME_TABLE_5M", "tv_datafeed_5m"),
         'REGIME_TABLE_HTF': os.getenv("REGIME_TABLE_HTF", "tv_datafeed_30m"),
         'REGIME_TABLE_HTF_FALLBACK': os.getenv("REGIME_TABLE_HTF_FALLBACK", "tv_datafeed_15m"),
 
-        # Lookbacks
         'REGIME_LOOKBACK_BARS': int(os.getenv("REGIME_LOOKBACK_BARS", 140)),
         'REGIME_ER_LOOKBACK': int(os.getenv("REGIME_ER_LOOKBACK", 12)),
         'REGIME_ATR_PCTL_LOOKBACK': int(os.getenv("REGIME_ATR_PCTL_LOOKBACK", 50)),
 
-        # Thresholds (tuned for LV trend filtering)
         'REGIME_ER_MIN': float(os.getenv("REGIME_ER_MIN", 0.35)),
         'REGIME_ATR_PCTL_MAX': float(os.getenv("REGIME_ATR_PCTL_MAX", 0.25)),
         'REGIME_EMA_SPREAD_ATR_MIN': float(os.getenv("REGIME_EMA_SPREAD_ATR_MIN", 0.30)),
         'REGIME_SLOPE_ATR_MIN': float(os.getenv("REGIME_SLOPE_ATR_MIN", 0.50)),
         'REGIME_REQUIRE_HTF_ALIGN': _env_bool("REGIME_REQUIRE_HTF_ALIGN", True),
 
-        # Optional absolute ATR guards (in price points). Leave blank to disable.
         'REGIME_ATR_MIN_POINTS': _env_float_opt("REGIME_ATR_MIN_POINTS", None),
         'REGIME_ATR_MAX_POINTS': _env_float_opt("REGIME_ATR_MAX_POINTS", None),
     }
-    # Build account map
+
     config['ACCOUNTS'] = {
         k[len("ACCOUNT_"):].lower(): int(v)
         for k, v in os.environ.items() if k.startswith("ACCOUNT_")
@@ -95,12 +88,10 @@ def load_config():
         or [2.5, 5.0]
     )
     config['TICKS_PER_POINT'] = float(os.getenv("TICKS_PER_POINT", 4))
-    mountain = pytz.timezone("America/Denver")
 
-    # Trading hours are defined in Mountain Time (America/Denver)
+    mountain = pytz.timezone("America/Denver")
     config['GET_FLAT_START'] = dtime(14, 5)  # 2:05pm MT
     config['GET_FLAT_END'] = dtime(16, 0)    # 4:00pm MT
-    # Markets stay flat on Saturday and reopen Sunday at 4:00pm MT
     config['WEEKEND_MARKET_OPEN'] = dtime(16, 0)
     config['MT'] = mountain
     return config
