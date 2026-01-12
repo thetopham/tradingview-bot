@@ -46,6 +46,10 @@ def _normalize_ts_iso(value: Any) -> str | None:
         return None
     if isinstance(value, str):
         return value
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
         if isinstance(value, (int, float)):
             ts_value = float(value)
