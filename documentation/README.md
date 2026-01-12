@@ -13,6 +13,7 @@ to avoid duplication.
 - **Architecture**: [System Overview](#1-system-overview), [Core Components](#5-core-components), [Chart Image Pipeline](#5-3-chart-image-pipeline)
 - **Operations**: [Scheduler](#13-scheduler-apscheduler), [Dashboard](#14-dashboard), [Logging & Observability](#15-logging--observability)
 - **TradingView alert configs**: [`documentation/tradingview/`](tradingview/)
+- **Simulation**: [BrokerSim usage](brokersim.md)
 
 ---
 

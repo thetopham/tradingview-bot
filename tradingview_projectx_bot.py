@@ -10,13 +10,18 @@ from flask import Flask, request, jsonify
 from logging_config import setup_logging
 from config import load_config
 from api import (
-    flatten_contract, get_contract, ai_trade_decision, search_pos
+    flatten_contract, get_contract, ai_trade_decision, search_pos, sim_update
     )
 from position_manager import PositionManager
 from strategies import run_simple
 from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token, auth_lock
-from signalr_listener import launch_signalr_listener, annotate_trade_exit_intent
+from signalr_listener import (
+    launch_signalr_listener,
+    annotate_trade_exit_intent,
+    initialize_trade_state,
+    process_closed_position,
+)
 from dashboard import dashboard_bp
 from threading import Thread
 from datetime import datetime
@@ -33,6 +38,8 @@ DEFAULT_ACCOUNT = config['DEFAULT_ACCOUNT']
 LOCAL_TZ        = config['MT']
 GET_FLAT_START  = config['GET_FLAT_START']
 GET_FLAT_END    = config['GET_FLAT_END']
+BROKER_MODE     = config.get('BROKER_MODE', 'live')
+SIM_ACCOUNTS_ENABLED = any(str(name).lower().startswith("sim") for name in ACCOUNTS.keys())
 
 AI_TEST_ENDPOINTS = {
     "beta": config.get("N8N_OVERSEER_URL_TEST1"),
@@ -41,6 +48,7 @@ AI_TEST_ENDPOINTS = {
     "delta": config.get("N8N_OVERSEER_URL_TEST4"),
     "epsilon": config.get("N8N_OVERSEER_URL_TEST5"),
     "practice": config.get("N8N_OVERSEER_URL_TEST6"),
+    "sim001": config.get("N8N_OVERSEER_URL_TEST7"),
 }
 
 POSITION_MANAGER = PositionManager(ACCOUNTS)
@@ -80,6 +88,11 @@ def handle_webhook_logic(data):
 
         acct_id = ACCOUNTS[acct]
         cid = get_contract(sym)
+
+        closed_positions = sim_update(acct_id, cid)
+        for closed_position in closed_positions:
+            closed_cid = closed_position.get("contractId", cid)
+            process_closed_position(acct_id, closed_cid, closed_position)
 
         # Manual flatten (close all) signal
         if sig == "FLAT":
@@ -122,6 +135,8 @@ def handle_webhook_logic(data):
                 route_label = "TEST5"
             elif acct == "practice":
                 route_label = "TEST6"
+            elif acct == "sim001":
+                route_label = "TEST7"
 
             safe_url = ai_url.split("?")[0] if ai_url else "unset"
             logging.info("[AI ROUTE] account=%s -> %s url=%s", acct, route_label, safe_url)
@@ -196,13 +211,16 @@ def handle_webhook_logic(data):
 
 if __name__ == "__main__":
     try:
-        authenticate()
-        signalr_listener = launch_signalr_listener(
-            get_token=get_token,
-            get_token_expiry=get_token_expiry,
-            authenticate=authenticate,
-            auth_lock=auth_lock
-        )
+        if str(BROKER_MODE).lower() == "sim" or SIM_ACCOUNTS_ENABLED:
+            initialize_trade_state()
+        if str(BROKER_MODE).lower() != "sim":
+            authenticate()
+            signalr_listener = launch_signalr_listener(
+                get_token=get_token,
+                get_token_expiry=get_token_expiry,
+                authenticate=authenticate,
+                auth_lock=auth_lock
+            )
         scheduler = start_scheduler(app)
         app.logger.info("Starting server.")
         app.run(host="0.0.0.0", port=TV_PORT, threaded=True)

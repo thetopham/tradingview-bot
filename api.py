@@ -21,7 +21,10 @@ PX_BASE = config['PX_BASE']
 SUPABASE_URL = config['SUPABASE_URL']
 SUPABASE_KEY = config['SUPABASE_KEY']
 MT = config['MT']
+BROKER_MODE = config['BROKER_MODE']
+SIM_STATE_PATH = config['SIM_STATE_PATH']
 MES = "MES"
+ACCOUNT_NAME_BY_ID = {int(v): str(k).lower() for k, v in ACCOUNTS.items()}
 
 _PRICE_CACHE: Dict[str, Optional[Tuple[float, str]]] = {
     "symbol": None,
@@ -29,10 +32,56 @@ _PRICE_CACHE: Dict[str, Optional[Tuple[float, str]]] = {
     "value": None,
 }
 _SUPABASE_CLIENT = None
+_SIM_BROKER = None
+
+def _is_sim_mode() -> bool:
+    return str(BROKER_MODE).lower() == "sim"
+
+def _is_sim_account_id(acct_id: Optional[int]) -> bool:
+    if acct_id is None:
+        return False
+    name = ACCOUNT_NAME_BY_ID.get(int(acct_id))
+    return bool(name and str(name).lower().startswith("sim"))
+
+def _use_sim_broker(account_id: Optional[int] = None, payload: Optional[dict] = None) -> bool:
+    if _is_sim_mode():
+        return True
+    acct_id = account_id
+    if acct_id is None and isinstance(payload, dict):
+        acct_id = payload.get("accountId")
+    if acct_id is None:
+        return False
+    try:
+        acct_id_int = int(acct_id)
+    except (TypeError, ValueError):
+        return False
+    return _is_sim_account_id(acct_id_int)
 
 def reset_supabase_client():
     global _SUPABASE_CLIENT
     _SUPABASE_CLIENT = None
+
+def _get_sim_broker():
+    global _SIM_BROKER
+    if _SIM_BROKER is None:
+        from simbroker import SimBroker
+        _SIM_BROKER = SimBroker(SIM_STATE_PATH, config)
+    return _SIM_BROKER
+
+def _sim_broker_post(path: str, payload: dict) -> dict:
+    broker = _get_sim_broker()
+    handler = getattr(broker, "handle", None)
+    if callable(handler):
+        return handler(path, payload)
+    return broker.handle_post(path, payload)
+
+def _maybe_sim_update(acct_id, contract_id: Optional[str] = None) -> None:
+    if not _use_sim_broker(account_id=acct_id):
+        return
+    cid = contract_id or OVERRIDE_CONTRACT_ID
+    if not cid:
+        return
+    sim_update(acct_id, cid)
 
 def _timeframe_filters(max_minutes: int = 1) -> List[str]:
     """Return timeframes up to the requested minute window (defaults to 1m)."""
@@ -69,6 +118,8 @@ def get_supabase_client():
 
 # ─── API Functions ────────────────────────────────────
 def post(path, payload):
+    if _use_sim_broker(payload=payload):
+        return _sim_broker_post(path, payload)
     ensure_token()
     url = f"{PX_BASE}{path}"
     logging.debug("POST %s payload=%s", url, payload)
@@ -89,6 +140,13 @@ def post(path, payload):
     data = resp.json()
     logging.debug("Response JSON: %s", data)
     return data
+
+
+def sim_update(acct_id: int, cid: str) -> List[Dict]:
+    if not _use_sim_broker(account_id=acct_id):
+        return []
+    resp = _get_sim_broker().sim_update(acct_id, cid)
+    return resp.get("closed", []) if isinstance(resp, dict) else []
 
 
 def place_market(acct_id, cid, side, size):
@@ -134,6 +192,7 @@ def place_market_bracket(acct_id, cid, side, size, *, stop_loss_ticks=None, take
     return post("/api/Order/place", payload)
 
 def search_open(acct_id):
+    _maybe_sim_update(acct_id)
     orders = post("/api/Order/searchOpen", {"accountId": acct_id}).get("orders", [])
     logging.debug("Open orders for %s: %s", acct_id, orders)
     return orders
@@ -145,15 +204,24 @@ def cancel(acct_id, order_id):
     return resp
 
 def search_pos(acct_id):
+    _maybe_sim_update(acct_id)
     pos = post("/api/Position/searchOpen", {"accountId": acct_id}).get("positions", [])
     logging.debug("Open positions for %s: %s", acct_id, pos)
     return pos
 
-def search_accounts(only_active_accounts: bool = True) -> List[Dict]:
+def search_accounts(only_active_accounts: bool = True, account_id: Optional[int] = None) -> List[Dict]:
     """Return account records with balance/canTrade flags."""
-
     payload = {"onlyActiveAccounts": bool(only_active_accounts)}
-    accounts = post("/api/Account/search", payload).get("accounts", [])
+    if _use_sim_broker(account_id=account_id):
+        accounts = _sim_broker_post("/api/Account/search", payload).get("accounts", [])
+    else:
+        accounts = post("/api/Account/search", payload).get("accounts", [])
+        if account_id is None:
+            sim_accounts = [
+                account for account in _sim_broker_post("/api/Account/search", payload).get("accounts", [])
+            ]
+            if sim_accounts:
+                accounts = list(accounts) + sim_accounts
     logging.debug("Accounts search (active_only=%s) returned %s records", only_active_accounts, len(accounts))
     return accounts
 
