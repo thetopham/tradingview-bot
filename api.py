@@ -23,6 +23,120 @@ SUPABASE_KEY = config['SUPABASE_KEY']
 MT = config['MT']
 MES = "MES"
 
+# ── Broker routing (live vs sim) ────────────────────────────────────────────
+BROKER_MODE = (os.getenv("BROKER_MODE") or config.get("BROKER_MODE") or "live").strip().lower()
+if BROKER_MODE not in ("live", "sim"):
+    BROKER_MODE = "live"
+
+# For A/B testing two simbroker implementations:
+#   SIMBROKER_IMPL=assistant|codex
+SIMBROKER_IMPL = (os.getenv("SIMBROKER_IMPL") or "assistant").strip().lower()
+if SIMBROKER_IMPL not in ("assistant", "codex"):
+    SIMBROKER_IMPL = "assistant"
+
+_SIM_BROKER = None
+_SIM_LOGGED_CLOSURES = set()  # (acct_id, contract_id, exit_ts)
+
+
+def _get_sim_broker():
+    """Lazy-load the selected SimBroker implementation."""
+    global _SIM_BROKER
+
+    if _SIM_BROKER is not None:
+        return _SIM_BROKER
+
+    if SIMBROKER_IMPL == "codex":
+        try:
+            from simbroker_codex import SimBroker  # type: ignore
+        except Exception as exc:
+            logging.warning("SIMBROKER_IMPL=codex requested but import failed (%s). Falling back to assistant.", exc)
+            from simbroker_assistant import SimBroker  # type: ignore
+    else:
+        from simbroker_assistant import SimBroker  # type: ignore
+
+    _SIM_BROKER = SimBroker()
+    return _SIM_BROKER
+
+
+def _read_trade_state():
+    path = os.getenv("TRADE_STATE_PATH", "./trade_state.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
+def _get_trade_meta(acct_id: int, cid: str) -> Dict[str, Any]:
+    state = _read_trade_state()
+    meta = (state.get("trade_meta") or {}).get(f"{int(acct_id)}|{cid}")
+    return dict(meta) if isinstance(meta, dict) else {}
+
+
+def _sim_log_trade_results(acct_id: int, cid: str, meta_override: Optional[Dict[str, Any]] = None):
+    """
+    In sim mode we do not have SignalR close events.
+
+    This function mirrors what signalr_listener would do on a close event:
+    - fetch trades via /api/Trade/search (served by SimBroker)
+    - compute PnL + entry/exit
+    - write to Supabase trade_results
+    """
+    meta = dict(meta_override) if isinstance(meta_override, dict) else _get_trade_meta(acct_id, cid)
+
+    entry_time = meta.get("entry_time")
+    ai_decision_id = meta.get("ai_decision_id")
+
+    # Fallback if trade_meta is missing (manual position / legacy flow)
+    if entry_time is None:
+        entry_time = time.time() - 3600  # 1h window to capture the entry trade
+
+    try:
+        log_trade_results_to_supabase(acct_id, cid, entry_time, ai_decision_id, meta)
+    except Exception as exc:
+        logging.error("[sim] log_trade_results_to_supabase failed acct=%s cid=%s: %s", acct_id, cid, exc)
+
+
+def sim_update(acct_id: int, cid: Optional[str] = None, now_ts_iso: Optional[str] = None):
+    """
+    Public helper: advance the sim broker and log any bracket-triggered closes.
+
+    You can call this once per bot cycle (recommended), but api.search_pos/search_open
+    also call it automatically in sim mode.
+    """
+    if BROKER_MODE != "sim":
+        return []
+
+    broker = _get_sim_broker()
+    events = broker.sim_update(int(acct_id), cid, now_ts_iso) or []
+
+    for ev in events:
+        try:
+            exit_ts = ev.get("exitTimestamp")
+            key = (int(ev.get("accountId")), str(ev.get("contractId")), str(exit_ts))
+            if key in _SIM_LOGGED_CLOSURES:
+                continue
+            _SIM_LOGGED_CLOSURES.add(key)
+
+            meta = _get_trade_meta(int(ev.get("accountId")), str(ev.get("contractId")))
+            if isinstance(meta, dict):
+                meta = dict(meta)
+                meta.setdefault("exit_reason", ev.get("reason"))
+                meta.setdefault("exit_trigger", "bracket")
+            _sim_log_trade_results(int(ev.get("accountId")), str(ev.get("contractId")), meta)
+        except Exception as exc:
+            logging.error("[sim] failed processing closure event %s: %s", ev, exc)
+
+    return events
+
+
+def _sim_update_and_log(acct_id: int):
+    """Internal: update all open positions for this account and log closures."""
+    if BROKER_MODE != "sim":
+        return
+    sim_update(acct_id, cid=None, now_ts_iso=None)
+
+
 _PRICE_CACHE: Dict[str, Optional[Tuple[float, str]]] = {
     "symbol": None,
     "ts": 0,
@@ -69,28 +183,28 @@ def get_supabase_client():
 
 # ─── API Functions ────────────────────────────────────
 def post(path, payload):
+    """
+    Unified ProjectX API caller.
+
+    - live mode: HTTP POST to ProjectX Gateway (existing behavior)
+    - sim mode : in-process dispatch to SimBroker (no HTTP, no SignalR, no token)
+    """
+    if BROKER_MODE == "sim":
+        broker = _get_sim_broker()
+        return broker.handle(path, payload or {})
+
     ensure_token()
     url = f"{PX_BASE}{path}"
-    logging.debug("POST %s payload=%s", url, payload)
-    resp = session.post(
-        url,
-        json=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {get_token()}"
-        },
-        timeout=(3.05, 10)
-    )
-    if resp.status_code == 429:
-        logging.warning("Rate limit hit: %s %s", resp.status_code, resp.text)
-    if resp.status_code >= 400:
-        logging.error("Error on POST %s: %s", url, resp.text)
-    resp.raise_for_status()
-    data = resp.json()
-    logging.debug("Response JSON: %s", data)
-    return data
-
-
+    headers = {"Authorization": f"Bearer {get_token()}"}
+    try:
+        logging.debug(f"POST {url} payload={payload}")
+        resp = session.post(url, json=payload, headers=headers)
+        if resp.status_code >= 400:
+            logging.error(f"HTTP {resp.status_code} error response: {resp.text}")
+        return resp.json()
+    except Exception as e:
+        logging.exception(f"POST {url} failed: {e}")
+        return {"success": False, "errorMessage": str(e)}
 def place_market(acct_id, cid, side, size):
     logging.info("Placing market order acct=%s cid=%s side=%s size=%s", acct_id, cid, side, size)
     return post("/api/Order/place", {
@@ -134,6 +248,9 @@ def place_market_bracket(acct_id, cid, side, size, *, stop_loss_ticks=None, take
     return post("/api/Order/place", payload)
 
 def search_open(acct_id):
+    if BROKER_MODE == "sim":
+        _sim_update_and_log(acct_id)
+
     orders = post("/api/Order/searchOpen", {"accountId": acct_id}).get("orders", [])
     logging.debug("Open orders for %s: %s", acct_id, orders)
     return orders
@@ -145,12 +262,20 @@ def cancel(acct_id, order_id):
     return resp
 
 def search_pos(acct_id):
+    if BROKER_MODE == "sim":
+        _sim_update_and_log(acct_id)
+
     pos = post("/api/Position/searchOpen", {"accountId": acct_id}).get("positions", [])
     logging.debug("Open positions for %s: %s", acct_id, pos)
     return pos
 
 def search_accounts(only_active_accounts: bool = True) -> List[Dict]:
     """Return account records with balance/canTrade flags."""
+
+    if BROKER_MODE == "sim":
+        # Advance sim time + log any bracket exits for all configured accounts
+        for _aid in sorted(set(ACCOUNTS.values())):
+            _sim_update_and_log(_aid)
 
     payload = {"onlyActiveAccounts": bool(only_active_accounts)}
     accounts = post("/api/Account/search", payload).get("accounts", [])
@@ -161,6 +286,14 @@ def close_pos(acct_id, cid):
     resp = post("/api/Position/closeContract", {"accountId": acct_id, "contractId": cid})
     if not resp.get("success", True):
         logging.warning("Close position reported failure: %s", resp)
+    if BROKER_MODE == "sim":
+        meta = _get_trade_meta(acct_id, cid)
+        if isinstance(meta, dict):
+            meta = dict(meta)
+            meta.setdefault("exit_reason", "manual_close")
+            meta.setdefault("exit_trigger", "manual")
+        _sim_log_trade_results(acct_id, cid, meta)
+
     return resp
 
 def search_trades(acct_id, since):

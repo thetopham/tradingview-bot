@@ -229,6 +229,13 @@ def track_trade(
 ):
     """Enhanced trade tracking with session ID to prevent mixing trades"""
 
+    # If the process restarted, ensure we load existing trade_state.json so we don't clobber it
+    try:
+        if not trade_meta and os.path.exists(TRADE_STATE_PATH):
+            _load_trade_state()
+    except Exception:
+        pass
+
     import uuid
 
     session_id = str(uuid.uuid4())[:8]

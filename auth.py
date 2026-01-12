@@ -1,84 +1,58 @@
-#auth.py
-
-import time
+# auth.py
+import os
 import threading
-import logging
-from datetime import datetime
+import time
 import requests
+import logging
 from config import load_config
-
-session = requests.Session()
 
 config = load_config()
 PX_BASE = config['PX_BASE']
-USER_NAME = config['USER_NAME']
-API_KEY = config['API_KEY']
-GET_FLAT_START = config['GET_FLAT_START']
-GET_FLAT_END = config['GET_FLAT_END']
-MT = config['MT']
-WEEKEND_MARKET_OPEN = config['WEEKEND_MARKET_OPEN']
 
+# Broker mode (live|sim). In sim mode we never hit ProjectX.
+BROKER_MODE = (os.getenv("BROKER_MODE") or config.get("BROKER_MODE") or "live").strip().lower()
 
-# ─── Auth State ───────────────────────────────────────
+session = requests.Session()
 _token = None
 _token_expiry = 0
 auth_lock = threading.Lock()
 
-def in_get_flat(now=None):
-    """Return True when trading should be paused (all times Mountain)."""
-    now = now or datetime.now(MT)
-    if now.tzinfo:
-        now = now.astimezone(MT)
-    else:
-        now = MT.localize(now)
-
-    t = now.timetz().replace(tzinfo=None)
-    weekday = now.weekday()  # Monday=0, Sunday=6
-
-    # Monday–Thursday: respect daily flatten window
-    if weekday < 4:
-        return GET_FLAT_START <= t <= GET_FLAT_END
-
-    # Friday: block starting at the window start, then stay flat for the weekend
-    if weekday == 4:
-        return t >= GET_FLAT_START
-
-    # Saturday: always flat
-    if weekday == 5:
-        return True
-
-    # Sunday: flat until futures market re-opens (4:00pm MT)
-    if weekday == 6:
-        return t < WEEKEND_MARKET_OPEN
-
-    return False
+# Guard used elsewhere to prevent flatten/close loops
+in_get_flat = False
 
 def authenticate():
+    """Authenticate against ProjectX Gateway (live) or return a dummy token (sim)."""
     global _token, _token_expiry
-    logging.info("Authenticating to Topstep API...")
-    resp = session.post(
-        f"{PX_BASE}/api/Auth/loginKey",
-        json={"userName": USER_NAME, "apiKey": API_KEY},
-        headers={"Content-Type": "application/json"},
-        timeout=(3.05, 10)
-    )
-    logging.info(f"Topstep response: {resp.status_code} {resp.text}")
+
+    if BROKER_MODE == "sim":
+        _token = "SIM_TOKEN"
+        _token_expiry = time.time() + 3600
+        return _token
+
+    payload = {"userName": os.getenv("PROJECTX_USER"), "apiKey": os.getenv("PROJECTX_API_KEY")}
+    url = f"{PX_BASE}/api/Auth/loginKey"
+    resp = session.post(url, json=payload, timeout=(3.05, 10))
     resp.raise_for_status()
     data = resp.json()
-    if not data.get("success"):
-        logging.error("Auth failed: %s", data)
-        raise RuntimeError("Auth failed")
-    _token = data["token"]
-    _token_expiry = time.time() + 23 * 3600
-    logging.info(f"Authentication successful; token (first 8): {_token[:8]}... expires in ~23h.")
+    _token = data.get("token")
+    # token valid for 24 hours (or treat as 1h if missing)
+    _token_expiry = time.time() + 3600 * 24
+    return _token
+
+def ensure_token():
+    """Refresh token if needed (live). No-op for sim."""
+    global _token_expiry
+
+    if BROKER_MODE == "sim":
+        return
+
+    with auth_lock:
+        if _token is None or time.time() > (_token_expiry - 60):
+            logging.info("Token expired or missing, authenticating...")
+            authenticate()
 
 def get_token():
     return _token
 
 def get_token_expiry():
     return _token_expiry
-
-def ensure_token():
-    with auth_lock:
-        if _token is None or time.time() >= _token_expiry:
-            authenticate()

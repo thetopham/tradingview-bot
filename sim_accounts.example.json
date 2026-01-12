@@ -1,0 +1,23 @@
+{
+  "sim001": {
+    "id": 900001,
+    "balance": 50000,
+    "sl_usd": 30,
+    "tp_usd": 60,
+    "fill_policy": "worst"
+  },
+  "sim002": {
+    "id": 900002,
+    "balance": 50000,
+    "sl_usd": 20,
+    "tp_usd": 40,
+    "fill_policy": "best"
+  },
+  "sim003": {
+    "id": 900003,
+    "balance": 25000,
+    "sl_usd": 15,
+    "tp_usd": 30,
+    "fill_policy": "worst"
+  }
+}
