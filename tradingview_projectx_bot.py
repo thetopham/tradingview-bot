@@ -48,6 +48,7 @@ AI_TEST_ENDPOINTS = {
     "delta": config.get("N8N_OVERSEER_URL_TEST4"),
     "epsilon": config.get("N8N_OVERSEER_URL_TEST5"),
     "practice": config.get("N8N_OVERSEER_URL_TEST6"),
+    "sim001": config.get("N8N_OVERSEER_URL_TEST7"),
 }
 
 POSITION_MANAGER = PositionManager(ACCOUNTS)
