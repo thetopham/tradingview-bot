@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import threading
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterable, Sequence
+
+from supabase import create_client
 
 SIM_STATE_PATH = "sim_state.json"
 
@@ -56,6 +59,221 @@ def _save_state_atomic(state_path: str, state: dict[str, Any]) -> None:
     with open(tmp_path, "w", encoding="utf-8") as handle:
         json.dump(state, handle, indent=2, sort_keys=True)
     os.replace(tmp_path, state_path)
+
+
+def _normalize_ts_iso(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    try:
+        if isinstance(value, (int, float)):
+            ts_value = float(value)
+            if ts_value > 1e12:
+                ts_value /= 1000.0
+            return datetime.fromtimestamp(ts_value, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    except Exception:
+        return None
+    return None
+
+
+def symbol_from_contract(contractId: str) -> str:
+    if not contractId:
+        return ""
+    upper = contractId.upper()
+    if ".MES." in upper:
+        return "MES"
+    tokens = [token.strip() for token in contractId.split(".") if token.strip()]
+    ignored = {"CON", "F", "US"}
+    symbol_candidates = [token for token in tokens if token.isalpha() and token.upper() not in ignored]
+    if symbol_candidates:
+        return symbol_candidates[-1].upper()
+    for token in tokens:
+        if any(char.isalpha() for char in token):
+            return "".join(char for char in token if char.isalpha()).upper()
+    return upper
+
+
+class PriceFeed:
+    def get_latest_close(
+        self,
+        symbol: str,
+        timeframe_preference: Sequence[str] | None = None,
+    ) -> tuple[float | None, str | None]:
+        raise NotImplementedError
+
+    def get_bars(
+        self,
+        symbol: str,
+        timeframe: str,
+        start_ts_iso: str,
+        end_ts_iso: str,
+        limit: int = 20000,
+    ) -> list[dict]:
+        raise NotImplementedError
+
+
+class SupabasePriceFeed(PriceFeed):
+    def __init__(self, config: dict[str, Any] | None = None, table: str = "tv_datafeed") -> None:
+        self.table = table
+        self.supabase_url = (config or {}).get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
+        self.supabase_key = (config or {}).get("SUPABASE_KEY") or os.getenv("SUPABASE_KEY")
+        self._client = None
+
+    def _get_client(self):
+        if self._client is not None:
+            return self._client
+        if not self.supabase_url or not self.supabase_key:
+            return None
+        try:
+            self._client = create_client(self.supabase_url, self.supabase_key)
+        except Exception as exc:
+            logging.warning("Supabase client init failed: %s", exc)
+            return None
+        return self._client
+
+    def get_latest_close(
+        self,
+        symbol: str,
+        timeframe_preference: Sequence[str] | None = None,
+    ) -> tuple[float | None, str | None]:
+        client = self._get_client()
+        if not client or not symbol:
+            return None, None
+        preferences = list(timeframe_preference or ["1m", "5m"])
+        for timeframe in preferences:
+            try:
+                result = (
+                    client.table(self.table)
+                    .select("ts,c")
+                    .eq("symbol", symbol)
+                    .eq("timeframe", timeframe)
+                    .order("ts", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                rows = result.data or []
+                if not rows:
+                    continue
+                row = rows[0]
+                close = row.get("c")
+                ts_iso = _normalize_ts_iso(row.get("ts"))
+                if close is None:
+                    continue
+                return float(close), ts_iso
+            except Exception as exc:
+                logging.debug("Supabase latest close fetch failed (%s %s): %s", symbol, timeframe, exc)
+                continue
+        return None, None
+
+    def get_bars(
+        self,
+        symbol: str,
+        timeframe: str,
+        start_ts_iso: str,
+        end_ts_iso: str,
+        limit: int = 20000,
+    ) -> list[dict]:
+        client = self._get_client()
+        if not client or not symbol or not timeframe:
+            return []
+        try:
+            result = (
+                client.table(self.table)
+                .select("ts,o,h,l,c,v")
+                .eq("symbol", symbol)
+                .eq("timeframe", timeframe)
+                .gte("ts", start_ts_iso)
+                .lte("ts", end_ts_iso)
+                .order("ts", desc=False)
+                .limit(limit)
+                .execute()
+            )
+            rows = result.data or []
+        except Exception as exc:
+            logging.debug("Supabase bar fetch failed (%s %s): %s", symbol, timeframe, exc)
+            return []
+        bars = []
+        for row in rows:
+            ts_iso = _normalize_ts_iso(row.get("ts"))
+            bars.append(
+                {
+                    "t": ts_iso,
+                    "o": row.get("o"),
+                    "h": row.get("h"),
+                    "l": row.get("l"),
+                    "c": row.get("c"),
+                    "v": row.get("v"),
+                }
+            )
+        return bars
+
+
+class InMemoryPriceFeed(PriceFeed):
+    def __init__(self, bars_by_symbol_timeframe: dict) -> None:
+        self.bars_by_symbol_timeframe = bars_by_symbol_timeframe or {}
+
+    def _get_bars_for(self, symbol: str, timeframe: str) -> list[dict]:
+        if not symbol or not timeframe:
+            return []
+        if isinstance(self.bars_by_symbol_timeframe, dict):
+            by_symbol = self.bars_by_symbol_timeframe.get(symbol) or self.bars_by_symbol_timeframe.get(symbol.upper())
+            if isinstance(by_symbol, dict):
+                return list(by_symbol.get(timeframe, []))
+            key = (symbol, timeframe)
+            if key in self.bars_by_symbol_timeframe:
+                return list(self.bars_by_symbol_timeframe.get(key, []))
+        return []
+
+    def get_latest_close(
+        self,
+        symbol: str,
+        timeframe_preference: Sequence[str] | None = None,
+    ) -> tuple[float | None, str | None]:
+        preferences = list(timeframe_preference or ["1m", "5m"])
+        for timeframe in preferences:
+            bars = self._get_bars_for(symbol, timeframe)
+            if not bars:
+                continue
+            latest = bars[-1]
+            close = latest.get("c")
+            ts_iso = latest.get("t") or latest.get("ts")
+            if close is None:
+                continue
+            return float(close), _normalize_ts_iso(ts_iso)
+        return None, None
+
+    def get_bars(
+        self,
+        symbol: str,
+        timeframe: str,
+        start_ts_iso: str,
+        end_ts_iso: str,
+        limit: int = 20000,
+    ) -> list[dict]:
+        bars = self._get_bars_for(symbol, timeframe)
+        if not bars:
+            return []
+        filtered = []
+        for bar in bars:
+            ts = bar.get("t") or bar.get("ts")
+            ts_iso = _normalize_ts_iso(ts)
+            if ts_iso is None:
+                continue
+            if start_ts_iso <= ts_iso <= end_ts_iso:
+                filtered.append(
+                    {
+                        "t": ts_iso,
+                        "o": bar.get("o"),
+                        "h": bar.get("h"),
+                        "l": bar.get("l"),
+                        "c": bar.get("c"),
+                        "v": bar.get("v"),
+                    }
+                )
+            if len(filtered) >= limit:
+                break
+        return filtered
 
 
 class SimBroker:
