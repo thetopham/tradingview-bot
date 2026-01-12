@@ -225,6 +225,14 @@ def start_scheduler(app):
             args=["practice", "5m"],
             replace_existing=True,
         )
+    if "sim001" in ACCOUNTS:
+        scheduler.add_job(
+            trigger_overseer,
+            CronTrigger(minute="0,5,10,15,20,25,30,35,40,45,50,55", second=15, timezone=LOCAL_TZ),
+            id="overseer_job_5m_practice",
+            args=["sim001", "5m"],
+            replace_existing=True,
+        )
     '''
     if "delta" in ACCOUNTS:
         scheduler.add_job(
