@@ -189,7 +189,7 @@ def start_scheduler(app):
         replace_existing=True,
     )   
 
-    
+    '''
     if "alpha" in ACCOUNTS:
         scheduler.add_job(
             trigger_overseer,
@@ -216,7 +216,7 @@ def start_scheduler(app):
             args=["gamma", "5m"],
             replace_existing=True,
         )
-
+    '''
     if "practice" in ACCOUNTS:
         scheduler.add_job(
             trigger_overseer,
@@ -225,7 +225,7 @@ def start_scheduler(app):
             args=["practice", "5m"],
             replace_existing=True,
         )
-    
+    '''
     if "delta" in ACCOUNTS:
         scheduler.add_job(
             trigger_overseer,
@@ -234,7 +234,7 @@ def start_scheduler(app):
             args=["delta", "15m"],
             replace_existing=True,
         )
-
+    '''
     if "epsilon" in ACCOUNTS:
         scheduler.add_job(
             trigger_overseer,
