@@ -298,10 +298,32 @@ class SimBroker:
         if path == "/api/Account/search":
             only_active = payload.get("onlyActiveAccounts")
             return self.search_accounts(only_active)
+        if path == "/api/Auth/loginKey":
+            return self.auth_login_key(payload)
+        if path == "/api/Auth/validate":
+            return self.auth_validate(payload)
+        if path == "/api/Contract/available":
+            return self.contract_available(payload)
+        if path == "/api/Contract/search":
+            return self.contract_search(payload)
+        if path == "/api/Contract/searchById":
+            return self.contract_search_by_id(payload)
+        if path == "/api/History/retrieveBars":
+            return self.history_retrieve_bars(payload)
         if path == "/api/Order/place":
             return self.place_order(payload)
+        if path == "/api/Order/search":
+            return self.search_orders(payload)
         if path == "/api/Order/searchOpen":
             return self.search_open_orders(payload)
+        if path == "/api/Order/cancel":
+            return self.cancel_order(payload)
+        if path == "/api/Order/modify":
+            return self.modify_order(payload)
+        if path == "/api/Position/closeContract":
+            return self.close_contract(payload)
+        if path == "/api/Position/partialCloseContract":
+            return self.partial_close_contract(payload)
         if path == "/api/Position/searchOpen":
             return self.search_open_positions(payload)
         if path == "/api/Trade/search":
@@ -331,6 +353,124 @@ class SimBroker:
 
     def _response_error(self, code: str, message: str) -> dict[str, Any]:
         return {"success": False, "errorCode": code, "errorMessage": message}
+
+    def _normalize_ts(self, value: Any) -> str | None:
+        return _normalize_ts_iso(value)
+
+    def _filter_by_time_range(
+        self,
+        records: Iterable[dict[str, Any]],
+        start_ts: Any,
+        end_ts: Any,
+        timestamp_key: str,
+    ) -> list[dict[str, Any]]:
+        normalized_start = self._normalize_ts(start_ts) if start_ts is not None else None
+        normalized_end = self._normalize_ts(end_ts) if end_ts is not None else None
+        if normalized_start is None and normalized_end is None:
+            return list(records)
+        filtered = []
+        for record in records:
+            record_ts = record.get(timestamp_key) or record.get("timestamp")
+            normalized_record_ts = self._normalize_ts(record_ts) or record_ts
+            if normalized_record_ts is None:
+                continue
+            if normalized_start is not None and normalized_record_ts < normalized_start:
+                continue
+            if normalized_end is not None and normalized_record_ts > normalized_end:
+                continue
+            filtered.append(record)
+        return filtered
+
+    def _build_contract(self, contract_id: str) -> dict[str, Any]:
+        symbol = symbol_from_contract(contract_id)
+        default_tick_size = float(self.config.get("SIM_DEFAULT_TICK_SIZE", 0.25))
+        default_tick_value = float(self.config.get("SIM_DEFAULT_TICK_VALUE", 1.25))
+        if symbol.upper() == "MES":
+            tick_size = 0.25
+            tick_value = 1.25
+        else:
+            tick_size = default_tick_size
+            tick_value = default_tick_value
+        return {
+            "id": contract_id,
+            "name": symbol or contract_id,
+            "description": f"{symbol} Futures" if symbol else contract_id,
+            "tickSize": tick_size,
+            "tickValue": tick_value,
+            "activeContract": True,
+            "symbolId": symbol or contract_id,
+        }
+
+    def _gather_contract_ids(self, payload: dict[str, Any]) -> list[str]:
+        contract_ids: list[str] = []
+        config_contract_id = self.config.get("OVERRIDE_CONTRACT_ID") or "CON.F.US.MES.H26"
+        if config_contract_id:
+            contract_ids.append(config_contract_id)
+        payload_contract_id = payload.get("contractId") or payload.get("id")
+        if payload_contract_id:
+            contract_ids.append(payload_contract_id)
+        payload_ids = payload.get("contractIds")
+        if isinstance(payload_ids, list):
+            contract_ids.extend([cid for cid in payload_ids if cid])
+        unique = []
+        for cid in contract_ids:
+            if cid not in unique:
+                unique.append(cid)
+        return unique
+
+    def auth_login_key(self, payload: dict[str, Any]) -> dict[str, Any]:
+        token = payload.get("token") or "sim-token"
+        return self._response_success({"token": token, "newToken": token})
+
+    def auth_validate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        token = payload.get("token") or payload.get("newToken") or "sim-token"
+        return self._response_success({"token": token, "newToken": token})
+
+    def contract_available(self, payload: dict[str, Any]) -> dict[str, Any]:
+        contracts = [self._build_contract(cid) for cid in self._gather_contract_ids(payload)]
+        return self._response_success({"contracts": contracts})
+
+    def contract_search(self, payload: dict[str, Any]) -> dict[str, Any]:
+        search_text = (payload.get("searchText") or payload.get("searchTerm") or "").strip().lower()
+        contracts = [self._build_contract(cid) for cid in self._gather_contract_ids(payload)]
+        if search_text:
+            filtered = []
+            for contract in contracts:
+                haystack = " ".join(
+                    str(contract.get(key) or "").lower()
+                    for key in ("id", "name", "description", "symbolId")
+                )
+                if search_text in haystack:
+                    filtered.append(contract)
+            contracts = filtered
+        return self._response_success({"contracts": contracts})
+
+    def contract_search_by_id(self, payload: dict[str, Any]) -> dict[str, Any]:
+        contract_ids = self._gather_contract_ids(payload)
+        contracts = [self._build_contract(cid) for cid in contract_ids]
+        return self._response_success({"contracts": contracts})
+
+    def history_retrieve_bars(self, payload: dict[str, Any]) -> dict[str, Any]:
+        contract_id = payload.get("contractId")
+        unit = payload.get("unit")
+        unit_number = payload.get("unitNumber")
+        start_ts = payload.get("startTimestamp")
+        end_ts = payload.get("endTimestamp")
+        if not contract_id:
+            return self._response_error("INVALID_ARGUMENT", "contractId is required")
+        if unit != "Minute":
+            return self._response_error("INVALID_ARGUMENT", "Only Minute unit is supported")
+        if unit_number not in (1, 5):
+            return self._response_error("INVALID_ARGUMENT", "Only 1 or 5 minute bars are supported")
+        start_ts_iso = self._normalize_ts(start_ts)
+        end_ts_iso = self._normalize_ts(end_ts)
+        if not start_ts_iso or not end_ts_iso:
+            return self._response_error("INVALID_ARGUMENT", "startTimestamp and endTimestamp are required")
+
+        symbol = symbol_from_contract(contract_id)
+        timeframe = f"{unit_number}m"
+        bars = self._get_price_feed().get_bars(symbol, timeframe, start_ts_iso, end_ts_iso)
+        return self._response_success({"bars": bars})
 
     def _ensure_accounts(self) -> None:
         accounts_config = self.config.get("ACCOUNTS") or {}
@@ -770,6 +910,19 @@ class SimBroker:
 
         return self._response_success({"orderId": order_id})
 
+    def search_orders(self, payload: dict[str, Any]) -> dict[str, Any]:
+        account_id = payload.get("accountId")
+        start_ts = payload.get("startTimestamp")
+        end_ts = payload.get("endTimestamp")
+        if account_id is None:
+            return self._response_error("INVALID_ARGUMENT", "accountId is required")
+
+        with _STATE_LOCK:
+            state = _load_state(self.state_path)
+        orders = [order for order in state.get("orders", []) if order.get("accountId") == account_id]
+        orders = self._filter_by_time_range(orders, start_ts, end_ts, "creationTimestamp")
+        return self._response_success({"orders": orders})
+
     def search_open_orders(self, payload: dict[str, Any]) -> dict[str, Any]:
         account_id = payload.get("accountId")
         if account_id is None:
@@ -783,6 +936,66 @@ class SimBroker:
             if order.get("accountId") == account_id and int(order.get("status", 0)) == 1
         ]
         return self._response_success({"orders": orders})
+
+    def cancel_order(self, payload: dict[str, Any]) -> dict[str, Any]:
+        account_id = payload.get("accountId")
+        order_id = payload.get("orderId")
+        if account_id is None or order_id is None:
+            return self._response_error("INVALID_ARGUMENT", "accountId and orderId are required")
+
+        now_ts = _now_iso_utc()
+        cancelled = False
+        with _STATE_LOCK:
+            state = _load_state(self.state_path)
+            for order in state.get("orders", []):
+                if order.get("id") == order_id and order.get("accountId") == account_id:
+                    if int(order.get("status", 0)) == 1:
+                        order["status"] = 3
+                        order["updateTimestamp"] = now_ts
+                        cancelled = True
+                    break
+            _save_state_atomic(self.state_path, state)
+        return self._response_success({"orderId": order_id, "cancelled": cancelled})
+
+    def modify_order(self, payload: dict[str, Any]) -> dict[str, Any]:
+        account_id = payload.get("accountId")
+        order_id = payload.get("orderId")
+        size = payload.get("size")
+        limit_price = payload.get("limitPrice")
+        stop_price = payload.get("stopPrice")
+        if account_id is None or order_id is None:
+            return self._response_error("INVALID_ARGUMENT", "accountId and orderId are required")
+
+        updates = {}
+        if size is not None:
+            size_value = float(size)
+            if size_value <= 0:
+                return self._response_error("INVALID_ARGUMENT", "size must be greater than 0")
+            updates["size"] = size_value
+        if limit_price is not None:
+            updates["limitPrice"] = float(limit_price)
+        if stop_price is not None:
+            updates["stopPrice"] = float(stop_price)
+        if not updates:
+            return self._response_error("INVALID_ARGUMENT", "No fields to modify")
+
+        now_ts = _now_iso_utc()
+        modified = False
+        with _STATE_LOCK:
+            state = _load_state(self.state_path)
+            for order in state.get("orders", []):
+                if order.get("id") == order_id and order.get("accountId") == account_id:
+                    if int(order.get("status", 0)) != 1:
+                        break
+                    order.update(updates)
+                    order["updateTimestamp"] = now_ts
+                    modified = True
+                    break
+            _save_state_atomic(self.state_path, state)
+
+        if not modified:
+            return self._response_error("ORDER_NOT_OPEN", "Order is not open")
+        return self._response_success({"orderId": order_id})
 
     def search_open_positions(self, payload: dict[str, Any]) -> dict[str, Any]:
         account_id = payload.get("accountId")
@@ -798,9 +1011,206 @@ class SimBroker:
         ]
         return self._response_success({"positions": positions})
 
+    def close_contract(self, payload: dict[str, Any]) -> dict[str, Any]:
+        account_id = payload.get("accountId")
+        contract_id = payload.get("contractId")
+        if account_id is None or contract_id is None:
+            return self._response_error("INVALID_ARGUMENT", "accountId and contractId are required")
+
+        symbol = symbol_from_contract(contract_id)
+        price_feed = self._get_price_feed()
+        exit_price, _ = price_feed.get_latest_close(symbol, timeframe_preference=["1m", "5m"])
+        if exit_price is None:
+            return self._response_error("NO_MARKET_DATA", "No market data available for close")
+
+        now_ts = _now_iso_utc()
+        with _STATE_LOCK:
+            state = _load_state(self.state_path)
+            state.setdefault("orders", [])
+            state.setdefault("positions", [])
+            state.setdefault("trades", [])
+            state.setdefault("accounts", [])
+            state.setdefault("nextOrderId", 1)
+            state.setdefault("nextTradeId", 1)
+            state.setdefault("bracket_links", {})
+
+            position = None
+            for existing in state["positions"]:
+                if existing.get("accountId") == account_id and existing.get("contractId") == contract_id:
+                    if float(existing.get("size", 0) or 0) != 0:
+                        position = existing
+                    break
+            if position is None:
+                return self._response_error("NOT_FOUND", "No open position found")
+
+            size = float(position.get("size") or 0)
+            position_type = int(position.get("type", 0))
+            is_long = position_type == 1
+            exit_side = 1 if is_long else 0
+
+            tick_size = float(self.config.get("SIM_DEFAULT_TICK_SIZE", 0.25))
+            tick_value = float(self.config.get("SIM_DEFAULT_TICK_VALUE", 1.25))
+            entry_price = float(position.get("averagePrice") or 0.0)
+            sign = 1 if is_long else -1
+            pnl = ((exit_price - entry_price) / tick_size) * tick_value * size * sign if tick_size else 0.0
+
+            order_id = state["nextOrderId"]
+            state["nextOrderId"] += 1
+            state["orders"].append(
+                {
+                    "id": order_id,
+                    "accountId": account_id,
+                    "contractId": contract_id,
+                    "type": 2,
+                    "side": exit_side,
+                    "size": size,
+                    "status": 2,
+                    "fillVolume": size,
+                    "filledPrice": float(exit_price),
+                    "creationTimestamp": now_ts,
+                    "updateTimestamp": now_ts,
+                }
+            )
+
+            trade_id = state["nextTradeId"]
+            state["nextTradeId"] += 1
+            state["trades"].append(
+                {
+                    "id": trade_id,
+                    "accountId": account_id,
+                    "contractId": contract_id,
+                    "orderId": order_id,
+                    "price": float(exit_price),
+                    "side": exit_side,
+                    "size": size,
+                    "profitAndLoss": pnl,
+                    "creationTimestamp": now_ts,
+                }
+            )
+
+            for account in state.get("accounts", []):
+                if account.get("id") == account_id:
+                    account["balance"] = float(account.get("balance", 0.0)) + pnl
+                    break
+
+            state["positions"].remove(position)
+            self._cancel_open_children(state, account_id, contract_id, now_ts)
+            _save_state_atomic(self.state_path, state)
+
+        return self._response_success({"orderId": order_id, "tradeId": trade_id, "profitAndLoss": pnl})
+
+    def partial_close_contract(self, payload: dict[str, Any]) -> dict[str, Any]:
+        account_id = payload.get("accountId")
+        contract_id = payload.get("contractId")
+        close_size = payload.get("size")
+        if account_id is None or contract_id is None or close_size is None:
+            return self._response_error("INVALID_ARGUMENT", "accountId, contractId, and size are required")
+        close_size = float(close_size)
+        if close_size <= 0:
+            return self._response_error("INVALID_ARGUMENT", "size must be greater than 0")
+
+        symbol = symbol_from_contract(contract_id)
+        price_feed = self._get_price_feed()
+        exit_price, _ = price_feed.get_latest_close(symbol, timeframe_preference=["1m", "5m"])
+        if exit_price is None:
+            return self._response_error("NO_MARKET_DATA", "No market data available for close")
+
+        now_ts = _now_iso_utc()
+        with _STATE_LOCK:
+            state = _load_state(self.state_path)
+            state.setdefault("orders", [])
+            state.setdefault("positions", [])
+            state.setdefault("trades", [])
+            state.setdefault("accounts", [])
+            state.setdefault("nextOrderId", 1)
+            state.setdefault("nextTradeId", 1)
+            state.setdefault("bracket_links", {})
+
+            position = None
+            for existing in state["positions"]:
+                if existing.get("accountId") == account_id and existing.get("contractId") == contract_id:
+                    if float(existing.get("size", 0) or 0) != 0:
+                        position = existing
+                    break
+            if position is None:
+                return self._response_error("NOT_FOUND", "No open position found")
+
+            current_size = float(position.get("size") or 0)
+            if close_size > current_size:
+                return self._response_error("INVALID_ARGUMENT", "size exceeds open position size")
+
+            position_type = int(position.get("type", 0))
+            is_long = position_type == 1
+            exit_side = 1 if is_long else 0
+
+            tick_size = float(self.config.get("SIM_DEFAULT_TICK_SIZE", 0.25))
+            tick_value = float(self.config.get("SIM_DEFAULT_TICK_VALUE", 1.25))
+            entry_price = float(position.get("averagePrice") or 0.0)
+            sign = 1 if is_long else -1
+            pnl = ((exit_price - entry_price) / tick_size) * tick_value * close_size * sign if tick_size else 0.0
+
+            order_id = state["nextOrderId"]
+            state["nextOrderId"] += 1
+            state["orders"].append(
+                {
+                    "id": order_id,
+                    "accountId": account_id,
+                    "contractId": contract_id,
+                    "type": 2,
+                    "side": exit_side,
+                    "size": close_size,
+                    "status": 2,
+                    "fillVolume": close_size,
+                    "filledPrice": float(exit_price),
+                    "creationTimestamp": now_ts,
+                    "updateTimestamp": now_ts,
+                }
+            )
+
+            trade_id = state["nextTradeId"]
+            state["nextTradeId"] += 1
+            state["trades"].append(
+                {
+                    "id": trade_id,
+                    "accountId": account_id,
+                    "contractId": contract_id,
+                    "orderId": order_id,
+                    "price": float(exit_price),
+                    "side": exit_side,
+                    "size": close_size,
+                    "profitAndLoss": pnl,
+                    "creationTimestamp": now_ts,
+                }
+            )
+
+            for account in state.get("accounts", []):
+                if account.get("id") == account_id:
+                    account["balance"] = float(account.get("balance", 0.0)) + pnl
+                    break
+
+            remaining = current_size - close_size
+            if remaining <= 0:
+                state["positions"].remove(position)
+                self._cancel_open_children(state, account_id, contract_id, now_ts)
+            else:
+                position["size"] = remaining
+                self._resize_open_children(state, account_id, contract_id, remaining)
+
+            _save_state_atomic(self.state_path, state)
+
+        return self._response_success(
+            {
+                "orderId": order_id,
+                "tradeId": trade_id,
+                "profitAndLoss": pnl,
+                "remainingSize": max(0.0, remaining),
+            }
+        )
+
     def search_trades(self, payload: dict[str, Any]) -> dict[str, Any]:
         account_id = payload.get("accountId")
         start_ts = payload.get("startTimestamp")
+        end_ts = payload.get("endTimestamp")
         if account_id is None:
             return self._response_error("INVALID_ARGUMENT", "accountId is required")
 
@@ -808,13 +1218,38 @@ class SimBroker:
             state = _load_state(self.state_path)
 
         trades = [t for t in state.get("trades", []) if t.get("accountId") == account_id]
-        if start_ts:
-            normalized_start = _normalize_ts_iso(start_ts) or start_ts
-            filtered = []
-            for trade in trades:
-                trade_ts = trade.get("creationTimestamp") or trade.get("timestamp")
-                normalized_trade_ts = _normalize_ts_iso(trade_ts) or trade_ts
-                if normalized_trade_ts and normalized_trade_ts >= normalized_start:
-                    filtered.append(trade)
-            trades = filtered
+        trades = self._filter_by_time_range(trades, start_ts, end_ts, "creationTimestamp")
         return self._response_success({"trades": trades})
+
+    def _cancel_open_children(self, state: dict[str, Any], account_id: int, contract_id: str, now_ts: str) -> None:
+        orders = state.get("orders", [])
+        open_child_ids = []
+        for order in orders:
+            if (
+                order.get("accountId") == account_id
+                and order.get("contractId") == contract_id
+                and order.get("parentOrderId") is not None
+                and int(order.get("status", 0)) == 1
+            ):
+                order["status"] = 3
+                order["updateTimestamp"] = now_ts
+                open_child_ids.append(order.get("id"))
+        if not open_child_ids:
+            return
+        bracket_links = state.get("bracket_links", {})
+        to_remove = []
+        for parent_id, child_ids in bracket_links.items():
+            if any(child_id in open_child_ids for child_id in child_ids):
+                to_remove.append(parent_id)
+        for parent_id in to_remove:
+            bracket_links.pop(parent_id, None)
+
+    def _resize_open_children(self, state: dict[str, Any], account_id: int, contract_id: str, size: float) -> None:
+        for order in state.get("orders", []):
+            if (
+                order.get("accountId") == account_id
+                and order.get("contractId") == contract_id
+                and order.get("parentOrderId") is not None
+                and int(order.get("status", 0)) == 1
+            ):
+                order["size"] = size
