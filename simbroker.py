@@ -464,6 +464,11 @@ class SimBroker:
                         last_ts = bar_ts
                         continue
 
+                    position_created_ts = _normalize_ts_iso(position.get("creationTimestamp"))
+                    if position_created_ts and bar_ts < position_created_ts:
+                        last_ts = bar_ts
+                        continue
+
                     parent_id = None
                     sl_order = None
                     tp_order = None
