@@ -298,6 +298,14 @@ class SimBroker:
         if path == "/api/Account/search":
             only_active = payload.get("onlyActiveAccounts")
             return self.search_accounts(only_active)
+        if path == "/api/Order/place":
+            return self.place_order(payload)
+        if path == "/api/Order/searchOpen":
+            return self.search_open_orders(payload)
+        if path == "/api/Position/searchOpen":
+            return self.search_open_positions(payload)
+        if path == "/api/Trade/search":
+            return self.search_trades(payload)
         if path == "/api/sim/update":
             account_id = payload.get("accountId")
             contract_id = payload.get("contractId")
@@ -315,6 +323,14 @@ class SimBroker:
             "errorCode": "NOT_IMPLEMENTED",
             "errorMessage": f"No sim broker handler for path: {path}",
         }
+
+    def _response_success(self, payload: dict[str, Any]) -> dict[str, Any]:
+        response = {"success": True, "errorCode": 0, "errorMessage": None}
+        response.update(payload)
+        return response
+
+    def _response_error(self, code: str, message: str) -> dict[str, Any]:
+        return {"success": False, "errorCode": code, "errorMessage": message}
 
     def _ensure_accounts(self) -> None:
         accounts_config = self.config.get("ACCOUNTS") or {}
@@ -428,3 +444,214 @@ class SimBroker:
         with _STATE_LOCK:
             state = _load_state(self.state_path)
         return copy.deepcopy(state)
+
+    def _get_price_feed(self) -> PriceFeed:
+        if self.price_feed is None:
+            self.price_feed = SupabasePriceFeed(self.config)
+        return self.price_feed
+
+    def _get_bracket_settings(self) -> tuple[float, float, float, float]:
+        sl_usd = float(self.config.get("SIM_BRACKET_SL_USD", 0.0))
+        tp_usd = float(self.config.get("SIM_BRACKET_TP_USD", 0.0))
+        tick_size = float(self.config.get("SIM_DEFAULT_TICK_SIZE", 0.25))
+        tick_value = float(self.config.get("SIM_DEFAULT_TICK_VALUE", 1.25))
+        return sl_usd, tp_usd, tick_size, tick_value
+
+    def place_order(self, payload: dict[str, Any]) -> dict[str, Any]:
+        account_id = payload.get("accountId")
+        contract_id = payload.get("contractId")
+        order_type = payload.get("type")
+        side = payload.get("side")
+        size = payload.get("size")
+        limit_price = payload.get("limitPrice")
+        stop_price = payload.get("stopPrice")
+        custom_tag = payload.get("customTag")
+
+        if account_id is None or contract_id is None:
+            return self._response_error("INVALID_ARGUMENT", "accountId and contractId are required")
+        if order_type is None or side is None or size is None:
+            return self._response_error("INVALID_ARGUMENT", "type, side, and size are required")
+        if int(order_type) != 2:
+            return self._response_error("NOT_IMPLEMENTED", "Only Market (type=2) orders are supported")
+
+        symbol = symbol_from_contract(contract_id)
+        price_feed = self._get_price_feed()
+        fill_price, _ = price_feed.get_latest_close(symbol, timeframe_preference=["1m", "5m"])
+        if fill_price is None:
+            return self._response_error("NO_MARKET_DATA", "No market data available for fill")
+
+        now_ts = _now_iso_utc()
+        with _STATE_LOCK:
+            state = _load_state(self.state_path)
+            state.setdefault("orders", [])
+            state.setdefault("positions", [])
+            state.setdefault("trades", [])
+            state.setdefault("bracket_links", {})
+            state.setdefault("nextOrderId", 1)
+            state.setdefault("nextPositionId", 1)
+            state.setdefault("nextTradeId", 1)
+
+            order_id = state["nextOrderId"]
+            state["nextOrderId"] += 1
+            parent_order = {
+                "id": order_id,
+                "accountId": account_id,
+                "contractId": contract_id,
+                "type": int(order_type),
+                "side": int(side),
+                "size": float(size),
+                "limitPrice": limit_price,
+                "stopPrice": stop_price,
+                "status": 2,
+                "fillVolume": float(size),
+                "filledPrice": float(fill_price),
+                "creationTimestamp": now_ts,
+                "updateTimestamp": now_ts,
+                "customTag": custom_tag,
+            }
+            state["orders"].append(parent_order)
+
+            position_type = 1 if int(side) == 0 else 2
+            position = None
+            for existing in state["positions"]:
+                if existing.get("accountId") == account_id and existing.get("contractId") == contract_id:
+                    position = existing
+                    break
+            if position is None:
+                position_id = state["nextPositionId"]
+                state["nextPositionId"] += 1
+                position = {
+                    "id": position_id,
+                    "accountId": account_id,
+                    "contractId": contract_id,
+                    "contractSymbol": symbol,
+                }
+                state["positions"].append(position)
+            position.update(
+                {
+                    "type": position_type,
+                    "size": float(size),
+                    "averagePrice": float(fill_price),
+                    "creationTimestamp": now_ts,
+                }
+            )
+
+            trade_id = state["nextTradeId"]
+            state["nextTradeId"] += 1
+            state["trades"].append(
+                {
+                    "id": trade_id,
+                    "accountId": account_id,
+                    "contractId": contract_id,
+                    "orderId": order_id,
+                    "price": float(fill_price),
+                    "side": int(side),
+                    "size": float(size),
+                    "profitAndLoss": None,
+                    "creationTimestamp": now_ts,
+                }
+            )
+
+            sl_usd, tp_usd, tick_size, tick_value = self._get_bracket_settings()
+            if tick_value:
+                sl_ticks = round(sl_usd / tick_value)
+                tp_ticks = round(tp_usd / tick_value)
+            else:
+                sl_ticks = 0
+                tp_ticks = 0
+            sl_offset = sl_ticks * tick_size
+            tp_offset = tp_ticks * tick_size
+
+            if int(side) == 0:
+                sl_price = _round_to_tick(float(fill_price) - sl_offset, tick_size)
+                tp_price = _round_to_tick(float(fill_price) + tp_offset, tick_size)
+                child_side = 1
+            else:
+                sl_price = _round_to_tick(float(fill_price) + sl_offset, tick_size)
+                tp_price = _round_to_tick(float(fill_price) - tp_offset, tick_size)
+                child_side = 0
+
+            sl_order_id = state["nextOrderId"]
+            state["nextOrderId"] += 1
+            tp_order_id = state["nextOrderId"]
+            state["nextOrderId"] += 1
+
+            sl_order = {
+                "id": sl_order_id,
+                "accountId": account_id,
+                "contractId": contract_id,
+                "type": 4,
+                "side": child_side,
+                "size": float(size),
+                "stopPrice": sl_price,
+                "status": 1,
+                "creationTimestamp": now_ts,
+                "parentOrderId": order_id,
+            }
+            tp_order = {
+                "id": tp_order_id,
+                "accountId": account_id,
+                "contractId": contract_id,
+                "type": 1,
+                "side": child_side,
+                "size": float(size),
+                "limitPrice": tp_price,
+                "status": 1,
+                "creationTimestamp": now_ts,
+                "parentOrderId": order_id,
+            }
+            state["orders"].extend([sl_order, tp_order])
+            state["bracket_links"][str(order_id)] = [sl_order_id, tp_order_id]
+
+            _save_state_atomic(self.state_path, state)
+
+        return self._response_success({"orderId": order_id})
+
+    def search_open_orders(self, payload: dict[str, Any]) -> dict[str, Any]:
+        account_id = payload.get("accountId")
+        if account_id is None:
+            return self._response_error("INVALID_ARGUMENT", "accountId is required")
+
+        with _STATE_LOCK:
+            state = _load_state(self.state_path)
+        orders = [
+            order
+            for order in state.get("orders", [])
+            if order.get("accountId") == account_id and int(order.get("status", 0)) == 1
+        ]
+        return self._response_success({"orders": orders})
+
+    def search_open_positions(self, payload: dict[str, Any]) -> dict[str, Any]:
+        account_id = payload.get("accountId")
+        if account_id is None:
+            return self._response_error("INVALID_ARGUMENT", "accountId is required")
+
+        with _STATE_LOCK:
+            state = _load_state(self.state_path)
+        positions = [
+            position
+            for position in state.get("positions", [])
+            if position.get("accountId") == account_id and float(position.get("size", 0) or 0) != 0
+        ]
+        return self._response_success({"positions": positions})
+
+    def search_trades(self, payload: dict[str, Any]) -> dict[str, Any]:
+        account_id = payload.get("accountId")
+        start_ts = payload.get("startTimestamp")
+        if account_id is None:
+            return self._response_error("INVALID_ARGUMENT", "accountId is required")
+
+        with _STATE_LOCK:
+            state = _load_state(self.state_path)
+
+        trades = [t for t in state.get("trades", []) if t.get("accountId") == account_id]
+        if start_ts:
+            normalized_start = _normalize_ts_iso(start_ts) or start_ts
+            filtered = []
+            for trade in trades:
+                trade_ts = trade.get("creationTimestamp") or trade.get("timestamp")
+                normalized_trade_ts = _normalize_ts_iso(trade_ts) or trade_ts
+                if normalized_trade_ts and normalized_trade_ts >= normalized_start:
+                    filtered.append(trade)
+            trades = filtered
+        return self._response_success({"trades": trades})
