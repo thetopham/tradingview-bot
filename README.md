@@ -64,17 +64,18 @@ Accounts:
 - Accounts are configured via `ACCOUNT_<NAME>=<id>` environment variables (for example, `ACCOUNT_BETA=123456`).
 - The bot lowercases those suffixes (`beta`, `epsilon`, etc.) and uses them as account keys when routing webhook payloads.
 - By default, both `beta` and `epsilon` use the main AI endpoint `N8N_AI_URL`.
-- Optional overseer test URLs (`N8N_OVERSEER_URL_TEST1` … `N8N_OVERSEER_URL_TEST5`) let you direct specific accounts to alternate n8n workflows.
+- Optional overseer test URLs (`N8N_OVERSEER_URL_TEST1` … `N8N_OVERSEER_URL_TEST6`) let you direct specific accounts to alternate n8n workflows.
   - **TEST1 is reserved for the `beta` account.**
   - **TEST2 is reserved for the `alpha` account.**
   - TEST3/TEST4/TEST5 map to `gamma`/`delta`/`epsilon` respectively.
+  - TEST6 maps to `practice`.
 - Each webhook run collects account positions and position context, sends them to the configured n8n flow, and follows the returned JSON signal (`BUY`/`SELL`/`HOLD`/`FLAT`) before executing the `simple` strategy.
 
 AI endpoint:
 
 - `N8N_AI_URL=https://.../webhook/simple` (example)
 - Optional per-timeframe chart prefetch URLs: `N8N_5MCHART_FETCH_URL`, `N8N_15MCHART_FETCH_URL`, `N8N_30MCHART_FETCH_URL`
-- Optional overseer test URLs: `N8N_OVERSEER_URL_TEST1` … `N8N_OVERSEER_URL_TEST5`
+- Optional overseer test URLs: `N8N_OVERSEER_URL_TEST1` … `N8N_OVERSEER_URL_TEST6`
 
 Optional:
 
