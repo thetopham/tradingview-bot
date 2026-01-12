@@ -411,7 +411,14 @@ class SimBroker:
 
     def sim_update(self, accountId: int, contractId: str, now_ts_iso: str | None = None) -> dict[str, Any]:
         """Update simulated state for an account/contract tuple."""
-        now_ts = now_ts_iso or _now_iso_utc()
+        now_ts = _normalize_ts_iso(now_ts_iso) or _now_iso_utc()
+        old_ts = "1970-01-01T00:00:00Z"
+        closed: list[dict[str, Any]] = []
+
+        symbol = symbol_from_contract(contractId)
+        price_feed = self._get_price_feed()
+        preferred_timeframe = (self.config.get("SIM_PRICE_TIMEFRAME") or "1m").strip() or "1m"
+        fallback_timeframe = "5m"
 
         with _STATE_LOCK:
             state = _load_state(self.state_path)
@@ -426,7 +433,162 @@ class SimBroker:
             state.setdefault("nextTradeId", 1)
 
             key = f"{accountId}:{contractId}"
-            state["last_processed_bar_ts"][key] = now_ts
+            last_ts = state["last_processed_bar_ts"].get(key) or old_ts
+
+            bars = price_feed.get_bars(symbol, preferred_timeframe, last_ts, now_ts)
+            if not bars and preferred_timeframe != fallback_timeframe:
+                bars = price_feed.get_bars(symbol, fallback_timeframe, last_ts, now_ts)
+
+            latest_processed_ts = last_ts
+            if bars:
+                orders = state.get("orders", [])
+                orders_by_id = {order.get("id"): order for order in orders if order.get("id") is not None}
+                positions = state.get("positions", [])
+
+                for bar in bars:
+                    bar_ts = _normalize_ts_iso(bar.get("t") or bar.get("ts"))
+                    if bar_ts is None or bar_ts <= last_ts:
+                        continue
+
+                    latest_processed_ts = bar_ts
+                    position = None
+                    for existing in positions:
+                        if (
+                            existing.get("accountId") == accountId
+                            and existing.get("contractId") == contractId
+                            and float(existing.get("size", 0) or 0) != 0
+                        ):
+                            position = existing
+                            break
+                    if position is None:
+                        last_ts = bar_ts
+                        continue
+
+                    position_created_ts = _normalize_ts_iso(position.get("creationTimestamp"))
+                    if position_created_ts and bar_ts < position_created_ts:
+                        last_ts = bar_ts
+                        continue
+
+                    parent_id = None
+                    sl_order = None
+                    tp_order = None
+                    for candidate_parent_id, child_ids in (state.get("bracket_links") or {}).items():
+                        child_orders = [
+                            orders_by_id.get(child_id)
+                            for child_id in child_ids
+                            if orders_by_id.get(child_id) is not None
+                        ]
+                        if not child_orders:
+                            continue
+                        if any(order.get("accountId") != accountId or order.get("contractId") != contractId for order in child_orders):
+                            continue
+                        if any(int(order.get("status", 0)) != 1 for order in child_orders):
+                            continue
+                        sl_candidate = next((order for order in child_orders if int(order.get("type", 0)) == 4), None)
+                        tp_candidate = next((order for order in child_orders if int(order.get("type", 0)) == 1), None)
+                        if sl_candidate and tp_candidate:
+                            parent_id = candidate_parent_id
+                            sl_order = sl_candidate
+                            tp_order = tp_candidate
+                            break
+
+                    if sl_order is None or tp_order is None:
+                        last_ts = bar_ts
+                        continue
+
+                    bar_high = bar.get("h")
+                    bar_low = bar.get("l")
+                    if bar_high is None or bar_low is None:
+                        last_ts = bar_ts
+                        continue
+
+                    position_type = int(position.get("type", 0))
+                    is_long = position_type == 1
+                    tp_price = tp_order.get("limitPrice")
+                    sl_price = sl_order.get("stopPrice")
+                    if tp_price is None or sl_price is None:
+                        last_ts = bar_ts
+                        continue
+
+                    if is_long:
+                        hit_tp = float(bar_high) >= float(tp_price)
+                        hit_sl = float(bar_low) <= float(sl_price)
+                    else:
+                        hit_tp = float(bar_low) <= float(tp_price)
+                        hit_sl = float(bar_high) >= float(sl_price)
+
+                    if not hit_tp and not hit_sl:
+                        last_ts = bar_ts
+                        continue
+
+                    fill_policy = str(self.config.get("SIM_FILL_POLICY", "worst")).lower()
+                    exit_is_tp = hit_tp
+                    if hit_tp and hit_sl:
+                        exit_is_tp = fill_policy == "best"
+                    elif hit_sl:
+                        exit_is_tp = False
+
+                    exit_order = tp_order if exit_is_tp else sl_order
+                    cancel_order = sl_order if exit_is_tp else tp_order
+                    exit_price = float(exit_order.get("limitPrice") if exit_is_tp else exit_order.get("stopPrice") or 0.0)
+
+                    exit_order["status"] = 2
+                    exit_order["fillVolume"] = float(position.get("size", 0) or 0)
+                    exit_order["filledPrice"] = exit_price
+                    exit_order["updateTimestamp"] = bar_ts
+                    cancel_order["status"] = 3
+                    cancel_order["updateTimestamp"] = bar_ts
+
+                    positions.remove(position)
+
+                    tick_size = float(self.config.get("SIM_DEFAULT_TICK_SIZE", 0.25))
+                    tick_value = float(self.config.get("SIM_DEFAULT_TICK_VALUE", 1.25))
+                    entry_price = float(position.get("averagePrice") or 0.0)
+                    size = float(position.get("size") or 0.0)
+                    if tick_size:
+                        sign = 1 if is_long else -1
+                        pnl = ((exit_price - entry_price) / tick_size) * tick_value * size * sign
+                    else:
+                        pnl = 0.0
+
+                    exit_order_id = exit_order.get("id")
+                    trade_id = state["nextTradeId"]
+                    state["nextTradeId"] += 1
+                    exit_side = 1 if is_long else 0
+                    state["trades"].append(
+                        {
+                            "id": trade_id,
+                            "accountId": accountId,
+                            "contractId": contractId,
+                            "orderId": exit_order_id,
+                            "price": exit_price,
+                            "side": exit_side,
+                            "size": size,
+                            "profitAndLoss": pnl,
+                            "creationTimestamp": bar_ts,
+                        }
+                    )
+
+                    for account in state.get("accounts", []):
+                        if account.get("id") == accountId:
+                            account["balance"] = float(account.get("balance", 0.0)) + pnl
+                            break
+
+                    closed.append(
+                        {
+                            "accountId": accountId,
+                            "contractId": contractId,
+                            "exitOrderId": exit_order_id,
+                            "exitTradeId": trade_id,
+                            "exitPrice": exit_price,
+                            "exitTimestamp": bar_ts,
+                            "parentOrderId": parent_id,
+                        }
+                    )
+                    last_ts = bar_ts
+
+            if latest_processed_ts != state["last_processed_bar_ts"].get(key):
+                state["last_processed_bar_ts"][key] = latest_processed_ts
 
             _save_state_atomic(self.state_path, state)
 
@@ -436,7 +598,8 @@ class SimBroker:
             "errorMessage": None,
             "accountId": accountId,
             "contractId": contractId,
-            "lastProcessedBarTs": now_ts,
+            "lastProcessedBarTs": state["last_processed_bar_ts"].get(key),
+            "closed": closed,
         }
 
     def get_state_snapshot(self) -> dict[str, Any]:
