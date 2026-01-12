@@ -283,6 +283,7 @@ class SimBroker:
         self.state_path = state_path
         self.config = config
         self.price_feed = price_feed
+        self._ensure_accounts()
 
     def _load_state_locked(self) -> dict[str, Any]:
         with _STATE_LOCK:
@@ -294,6 +295,9 @@ class SimBroker:
 
     def handle_post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Route /api/... POST endpoints for the simulation broker."""
+        if path == "/api/Account/search":
+            only_active = payload.get("onlyActiveAccounts")
+            return self.search_accounts(only_active)
         if path == "/api/sim/update":
             account_id = payload.get("accountId")
             contract_id = payload.get("contractId")
@@ -310,6 +314,83 @@ class SimBroker:
             "success": False,
             "errorCode": "NOT_IMPLEMENTED",
             "errorMessage": f"No sim broker handler for path: {path}",
+        }
+
+    def _ensure_accounts(self) -> None:
+        accounts_config = self.config.get("ACCOUNTS") or {}
+        if not isinstance(accounts_config, dict) or not accounts_config:
+            return
+        starting_balance = float(self.config.get("SIM_STARTING_BALANCE", 0.0))
+
+        with _STATE_LOCK:
+            state = _load_state(self.state_path)
+            accounts = list(state.get("accounts") or [])
+            accounts_by_id = {
+                account.get("id"): account
+                for account in accounts
+                if account.get("id") is not None
+            }
+            updated = False
+            for account_name, account_id in accounts_config.items():
+                if account_id is None:
+                    continue
+                existing = accounts_by_id.get(account_id)
+                if existing is None:
+                    accounts.append(
+                        {
+                            "id": account_id,
+                            "name": account_name,
+                            "balance": starting_balance,
+                            "canTrade": True,
+                            "isVisible": True,
+                            "simulated": True,
+                        }
+                    )
+                    updated = True
+                    continue
+                if existing.get("name") != account_name:
+                    existing["name"] = account_name
+                    updated = True
+                if "balance" not in existing:
+                    existing["balance"] = starting_balance
+                    updated = True
+                if "canTrade" not in existing:
+                    existing["canTrade"] = True
+                    updated = True
+                if "isVisible" not in existing:
+                    existing["isVisible"] = True
+                    updated = True
+                if "simulated" not in existing:
+                    existing["simulated"] = True
+                    updated = True
+
+            if updated:
+                state["accounts"] = accounts
+                _save_state_atomic(self.state_path, state)
+
+    def search_accounts(self, only_active_accounts: bool | None = None) -> dict[str, Any]:
+        with _STATE_LOCK:
+            state = _load_state(self.state_path)
+        accounts = []
+        for account in state.get("accounts", []):
+            can_trade = bool(account.get("canTrade", True))
+            is_visible = bool(account.get("isVisible", True))
+            if only_active_accounts and not (can_trade and is_visible):
+                continue
+            accounts.append(
+                {
+                    "id": account.get("id"),
+                    "name": account.get("name"),
+                    "balance": account.get("balance", 0.0),
+                    "canTrade": can_trade,
+                    "isVisible": is_visible,
+                }
+            )
+        return {
+            "success": True,
+            "errorCode": None,
+            "errorMessage": None,
+            "accounts": accounts,
         }
 
     def sim_update(self, accountId: int, contractId: str, now_ts_iso: str | None = None) -> dict[str, Any]:
