@@ -424,7 +424,7 @@ class SimBroker:
 
     def auth_validate(self, payload: dict[str, Any]) -> dict[str, Any]:
         token = payload.get("token") or payload.get("newToken") or "sim-token"
-        return self._response_success({"token": token, "newToken": token})
+        return self._response_success({"newToken": token})
 
     def contract_available(self, payload: dict[str, Any]) -> dict[str, Any]:
         contracts = [self._build_contract(cid) for cid in self._gather_contract_ids(payload)]
@@ -448,20 +448,28 @@ class SimBroker:
     def contract_search_by_id(self, payload: dict[str, Any]) -> dict[str, Any]:
         contract_ids = self._gather_contract_ids(payload)
         contracts = [self._build_contract(cid) for cid in contract_ids]
-        return self._response_success({"contracts": contracts})
+        contract = contracts[0] if contracts else None
+        return self._response_success({"contract": contract})
 
     def history_retrieve_bars(self, payload: dict[str, Any]) -> dict[str, Any]:
         contract_id = payload.get("contractId")
         unit = payload.get("unit")
         unit_number = payload.get("unitNumber")
-        start_ts = payload.get("startTimestamp")
-        end_ts = payload.get("endTimestamp")
+        start_ts = payload.get("startTime") or payload.get("startTimestamp")
+        end_ts = payload.get("endTime") or payload.get("endTimestamp")
         if not contract_id:
             return self._response_error("INVALID_ARGUMENT", "contractId is required")
-        if unit != "Minute":
-            return self._response_error("INVALID_ARGUMENT", "Only Minute unit is supported")
-        if unit_number not in (1, 5):
+        if unit is None:
+            return self._response_error("INVALID_ARGUMENT", "unit is required")
+        try:
+            unit_value = int(unit)
+        except (TypeError, ValueError):
+            unit_value = None
+        if unit_value not in (2,):
+            return self._response_error("INVALID_ARGUMENT", "Only Minute unit (2) is supported")
+        if unit_number not in (1, 5, "1", "5"):
             return self._response_error("INVALID_ARGUMENT", "Only 1 or 5 minute bars are supported")
+        unit_number = int(unit_number)
         start_ts_iso = self._normalize_ts(start_ts)
         end_ts_iso = self._normalize_ts(end_ts)
         if not start_ts_iso or not end_ts_iso:
@@ -474,6 +482,7 @@ class SimBroker:
 
     def _ensure_accounts(self) -> None:
         accounts_config = self.config.get("ACCOUNTS") or {}
+        bracket_overrides = self.config.get("SIM_ACCOUNT_BRACKETS") or {}
         if not isinstance(accounts_config, dict) or not accounts_config:
             return
         starting_balance = float(self.config.get("SIM_STARTING_BALANCE", 0.0))
@@ -490,6 +499,9 @@ class SimBroker:
             for account_name, account_id in accounts_config.items():
                 if account_id is None:
                     continue
+                bracket_override = bracket_overrides.get(str(account_name).lower(), {})
+                bracket_sl_usd = float(bracket_override.get("sl_usd", self.config.get("SIM_BRACKET_SL_USD", 0.0)))
+                bracket_tp_usd = float(bracket_override.get("tp_usd", self.config.get("SIM_BRACKET_TP_USD", 0.0)))
                 existing = accounts_by_id.get(account_id)
                 if existing is None:
                     accounts.append(
@@ -500,12 +512,20 @@ class SimBroker:
                             "canTrade": True,
                             "isVisible": True,
                             "simulated": True,
+                            "bracketSlUsd": bracket_sl_usd,
+                            "bracketTpUsd": bracket_tp_usd,
                         }
                     )
                     updated = True
                     continue
                 if existing.get("name") != account_name:
                     existing["name"] = account_name
+                    updated = True
+                if existing.get("bracketSlUsd") != bracket_sl_usd:
+                    existing["bracketSlUsd"] = bracket_sl_usd
+                    updated = True
+                if existing.get("bracketTpUsd") != bracket_tp_usd:
+                    existing["bracketTpUsd"] = bracket_tp_usd
                     updated = True
                 if "balance" not in existing:
                     existing["balance"] = starting_balance
@@ -542,12 +562,7 @@ class SimBroker:
                     "isVisible": is_visible,
                 }
             )
-        return {
-            "success": True,
-            "errorCode": None,
-            "errorMessage": None,
-            "accounts": accounts,
-        }
+        return self._response_success({"accounts": accounts})
 
     def sim_update(self, accountId: int, contractId: str, now_ts_iso: str | None = None) -> dict[str, Any]:
         """Update simulated state for an account/contract tuple."""
@@ -591,6 +606,140 @@ class SimBroker:
                         continue
 
                     latest_processed_ts = bar_ts
+                    bar_high = bar.get("h")
+                    bar_low = bar.get("l")
+                    if bar_high is None or bar_low is None:
+                        last_ts = bar_ts
+                        continue
+
+                    open_orders = [
+                        order
+                        for order in orders
+                        if (
+                            order.get("accountId") == accountId
+                            and order.get("contractId") == contractId
+                            and int(order.get("status", 0)) == 1
+                            and order.get("parentOrderId") is None
+                            and int(order.get("type", 0)) in (1, 4)
+                        )
+                    ]
+                    if open_orders:
+                        position = next(
+                            (
+                                existing
+                                for existing in positions
+                                if (
+                                    existing.get("accountId") == accountId
+                                    and existing.get("contractId") == contractId
+                                    and float(existing.get("size", 0) or 0) != 0
+                                )
+                            ),
+                            None,
+                        )
+                        for order in open_orders:
+                            order_type = int(order.get("type", 0))
+                            side = int(order.get("side", 0))
+                            limit_px = order.get("limitPrice")
+                            stop_px = order.get("stopPrice")
+                            if order_type == 1:
+                                trigger_price = limit_px
+                                if trigger_price is None:
+                                    continue
+                                if side == 0 and float(bar_low) > float(trigger_price):
+                                    continue
+                                if side == 1 and float(bar_high) < float(trigger_price):
+                                    continue
+                            else:
+                                trigger_price = stop_px
+                                if trigger_price is None:
+                                    continue
+                                if side == 0 and float(bar_high) < float(trigger_price):
+                                    continue
+                                if side == 1 and float(bar_low) > float(trigger_price):
+                                    continue
+
+                            fill_price = float(trigger_price)
+                            order["status"] = 2
+                            order["fillVolume"] = float(order.get("size", 0) or 0)
+                            order["filledPrice"] = fill_price
+                            order["updateTimestamp"] = bar_ts
+                            orders_by_id[order.get("id")] = order
+
+                            fill_size = float(order.get("size", 0) or 0)
+                            if fill_size <= 0:
+                                continue
+
+                            is_buy = side == 0
+                            order_position_type = 1 if is_buy else 2
+                            position_size = float(position.get("size", 0) or 0) if position else 0.0
+                            position_type = int(position.get("type", 0)) if position else 0
+
+                            closing_size = 0.0
+                            pnl = None
+                            tick_size = float(self.config.get("SIM_DEFAULT_TICK_SIZE", 0.25))
+                            tick_value = float(self.config.get("SIM_DEFAULT_TICK_VALUE", 1.25))
+                            if position and position_size and position_type != order_position_type:
+                                closing_size = min(position_size, fill_size)
+                                entry_price = float(position.get("averagePrice") or 0.0)
+                                sign = 1 if position_type == 1 else -1
+                                if tick_size:
+                                    pnl = ((fill_price - entry_price) / tick_size) * tick_value * closing_size * sign
+                                else:
+                                    pnl = 0.0
+                                remaining_position = position_size - closing_size
+                                if remaining_position > 0:
+                                    position["size"] = remaining_position
+                                else:
+                                    positions.remove(position)
+                                    position = None
+
+                            residual_size = fill_size - closing_size
+                            if residual_size > 0:
+                                if position and position_type == order_position_type:
+                                    total_size = position_size + residual_size
+                                    if total_size:
+                                        position["averagePrice"] = (
+                                            (position_size * float(position.get("averagePrice") or 0.0))
+                                            + (residual_size * fill_price)
+                                        ) / total_size
+                                    position["size"] = total_size
+                                else:
+                                    position_id = state["nextPositionId"]
+                                    state["nextPositionId"] += 1
+                                    position = {
+                                        "id": position_id,
+                                        "accountId": accountId,
+                                        "contractId": contractId,
+                                        "contractSymbol": symbol,
+                                        "type": order_position_type,
+                                        "size": residual_size,
+                                        "averagePrice": fill_price,
+                                        "creationTimestamp": bar_ts,
+                                    }
+                                    positions.append(position)
+
+                            trade_id = state["nextTradeId"]
+                            state["nextTradeId"] += 1
+                            state["trades"].append(
+                                {
+                                    "id": trade_id,
+                                    "accountId": accountId,
+                                    "contractId": contractId,
+                                    "orderId": order.get("id"),
+                                    "price": fill_price,
+                                    "side": side,
+                                    "size": fill_size,
+                                    "profitAndLoss": pnl,
+                                    "creationTimestamp": bar_ts,
+                                }
+                            )
+
+                            if pnl is not None:
+                                for account in state.get("accounts", []):
+                                    if account.get("id") == accountId:
+                                        account["balance"] = float(account.get("balance", 0.0)) + pnl
+                                        break
+
                     position = None
                     for existing in positions:
                         if (
@@ -633,12 +782,6 @@ class SimBroker:
                             break
 
                     if sl_order is None or tp_order is None:
-                        last_ts = bar_ts
-                        continue
-
-                    bar_high = bar.get("h")
-                    bar_low = bar.get("l")
-                    if bar_high is None or bar_low is None:
                         last_ts = bar_ts
                         continue
 
@@ -734,7 +877,7 @@ class SimBroker:
 
         return {
             "success": True,
-            "errorCode": None,
+            "errorCode": 0,
             "errorMessage": None,
             "accountId": accountId,
             "contractId": contractId,
@@ -753,12 +896,52 @@ class SimBroker:
             self.price_feed = SupabasePriceFeed(self.config)
         return self.price_feed
 
-    def _get_bracket_settings(self) -> tuple[float, float, float, float]:
+    def _get_bracket_settings(self, state: dict[str, Any], account_id: int) -> tuple[float, float, float, float]:
         sl_usd = float(self.config.get("SIM_BRACKET_SL_USD", 0.0))
         tp_usd = float(self.config.get("SIM_BRACKET_TP_USD", 0.0))
+        for account in state.get("accounts", []):
+            if account.get("id") == account_id:
+                sl_usd = float(account.get("bracketSlUsd", sl_usd))
+                tp_usd = float(account.get("bracketTpUsd", tp_usd))
+                break
         tick_size = float(self.config.get("SIM_DEFAULT_TICK_SIZE", 0.25))
         tick_value = float(self.config.get("SIM_DEFAULT_TICK_VALUE", 1.25))
         return sl_usd, tp_usd, tick_size, tick_value
+
+    def _resolve_bracket_ticks(
+        self,
+        payload: dict[str, Any],
+        state: dict[str, Any],
+        account_id: int,
+        tick_value: float,
+    ) -> tuple[int, int]:
+        sl_ticks = None
+        tp_ticks = None
+        sl_bracket = payload.get("stopLossBracket") or {}
+        tp_bracket = payload.get("takeProfitBracket") or {}
+        if isinstance(sl_bracket, dict) and sl_bracket.get("ticks") is not None:
+            try:
+                sl_ticks = int(sl_bracket.get("ticks"))
+            except (TypeError, ValueError):
+                sl_ticks = None
+        if isinstance(tp_bracket, dict) and tp_bracket.get("ticks") is not None:
+            try:
+                tp_ticks = int(tp_bracket.get("ticks"))
+            except (TypeError, ValueError):
+                tp_ticks = None
+
+        if sl_ticks is None or tp_ticks is None:
+            sl_usd, tp_usd, _, _ = self._get_bracket_settings(state, account_id)
+            if tick_value:
+                if sl_ticks is None:
+                    sl_ticks = round(sl_usd / tick_value)
+                if tp_ticks is None:
+                    tp_ticks = round(tp_usd / tick_value)
+            else:
+                sl_ticks = sl_ticks or 0
+                tp_ticks = tp_ticks or 0
+
+        return int(sl_ticks or 0), int(tp_ticks or 0)
 
     def place_order(self, payload: dict[str, Any]) -> dict[str, Any]:
         account_id = payload.get("accountId")
@@ -774,14 +957,16 @@ class SimBroker:
             return self._response_error("INVALID_ARGUMENT", "accountId and contractId are required")
         if order_type is None or side is None or size is None:
             return self._response_error("INVALID_ARGUMENT", "type, side, and size are required")
-        if int(order_type) != 2:
-            return self._response_error("NOT_IMPLEMENTED", "Only Market (type=2) orders are supported")
+        if int(order_type) not in (1, 2, 4):
+            return self._response_error("NOT_IMPLEMENTED", "Only Limit (1), Market (2), or Stop (4) are supported")
 
         symbol = symbol_from_contract(contract_id)
         price_feed = self._get_price_feed()
-        fill_price, _ = price_feed.get_latest_close(symbol, timeframe_preference=["1m", "5m"])
-        if fill_price is None:
-            return self._response_error("NO_MARKET_DATA", "No market data available for fill")
+        fill_price = None
+        if int(order_type) == 2:
+            fill_price, _ = price_feed.get_latest_close(symbol, timeframe_preference=["1m", "5m"])
+            if fill_price is None:
+                return self._response_error("NO_MARKET_DATA", "No market data available for fill")
 
         now_ts = _now_iso_utc()
         with _STATE_LOCK:
@@ -805,106 +990,105 @@ class SimBroker:
                 "size": float(size),
                 "limitPrice": limit_price,
                 "stopPrice": stop_price,
-                "status": 2,
-                "fillVolume": float(size),
-                "filledPrice": float(fill_price),
+                "status": 1 if int(order_type) in (1, 4) else 2,
+                "fillVolume": float(size) if int(order_type) == 2 else 0,
+                "filledPrice": float(fill_price) if int(order_type) == 2 else None,
                 "creationTimestamp": now_ts,
                 "updateTimestamp": now_ts,
                 "customTag": custom_tag,
+                "symbolId": symbol,
             }
             state["orders"].append(parent_order)
 
-            position_type = 1 if int(side) == 0 else 2
-            position = None
-            for existing in state["positions"]:
-                if existing.get("accountId") == account_id and existing.get("contractId") == contract_id:
-                    position = existing
-                    break
-            if position is None:
-                position_id = state["nextPositionId"]
-                state["nextPositionId"] += 1
-                position = {
-                    "id": position_id,
+            if int(order_type) == 2:
+                position_type = 1 if int(side) == 0 else 2
+                position = None
+                for existing in state["positions"]:
+                    if existing.get("accountId") == account_id and existing.get("contractId") == contract_id:
+                        position = existing
+                        break
+                if position is None:
+                    position_id = state["nextPositionId"]
+                    state["nextPositionId"] += 1
+                    position = {
+                        "id": position_id,
+                        "accountId": account_id,
+                        "contractId": contract_id,
+                        "contractSymbol": symbol,
+                    }
+                    state["positions"].append(position)
+                position.update(
+                    {
+                        "type": position_type,
+                        "size": float(size),
+                        "averagePrice": float(fill_price),
+                        "creationTimestamp": now_ts,
+                    }
+                )
+
+                trade_id = state["nextTradeId"]
+                state["nextTradeId"] += 1
+                state["trades"].append(
+                    {
+                        "id": trade_id,
+                        "accountId": account_id,
+                        "contractId": contract_id,
+                        "orderId": order_id,
+                        "price": float(fill_price),
+                        "side": int(side),
+                        "size": float(size),
+                        "profitAndLoss": None,
+                        "creationTimestamp": now_ts,
+                    }
+                )
+
+                sl_usd, tp_usd, tick_size, tick_value = self._get_bracket_settings(state, account_id)
+                sl_ticks, tp_ticks = self._resolve_bracket_ticks(payload, state, account_id, tick_value)
+                sl_offset = sl_ticks * tick_size
+                tp_offset = tp_ticks * tick_size
+
+                if int(side) == 0:
+                    sl_price = _round_to_tick(float(fill_price) - sl_offset, tick_size)
+                    tp_price = _round_to_tick(float(fill_price) + tp_offset, tick_size)
+                    child_side = 1
+                else:
+                    sl_price = _round_to_tick(float(fill_price) + sl_offset, tick_size)
+                    tp_price = _round_to_tick(float(fill_price) - tp_offset, tick_size)
+                    child_side = 0
+
+                sl_order_id = state["nextOrderId"]
+                state["nextOrderId"] += 1
+                tp_order_id = state["nextOrderId"]
+                state["nextOrderId"] += 1
+
+                sl_order = {
+                    "id": sl_order_id,
                     "accountId": account_id,
                     "contractId": contract_id,
-                    "contractSymbol": symbol,
-                }
-                state["positions"].append(position)
-            position.update(
-                {
-                    "type": position_type,
+                    "type": 4,
+                    "side": child_side,
                     "size": float(size),
-                    "averagePrice": float(fill_price),
+                    "stopPrice": sl_price,
+                    "status": 1,
                     "creationTimestamp": now_ts,
+                    "parentOrderId": order_id,
+                    "symbolId": symbol,
                 }
-            )
-
-            trade_id = state["nextTradeId"]
-            state["nextTradeId"] += 1
-            state["trades"].append(
-                {
-                    "id": trade_id,
+                tp_order = {
+                    "id": tp_order_id,
                     "accountId": account_id,
                     "contractId": contract_id,
-                    "orderId": order_id,
-                    "price": float(fill_price),
-                    "side": int(side),
+                    "type": 1,
+                    "side": child_side,
                     "size": float(size),
-                    "profitAndLoss": None,
+                    "limitPrice": tp_price,
+                    "status": 1,
                     "creationTimestamp": now_ts,
+                    "parentOrderId": order_id,
+                    "symbolId": symbol,
                 }
-            )
-
-            sl_usd, tp_usd, tick_size, tick_value = self._get_bracket_settings()
-            if tick_value:
-                sl_ticks = round(sl_usd / tick_value)
-                tp_ticks = round(tp_usd / tick_value)
-            else:
-                sl_ticks = 0
-                tp_ticks = 0
-            sl_offset = sl_ticks * tick_size
-            tp_offset = tp_ticks * tick_size
-
-            if int(side) == 0:
-                sl_price = _round_to_tick(float(fill_price) - sl_offset, tick_size)
-                tp_price = _round_to_tick(float(fill_price) + tp_offset, tick_size)
-                child_side = 1
-            else:
-                sl_price = _round_to_tick(float(fill_price) + sl_offset, tick_size)
-                tp_price = _round_to_tick(float(fill_price) - tp_offset, tick_size)
-                child_side = 0
-
-            sl_order_id = state["nextOrderId"]
-            state["nextOrderId"] += 1
-            tp_order_id = state["nextOrderId"]
-            state["nextOrderId"] += 1
-
-            sl_order = {
-                "id": sl_order_id,
-                "accountId": account_id,
-                "contractId": contract_id,
-                "type": 4,
-                "side": child_side,
-                "size": float(size),
-                "stopPrice": sl_price,
-                "status": 1,
-                "creationTimestamp": now_ts,
-                "parentOrderId": order_id,
-            }
-            tp_order = {
-                "id": tp_order_id,
-                "accountId": account_id,
-                "contractId": contract_id,
-                "type": 1,
-                "side": child_side,
-                "size": float(size),
-                "limitPrice": tp_price,
-                "status": 1,
-                "creationTimestamp": now_ts,
-                "parentOrderId": order_id,
-            }
-            state["orders"].extend([sl_order, tp_order])
-            state["bracket_links"][str(order_id)] = [sl_order_id, tp_order_id]
+                state["orders"].extend([sl_order, tp_order])
+                state["bracket_links"][str(order_id)] = [sl_order_id, tp_order_id]
 
             _save_state_atomic(self.state_path, state)
 

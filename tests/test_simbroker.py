@@ -16,24 +16,27 @@ def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _make_config() -> dict:
+def _make_config(accounts=None, bracket_overrides=None) -> dict:
+    accounts = accounts or {"Sim": ACCOUNT_ID}
+    bracket_overrides = bracket_overrides or {}
     return {
-        "ACCOUNTS": {"Sim": ACCOUNT_ID},
+        "ACCOUNTS": accounts,
         "SIM_STARTING_BALANCE": 1000.0,
         "SIM_BRACKET_SL_USD": 1.0,
         "SIM_BRACKET_TP_USD": 2.0,
         "SIM_DEFAULT_TICK_SIZE": 1.0,
         "SIM_DEFAULT_TICK_VALUE": 1.0,
+        "SIM_ACCOUNT_BRACKETS": bracket_overrides,
     }
 
 
-def _make_broker(tmp_path, bars):
+def _make_broker(tmp_path, bars, config=None):
     state_path = tmp_path / "sim_state.json"
     price_feed = InMemoryPriceFeed({SYMBOL: {"1m": bars}})
-    return SimBroker(str(state_path), _make_config(), price_feed=price_feed), price_feed
+    return SimBroker(str(state_path), config or _make_config(), price_feed=price_feed), price_feed
 
 
-def _place_market_order(broker: SimBroker) -> dict:
+def _place_market_order(broker: SimBroker, payload_overrides=None) -> dict:
     payload = {
         "accountId": ACCOUNT_ID,
         "contractId": CONTRACT_ID,
@@ -41,6 +44,8 @@ def _place_market_order(broker: SimBroker) -> dict:
         "side": 0,
         "size": 1,
     }
+    if payload_overrides:
+        payload.update(payload_overrides)
     return broker.handle_post("/api/Order/place", payload)
 
 
@@ -124,3 +129,48 @@ def test_persists_state_across_restart(tmp_path):
     trades = restarted.handle_post("/api/Trade/search", {"accountId": ACCOUNT_ID})["trades"]
     assert len(orders) == 3
     assert len(trades) == 2
+
+
+def test_account_bracket_overrides_and_payload_ticks(tmp_path):
+    now = datetime.now(timezone.utc)
+    bars = [
+        {"t": _iso(now), "o": 100, "h": 100, "l": 100, "c": 100, "v": 1},
+    ]
+    alt_account_id = 202
+    config = _make_config(
+        accounts={"Sim": ACCOUNT_ID, "Alt": alt_account_id},
+        bracket_overrides={
+            "sim": {"sl_usd": 1.0, "tp_usd": 2.0},
+            "alt": {"sl_usd": 3.0, "tp_usd": 6.0},
+        },
+    )
+    broker, _ = _make_broker(tmp_path, bars, config=config)
+
+    broker.handle_post(
+        "/api/Order/place",
+        {
+            "accountId": alt_account_id,
+            "contractId": CONTRACT_ID,
+            "type": 2,
+            "side": 0,
+            "size": 1,
+        },
+    )
+    open_orders_alt = broker.handle_post("/api/Order/searchOpen", {"accountId": alt_account_id})["orders"]
+    stop_order = next(order for order in open_orders_alt if order["type"] == 4)
+    limit_order = next(order for order in open_orders_alt if order["type"] == 1)
+    assert stop_order["stopPrice"] == 97
+    assert limit_order["limitPrice"] == 106
+
+    _place_market_order(
+        broker,
+        payload_overrides={
+            "stopLossBracket": {"ticks": 5, "type": 4},
+            "takeProfitBracket": {"ticks": 9, "type": 1},
+        },
+    )
+    open_orders = broker.handle_post("/api/Order/searchOpen", {"accountId": ACCOUNT_ID})["orders"]
+    stop_order = next(order for order in open_orders if order["type"] == 4)
+    limit_order = next(order for order in open_orders if order["type"] == 1)
+    assert stop_order["stopPrice"] == 95
+    assert limit_order["limitPrice"] == 109

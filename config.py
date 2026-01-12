@@ -50,6 +50,26 @@ def load_config():
     if not config['ACCOUNTS']:
         raise RuntimeError("No accounts loaded from .env. Add ACCOUNT_<NAME>=<ID>.")
     config['DEFAULT_ACCOUNT'] = next(iter(config['ACCOUNTS']))
+    default_sl_usd = config['SIM_BRACKET_SL_USD']
+    default_tp_usd = config['SIM_BRACKET_TP_USD']
+    sim_account_brackets = {}
+    for account_name in config['ACCOUNTS'].keys():
+        env_prefix = f"SIM_ACCOUNT_{str(account_name).upper()}"
+        sl_env = os.getenv(f"{env_prefix}_SL_USD")
+        tp_env = os.getenv(f"{env_prefix}_TP_USD")
+        try:
+            sl_usd = float(sl_env) if sl_env not in (None, "") else default_sl_usd
+        except ValueError:
+            sl_usd = default_sl_usd
+        try:
+            tp_usd = float(tp_env) if tp_env not in (None, "") else default_tp_usd
+        except ValueError:
+            tp_usd = default_tp_usd
+        sim_account_brackets[str(account_name).lower()] = {
+            "sl_usd": sl_usd,
+            "tp_usd": tp_usd,
+        }
+    config['SIM_ACCOUNT_BRACKETS'] = sim_account_brackets
     config['OVERRIDE_CONTRACT_ID'] = os.getenv("OVERRIDE_CONTRACT_ID", "CON.F.US.MES.H26")
     config['STOP_LOSS_POINTS'] = float(os.getenv("STOP_LOSS_POINTS", 5.75))
     config['TP_POINTS'] = (
