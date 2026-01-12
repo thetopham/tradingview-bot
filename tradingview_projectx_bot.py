@@ -40,6 +40,7 @@ AI_TEST_ENDPOINTS = {
     "gamma": config.get("N8N_OVERSEER_URL_TEST3"),
     "delta": config.get("N8N_OVERSEER_URL_TEST4"),
     "epsilon": config.get("N8N_OVERSEER_URL_TEST5"),
+    "practice": config.get("N8N_OVERSEER_URL_TEST6"),
 }
 
 POSITION_MANAGER = PositionManager(ACCOUNTS)
@@ -119,6 +120,8 @@ def handle_webhook_logic(data):
                 route_label = "TEST4"
             elif acct == "epsilon":
                 route_label = "TEST5"
+            elif acct == "practice":
+                route_label = "TEST6"
 
             safe_url = ai_url.split("?")[0] if ai_url else "unset"
             logging.info("[AI ROUTE] account=%s -> %s url=%s", acct, route_label, safe_url)
