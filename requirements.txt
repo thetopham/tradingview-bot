@@ -7,3 +7,4 @@ gunicorn
 python-dateutil
 signalrcore
 supabase
+pytest
