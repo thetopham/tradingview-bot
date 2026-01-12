@@ -1,0 +1,1685 @@
+ProjectX Gateway API
+Getting Started
+ProjectX Trading, LLC - through its trading platform ProjectX, offers a complete end-to-end solution for prop firms and evaluation providers. These features include account customization, risk rules & monitoring, liquidations, statistics and robust permissioning. Our API utilizes the REST API architecture for managing your prop firm trader operations.
+
+What you'll need
+An understanding of REST API
+cURL or Postman for making sample requests
+
+Getting Started
+We've designed a very robust API for accessing and managing all aspects of your firm.
+
+🗃️ Authenticate
+2 items
+
+📄️ Validate Session
+Once you have successfully authenticated, session tokens are only valid for 24 hours.
+
+📄️ Placing Your First Order
+This documentation outlines the process for placing your first order using our API. To successfully execute an order, you must have an active trading account associated with your user. Follow the steps below to retrieve your account details, browse available contracts, and place your order.
+
+📄️ Connection URLs
+📄️ Rate Limits
+Overview
+
+Authenticate (with API key)
+We utilize JSON Web Tokens to authenticate all requests sent to the API. This process involves obtaining a session token, which is required for future requests.
+
+Step 1
+To begin, ensure you have the following:
+
+An API key obtained from your firm. If you do not have these credentials, please contact your firm.
+The connection URLs, obtained here.
+Step 2
+API URL: POST https://api.topstepx.com/api/Auth/loginKey
+
+API Reference: /api/Auth/loginKey
+
+cURL Request
+curl -X 'POST' \
+  'https://api.topstepx.com/api/Auth/loginKey' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "userName": "string",
+    "apiKey": "string"
+  }'
+
+Step 3
+Process the API response, and make sure the result is Success (0), then store your session token in a safe place. This session token will grant full access to the Gateway API.
+
+Response
+{
+    "token": "your_session_token_here",
+    "success": true,
+    "errorCode": 0,
+    "errorMessage": null
+}
+
+
+Authenticate (for authorized applications)
+We utilize JSON Web Tokens to authenticate all requests sent to the API.
+
+Step 1
+Retrieve the admin credentials (username and password, appId, and verifyKey) that have been provided for your firm. You will need these credentials to authenticate with the API.
+
+If you do not have these credentials, please contact your Account Manager for more information.
+
+Step 2
+API URL: POST https://api.topstepx.com/api/Auth/loginApp
+
+API Reference: /api/Auth/loginApp
+
+cURL Request
+curl -X 'POST' \
+  'https://api.topstepx.com/api/Auth/loginApp' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "userName": "yourUsername",
+    "password": "yourPassword",
+    "deviceId": "yourDeviceId",
+    "appId": "yourApplicationID",
+    "verifyKey": "yourVerifyKey"
+  }'
+
+Step 3
+Process the API response, and make sure the result is Success (0), then store your session token in a safe place. This session token will grant full access to the Gateway API.
+
+Response
+{
+    "token": "your_session_token_here",
+    "success": true,
+    "errorCode": 0,
+    "errorMessage": null
+}
+
+Validate Session
+Once you have successfully authenticated, session tokens are only valid for 24 hours.
+
+If your token has expired, you must re-validate it to receive a new token.
+
+Validate Token
+API URL: POST https://api.topstepx.com/api/Auth/validate
+
+API Reference: /api/Auth/validate
+
+To validate your token, you must make a POST request to the endpoint referenced above.
+
+cURL
+
+curl -X 'POST' \
+  'https://api.topstepx.com/api/Auth/validate' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json'
+
+response
+{
+  "success": true,
+  "errorCode": 0,
+  "errorMessage": null,
+  "newToken": "NEW_TOKEN"
+}
+
+
+Placing Your First Order
+This documentation outlines the process for placing your first order using our API. To successfully execute an order, you must have an active trading account associated with your user. Follow the steps below to retrieve your account details, browse available contracts, and place your order.
+
+Step 1
+To initiate the order process, you must first retrieve a list of active accounts linked to your user. This step is essential for confirming your account status before placing an order.
+
+API URL: POST https://api.topstepx.com/api/Account/search
+
+API Reference: /api/Account/search
+
+
+Response
+{
+    "accounts": [
+        {
+            "id": 1,
+            "name": "TEST_ACCOUNT_1",
+            "canTrade": true,
+            "isVisible": true
+        }
+    ],
+    "success": true,
+    "errorCode": 0,
+    "errorMessage": null
+}                      
+cURL Request
+curl -X 'POST' \
+  'https://api.topstepx.com/api/Account/search' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "onlyActiveAccounts": true
+  }'
+Request
+{
+  "onlyActiveAccounts": true
+}       
+
+Save the id of the account you want to use for placing orders. This will be used in Step 3.
+
+Step 2
+To place an order, you need to retrieve a list of available contracts. This step allows you to browse through the contracts that can be traded.
+
+API URL: POST https://api.topstepx.com/api/Contract/available
+
+API Reference: /api/Contract/available
+
+Request
+{
+  "live": true
+}
+
+Response
+{
+    "contracts": [
+        {
+            "id": "CON.F.US.BP6.U25",
+            "name": "6BU5",
+            "description": "British Pound (Globex): September 2025",
+            "tickSize": 0.0001,
+            "tickValue": 6.25,
+            "activeContract": true,
+            "symbolId": "F.US.BP6"
+        },
+        // Additional contracts...
+    ],
+    "success": true,
+    "errorCode": 0,
+    "errorMessage": null
+}
+
+cURL Request
+curl -X 'POST' \
+  'https://api.topstepx.com/api/Contract/available' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "live": true
+  }'
+
+
+Save the id of the contract on which you would like to place an order. This will be used in Step 3.
+
+Step 3
+Now that you have the account ID and a list of available contracts, you can place your order. Use the following endpoint to submit your order request.
+
+API URL: POST https://api.topstepx.com/api/Order/place
+
+API Reference: /api/Order/place
+
+Request
+{
+  "accountId": 1, // Replace with your actual account ID
+  "contractId": "CON.F.US.BP6.U25", // Replace with the contract ID you want to trade
+  "type": 2, // Market order
+  "side": 1, // Ask 
+  "size": 1 // Size of the order
+}
+Response
+{
+    "orderId": 9056,
+    "success": true,
+    "errorCode": 0,
+    "errorMessage": null
+}
+cURL Request
+curl -X 'POST' \
+  'https://api.topstepx.com/api/Order/place' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "accountId": 1,
+    "contractId": "CON.F.US.BP6.U25",
+    "type": 2,
+    "side": 1,
+    "size": 1
+  }'
+
+
+Example Response
+Success
+Error
+{
+    "orderId": 9056,
+    "success": true,
+    "errorCode": 0,
+    "errorMessage": null
+}
+
+Connection URLs
+Connection Details:
+API Endpoint: https://api.topstepx.com
+
+User Hub: https://rtc.topstepx.com/hubs/user
+
+Market Hub: https://rtc.topstepx.com/hubs/market
+
+Rate Limits
+Overview
+The Gateway API employs a rate limiting system for all authenticated requests. Its goal is to promote fair usage, prevent abuse, and ensure the stability and reliability of the service, while clearly defining the level of performance clients can expect.
+
+Rate Limit Table
+Endpoint(s)	Limit
+POST /api/History/retrieveBars	50 requests / 30 seconds
+All other Endpoints	200 requests / 60 seconds
+What Happens If You Exceed Rate Limits?
+If you exceed the allowed rate limits, the API will respond with an HTTP 429 Too Many Requests error. When this occurs, you should reduce your request frequency and try again after a short delay.
+
+
+API Reference
+🗃️ Account
+1 items
+
+🗃️ Market Data
+4 items
+
+🗃️ Orders
+5 items
+
+🗃️ Positions
+3 items
+
+🗃️ Trades
+1 items
+
+Search for Account
+API URL: POST https://api.topstepx.com/api/Account/search
+
+API Reference: /api/Account/search
+
+Description
+Search for accounts.
+
+Parameters
+Name	Type	Description	Required	Nullable
+onlyActiveAccounts	boolean	Whether to filter only active accounts.	Required	false
+Example Usage
+Example Request
+cURL Request
+curl -X 'undefined' \
+  'https://api.topstepx.com/api/Account/search' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json'
+
+Example Response
+Success
+Error
+{
+  "accounts": [
+      {
+          "id": 1,
+          "name": "TEST_ACCOUNT_1",
+          "balance": 50000,
+          "canTrade": true,
+          "isVisible": true
+      }
+  ],
+  "success": true,
+  "errorCode": 0,
+  "errorMessage": null
+}               
+
+
+Retrieve Bars
+API URL: POST https://api.topstepx.com/api/History/retrieveBars
+
+API Reference: /api/History/retrieveBars
+
+Description
+Retrieve bars.
+
+Note: The maximum number of bars that can be retrieved in a single request is 20,000.
+
+Parameters
+Name	Type	Description	Required	Nullable
+contractId	integer	The contract ID.	Required	false
+live	boolean	Whether to retrieve bars using the sim or live data subscription.	Required	false
+startTime	datetime	The start time of the historical data.	Required	false
+endTime	datetime	The end time of the historical data.	Required	false
+unit	integer	The unit of aggregation for the historical data:
+1 = Second
+2 = Minute
+3 = Hour
+4 = Day
+5 = Week
+6 = Month	Required	false
+unitNumber	integer	The number of units to aggregate.	Required	false
+limit	integer	The maximum number of bars to retrieve.	Required	false
+includePartialBar	boolean	Whether to include a partial bar representing the current time unit.	Required	false
+Example Usage
+Example Request
+cURL Request
+curl -X 'POST' \
+  'https://api.topstepx.com/api/History/retrieveBars' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "contractId": "CON.F.US.RTY.Z24",
+    "live": false,
+    "startTime": "2024-12-01T00:00:00Z",
+    "endTime": "2024-12-31T21:00:00Z",
+    "unit": 3,
+    "unitNumber": 1,
+    "limit": 7,
+    "includePartialBar": false
+  }'
+
+Example Response
+Success
+Error
+{
+    "bars": [
+        {
+            "t": "2024-12-20T14:00:00+00:00",
+            "o": 2208.100000000,
+            "h": 2217.000000000,
+            "l": 2206.700000000,
+            "c": 2210.100000000,
+            "v": 87
+        },
+        {
+            "t": "2024-12-20T13:00:00+00:00",
+            "o": 2195.800000000,
+            "h": 2215.000000000,
+            "l": 2192.900000000,
+            "c": 2209.800000000,
+            "v": 536
+        },
+        {
+            "t": "2024-12-20T12:00:00+00:00",
+            "o": 2193.600000000,
+            "h": 2200.300000000,
+            "l": 2192.000000000,
+            "c": 2198.000000000,
+            "v": 180
+        },
+        {
+            "t": "2024-12-20T11:00:00+00:00",
+            "o": 2192.200000000,
+            "h": 2194.800000000,
+            "l": 2189.900000000,
+            "c": 2194.800000000,
+            "v": 174
+        },
+        {
+            "t": "2024-12-20T10:00:00+00:00",
+            "o": 2200.400000000,
+            "h": 2200.400000000,
+            "l": 2191.000000000,
+            "c": 2193.100000000,
+            "v": 150
+        },
+        {
+            "t": "2024-12-20T09:00:00+00:00",
+            "o": 2205.000000000,
+            "h": 2205.800000000,
+            "l": 2198.900000000,
+            "c": 2200.500000000,
+            "v": 56
+        },
+        {
+            "t": "2024-12-20T08:00:00+00:00",
+            "o": 2207.700000000,
+            "h": 2210.100000000,
+            "l": 2198.100000000,
+            "c": 2204.900000000,
+            "v": 144
+        }
+    ],
+    "success": true,
+    "errorCode": 0,
+    "errorMessage": null
+}
+
+Search for Contracts
+API URL: POST https://api.topstepx.com/api/Contract/search
+
+API Reference: /api/Contract/search
+
+Description
+Search for contracts. Note: The response returns up to 20 contracts at a time.
+
+Parameters
+Name	Type	Description	Required	Nullable
+searchText	string	The name of the contract to search for.	Required	false
+live	boolean	Whether to search for contracts using the sim/live data subscription.	Required	false
+Example Usage
+Example Request
+cURL Request
+curl -X 'POST' \
+  'https://api.topstepx.com/api/Contract/search' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "live": false,
+    "searchText": "NQ"
+  }'
+
+Example Response
+Success
+Error
+{
+  "contracts": [
+      {
+          "id": "CON.F.US.ENQ.U25",
+          "name": "NQU5",
+          "description": "E-mini NASDAQ-100: September 2025",
+          "tickSize": 0.25,
+          "tickValue": 5,
+          "activeContract": true,
+          "symbolId": "F.US.ENQ"
+      },
+      {
+          "id": "CON.F.US.MNQ.U25",
+          "name": "MNQU5",
+          "description": "Micro E-mini Nasdaq-100: September 2025",
+          "tickSize": 0.25,
+          "tickValue": 0.5,
+          "activeContract": true,
+          "symbolId": "F.US.MNQ"
+      },
+      {
+          "id": "CON.F.US.NQG.Q25",
+          "name": "QGQ5",
+          "description": "E-Mini Natural Gas: August 2025",
+          "tickSize": 0.005,
+          "tickValue": 12.5,
+          "activeContract": true,
+          "symbolId": "F.US.NQG"
+      },
+      {
+          "id": "CON.F.US.NQM.U25",
+          "name": "QMU5",
+          "description": "E-Mini Crude Oil: September 2025",
+          "tickSize": 0.025,
+          "tickValue": 12.5,
+          "activeContract": true,
+          "symbolId": "F.US.NQM"
+      }
+  ],
+  "success": true,
+  "errorCode": 0,
+  "errorMessage": null
+}
+
+
+Search for Contract by Id
+API URL: POST https://api.topstepx.com/api/Contract/searchById
+
+API Reference: /api/Contract/searchById
+
+Description
+Search for contracts.
+
+Parameters
+Name	Type	Description	Required	Nullable
+contractId	string	The id of the contract to search for.	Required	false
+Example Usage
+Example Request
+cURL Request
+curl -X 'POST' \
+  'https://api.topstepx.com/api/Contract/searchById' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "contractId": "CON.F.US.ENQ.H25"
+  }'
+
+Example Response
+Success
+Error
+{
+  "contract": {
+      "id": "CON.F.US.ENQ.H25",
+      "name": "NQH5",
+      "description": "E-mini NASDAQ-100: March 2025",
+      "tickSize": 0.25,
+      "tickValue": 5,
+      "activeContract": false,
+      "symbolId": "F.US.ENQ"
+  },
+  "success": true,
+  "errorCode": 0,
+  "errorMessage": null
+}
+
+List Available Contracts
+API URL: POST https://api.topstepx.com/api/Contract/available
+
+API Reference: /api/Contract/available
+
+Description
+Lists available contracts based on the provided request parameters.
+
+Parameters
+Name	Type	Description	Required	Nullable
+live	boolean	Whether to retrieve live contracts. This parameter is required and cannot be null.	Required	false
+Example Usage
+Example Request
+cURL Request
+curl -X 'POST' \
+  'https://api.topstepx.com/api/Contract/available' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "live": true
+  }'
+
+Example Response
+Success
+{
+    "contracts": [
+        {
+            "id": "CON.F.US.BP6.U25",
+            "name": "6BU5",
+            "description": "British Pound (Globex): September 2025",
+            "tickSize": 0.0001,
+            "tickValue": 6.25,
+            "activeContract": true,
+            "symbolId": "F.US.BP6"
+        },
+        {
+            "id": "CON.F.US.CA6.U25",
+            "name": "6CU5",
+            "description": "Canadian Dollar (Globex): September 2025",
+            "tickSize": 0.00005,
+            "tickValue": 5,
+            "activeContract": true,
+            "symbolId": "F.US.CA6"
+        },
+        {
+            "id": "CON.F.US.DA6.U25",
+            "name": "6AU5",
+            "description": "Australian Dollar (Globex): September 2025",
+            "tickSize": 0.00005,
+            "tickValue": 5,
+            "activeContract": true,
+            "symbolId": "F.US.DA6"
+        },
+        {
+            "id": "CON.F.US.EEU.U25",
+            "name": "E7U5",
+            "description": "E-mini Euro FX: September 2025",
+            "tickSize": 0.0001,
+            "tickValue": 6.25,
+            "activeContract": true,
+            "symbolId": "F.US.EEU"
+        },
+        {
+            "id": "CON.F.US.EMD.U25",
+            "name": "EMDU5",
+            "description": "E-mini MidCap 400: September 2025",
+            "tickSize": 0.1,
+            "tickValue": 10,
+            "activeContract": true,
+            "symbolId": "F.US.EMD"
+        },
+        {
+            "id": "CON.F.US.ENQ.U25",
+            "name": "NQU5",
+            "description": "E-mini NASDAQ-100: September 2025",
+            "tickSize": 0.25,
+            "tickValue": 5,
+            "activeContract": true,
+            "symbolId": "F.US.ENQ"
+        },
+        {
+            "id": "CON.F.US.EP.U25",
+            "name": "ESU5",
+            "description": "E-Mini S&P 500: September 2025",
+            "tickSize": 0.25,
+            "tickValue": 12.5,
+            "activeContract": true,
+            "symbolId": "F.US.EP"
+        },
+        {
+            "id": "CON.F.US.EU6.U25",
+            "name": "6EU5",
+            "description": "Euro FX (Globex): September 2025",
+            "tickSize": 0.00005,
+            "tickValue": 6.25,
+            "activeContract": true,
+            "symbolId": "F.US.EU6"
+        },
+        {
+            "id": "CON.F.US.GF.Q25",
+            "name": "GFQ5",
+            "description": "Feeder Cattle (Globex): August 2025",
+            "tickSize": 0.025,
+            "tickValue": 12.5,
+            "activeContract": true,
+            "symbolId": "F.US.GF"
+        },
+        {
+            "id": "CON.F.US.GLE.Q25",
+            "name": "LEQ5",
+            "description": "Live Cattle (Globex): August 2025",
+            "tickSize": 0.025,
+            "tickValue": 10,
+            "activeContract": true,
+            "symbolId": "F.US.GLE"
+        },
+        {
+            "id": "CON.F.US.GMCD.U25",
+            "name": "MCDU5",
+            "description": "E-Micro CAD/USD: September 2025",
+            "tickSize": 0.0001,
+            "tickValue": 1,
+            "activeContract": true,
+            "symbolId": "F.US.GMCD"
+        },
+        {
+            "id": "CON.F.US.GMET.N25",
+            "name": "METN5",
+            "description": "Micro Ether: July 2025",
+            "tickSize": 0.5,
+            "tickValue": 0.05,
+            "activeContract": true,
+            "symbolId": "F.US.GMET"
+        },
+        {
+            "id": "CON.F.US.HE.Q25",
+            "name": "HEQ5",
+            "description": "Lean Hogs (Globex): August 2025",
+            "tickSize": 0.025,
+            "tickValue": 10,
+            "activeContract": true,
+            "symbolId": "F.US.HE"
+        },
+        {
+            "id": "CON.F.US.JY6.U25",
+            "name": "6JU5",
+            "description": "Japanese Yen (Globex): September 2025",
+            "tickSize": 0.0000005,
+            "tickValue": 6.25,
+            "activeContract": true,
+            "symbolId": "F.US.JY6"
+        },
+        {
+            "id": "CON.F.US.M2K.U25",
+            "name": "M2KU5",
+            "description": "Micro E-mini Russell 2000: September 2025",
+            "tickSize": 0.1,
+            "tickValue": 0.5,
+            "activeContract": true,
+            "symbolId": "F.US.M2K"
+        },
+        {
+            "id": "CON.F.US.M6A.U25",
+            "name": "M6AU5",
+            "description": "E-Micro AUD/USD: September 2025",
+            "tickSize": 0.0001,
+            "tickValue": 1,
+            "activeContract": true,
+            "symbolId": "F.US.M6A"
+        },
+        {
+            "id": "CON.F.US.M6B.U25",
+            "name": "M6BU5",
+            "description": "E-Micro GBP/USD: September 2025",
+            "tickSize": 0.0001,
+            "tickValue": 0.625,
+            "activeContract": true,
+            "symbolId": "F.US.M6B"
+        },
+        {
+            "id": "CON.F.US.M6E.U25",
+            "name": "M6EU5",
+            "description": "E-Micro EUR/USD: September 2025",
+            "tickSize": 0.0001,
+            "tickValue": 1.25,
+            "activeContract": true,
+            "symbolId": "F.US.M6E"
+        },
+        {
+            "id": "CON.F.US.MBT.N25",
+            "name": "MBTN5",
+            "description": "Micro Bitcoin: July 2025",
+            "tickSize": 5,
+            "tickValue": 0.5,
+            "activeContract": true,
+            "symbolId": "F.US.MBT"
+        },
+        {
+            "id": "CON.F.US.MES.U25",
+            "name": "MESU5",
+            "description": "Micro E-mini S&P 500: September 2025",
+            "tickSize": 0.25,
+            "tickValue": 1.25,
+            "activeContract": true,
+            "symbolId": "F.US.MES"
+        },
+        {
+            "id": "CON.F.US.MNQ.U25",
+            "name": "MNQU5",
+            "description": "Micro E-mini Nasdaq-100: September 2025",
+            "tickSize": 0.25,
+            "tickValue": 0.5,
+            "activeContract": true,
+            "symbolId": "F.US.MNQ"
+        },
+        {
+            "id": "CON.F.US.MX6.U25",
+            "name": "6MU5",
+            "description": "Mexican Peso (Globex): September 2025",
+            "tickSize": 0.00001,
+            "tickValue": 5,
+            "activeContract": true,
+            "symbolId": "F.US.MX6"
+        },
+        {
+            "id": "CON.F.US.NE6.U25",
+            "name": "6NU5",
+            "description": "New Zealand Dollar (Globex): September 2025",
+            "tickSize": 0.00005,
+            "tickValue": 5,
+            "activeContract": true,
+            "symbolId": "F.US.NE6"
+        },
+        {
+            "id": "CON.F.US.NKD.U25",
+            "name": "NKDU5",
+            "description": "Nikkei 225 (Globex): September 2025",
+            "tickSize": 5,
+            "tickValue": 25,
+            "activeContract": true,
+            "symbolId": "F.US.NKD"
+        },
+        {
+            "id": "CON.F.US.RTY.U25",
+            "name": "RTYU5",
+            "description": "E-mini Russell 2000: September 2025",
+            "tickSize": 0.1,
+            "tickValue": 5,
+            "activeContract": true,
+            "symbolId": "F.US.RTY"
+        },
+        {
+            "id": "CON.F.US.SF6.U25",
+            "name": "6SU5",
+            "description": "Swiss Franc (Globex): September 2025",
+            "tickSize": 0.00005,
+            "tickValue": 6.25,
+            "activeContract": true,
+            "symbolId": "F.US.SF6"
+        },
+        {
+            "id": "CON.F.US.SR3.Z25",
+            "name": "SR3Z5",
+            "description": "3 Month SOFR: December 2025",
+            "tickSize": 0.005,
+            "tickValue": 12.5,
+            "activeContract": true,
+            "symbolId": "F.US.SR3"
+        }
+    ],
+    "success": true,
+    "errorCode": 0,
+    "errorMessage": null
+}
+
+Orders
+Authorized users have access to order operations, allowing them to search for, modify, place, and cancel orders.
+
+📄️ Search for Orders
+<ApiHeader
+
+📄️ Search for Open Orders
+<ApiHeader
+
+📄️ Place an Order
+<ApiHeader
+
+📄️ Cancel an Order
+<ApiHeader
+
+📄️ Modify an Order
+<ApiHeader
+
+Search for Orders
+API URL: POST https://api.topstepx.com/api/Order/search
+
+API Reference: /api/Order/search
+
+Description
+Search for orders.
+
+Parameters
+Name	Type	Description	Required	Nullable
+accountId	integer	The account ID.	Required	false
+startTimestamp	datetime	The start of the timestamp filter.	Required	false
+endTimestamp	datetime	The end of the timestamp filter.	Optional	true
+Example Usage
+Example Request
+cURL Request
+curl -X 'POST' \
+  'https://api.topstepx.com/api/Order/search' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "accountId": 704,
+    "startTimestamp": "2025-07-18T21:00:01.268009+00:00",
+    "endTimestamp": "2025-07-18T21:00:01.278009+00:00"
+  }'
+
+Example Response
+Success
+Error
+{
+  "orders": [
+      {
+          "id": 36598,
+          "accountId": 704,
+          "contractId": "CON.F.US.EP.U25",
+          "symbolId": "F.US.EP",
+          "creationTimestamp": "2025-07-18T21:00:01.268009+00:00",
+          "updateTimestamp": "2025-07-18T21:00:01.268009+00:00",
+          "status": 2,
+          "type": 2,
+          "side": 0,
+          "size": 1,
+          "limitPrice": null,
+          "stopPrice": null,
+          "fillVolume": 1,
+          "filledPrice": 6335.250000000,
+          "customTag": null
+      }
+  ],
+  "success": true,
+  "errorCode": 0,
+  "errorMessage": null
+}
+
+
+Search for Open Orders
+API URL: POST https://api.topstepx.com/api/Order/searchOpen
+
+API Reference: /api/Order/searchOpen
+
+Description
+Search for open orders.
+
+Parameters
+Name	Type	Description	Required	Nullable
+accountId	integer	The account ID.	Required	false
+Example Usage
+Example Request
+cURL Request
+curl -X 'POST' \
+  'https://api.topstepx.com/api/Order/searchOpen' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "accountId": 212
+  }'
+
+Example Response
+Success
+Error
+{
+    "orders": [
+        {
+            "id": 26970,
+            "accountId": 212,
+            "contractId": "CON.F.US.EP.M25",
+            "creationTimestamp": "2025-04-21T19:45:52.105808+00:00",
+            "updateTimestamp": "2025-04-21T19:45:52.105808+00:00",
+            "status": 1,
+            "type": 4,
+            "side": 1,
+            "size": 1,
+            "limitPrice": null,
+            "stopPrice": 5138.000000000,
+            "filledPrice": null
+        }
+    ],
+    "success": true,
+    "errorCode": 0,
+    "errorMessage": null
+}
+
+Place an Order
+API URL: POST https://api.topstepx.com/api/Order/place
+
+API Reference: /api/Order/place
+
+Description
+Place an order.
+
+Parameters
+Name	Type	Description	Required	Nullable
+accountId	integer	The account ID.	Required	false
+contractId	string	The contract ID.	Required	false
+type	integer	The order type:
+1 = Limit
+2 = Market
+4 = Stop
+5 = TrailingStop
+6 = JoinBid
+7 = JoinAsk	Required	false
+side	integer	The side of the order:
+0 = Bid (buy)
+1 = Ask (sell)	Required	false
+size	integer	The size of the order.	Required	false
+limitPrice	decimal	The limit price for the order, if applicable.	Optional	true
+stopPrice	decimal	The stop price for the order, if applicable.	Optional	true
+trailPrice	decimal	The trail price for the order, if applicable.	Optional	true
+customTag	string	An optional custom tag for the order. Must be unique across the account.	Optional	true
+stopLossBracket	object	Stop loss bracket configuration.	Optional	true
+takeProfitBracket	object	Take profit bracket configuration.	Optional	true
+Bracket Objects
+stopLossBracket
+Name	Type	Description	Required	Nullable
+ticks	integer	Number of ticks for stop loss	Required	false
+type	integer	Type of stop loss bracket. Uses same OrderType enum values:
+1 = Limit
+2 = Market
+4 = Stop
+5 = TrailingStop
+6 = JoinBid
+7 = JoinAsk	Required	false
+takeProfitBracket
+Name	Type	Description	Required	Nullable
+ticks	integer	Number of ticks for take profit	Required	false
+type	integer	Type of take profit bracket. Uses same OrderType enum values:
+1 = Limit
+2 = Market
+4 = Stop
+5 = TrailingStop
+6 = JoinBid
+7 = JoinAsk	Required	false
+Example Usage
+Example Request
+cURL Request
+curl -X 'POST' \
+  'https://api.topstepx.com/api/Order/place' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "accountId": 465,
+    "contractId": "CON.F.US.DA6.M25",
+    "type": 2,
+    "side": 1,
+    "size": 1,
+    "limitPrice": null,
+    "stopPrice": null,
+    "trailPrice": null,
+    "customTag": null,
+    "stopLossBracket": {
+      "ticks": 10,
+      "type": 1
+    },
+    "takeProfitBracket": {
+      "ticks": 20,
+      "type": 1
+    }
+  }'
+
+Example Response
+Success
+Error
+{
+    "orderId": 9056,
+    "success": true,
+    "errorCode": 0,
+    "errorMessage": null
+}
+
+
+Cancel an Order
+API URL: POST https://api.topstepx.com/api/Order/cancel
+
+API Reference: /api/Order/cancel
+
+Description
+Cancel an order.
+
+Parameters
+Name	Type	Description	Required	Nullable
+accountId	integer	The account ID.	Required	false
+orderId	integer	The order id.	Required	false
+Example Usage
+Example Request
+cURL Request
+curl -X 'POST' \
+  'https://api.topstepx.com/api/Order/cancel' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "accountId": 465,
+    "orderId": 26974
+  }'
+
+Example Response
+Success
+Error
+{
+    "success": true,
+    "errorCode": 0,
+    "errorMessage": null
+}
+
+Modify an Order
+API URL: POST https://api.topstepx.com/api/Order/modify
+
+API Reference: /api/Order/modify
+
+Description
+Modify an open order.
+
+Parameters
+Name	Type	Description	Required	Nullable
+accountId	integer	The account ID.	Required	false
+orderId	integer	The order id.	Required	false
+size	integer	The size of the order.	Optional	true
+limitPrice	decimal	The limit price for the order, if applicable.	Optional	true
+stopPrice	decimal	The stop price for the order, if applicable.	Optional	true
+trailPrice	decimal	The trail price for the order, if applicable.	Optional	true
+Example Usage
+Example Request
+cURL Request
+curl -X 'POST' \
+  'https://api.topstepx.com/api/Order/modify' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "accountId": 465,
+    "orderId": 26974,
+    "size": 1,
+    "limitPrice": null,
+    "stopPrice": 1604,
+    "trailPrice": null
+  }'
+
+Example Response
+Success
+Error
+{
+    "success": true,
+    "errorCode": 0,
+    "errorMessage": null
+}
+
+Positions
+Authorized users have access to position operations, allowing them to search for, and close positions.
+
+📄️ Close Positions
+<ApiHeader
+
+📄️ Partially Close Positions
+<ApiHeader
+
+📄️ Search for Positions
+<ApiHeader
+
+Close Positions
+API URL: POST https://api.topstepx.com/api/Position/closeContract
+
+API Reference: /api/Position/closeContract
+
+Description
+Close a position.
+
+Parameters
+Name	Type	Description	Required	Nullable
+accountId	integer	The account ID.	Required	false
+contractId	string	The contract ID.	Required	false
+Example Usage
+Example Request
+cURL Request
+curl -X 'POST' \
+  'https://api.topstepx.com/api/Position/closeContract' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "accountId": 536,
+    "contractId": "CON.F.US.GMET.J25"
+  }'
+
+Example Response
+Success
+Error
+{
+    "success": true,
+    "errorCode": 0,
+    "errorMessage": null
+}
+
+Partially Close Positions
+API URL: POST https://api.topstepx.com/api/Position/partialCloseContract
+
+API Reference: /api/Position/partialCloseContract
+
+Description
+Partially close a position.
+
+Parameters
+Name	Type	Description	Required	Nullable
+accountId	integer	The account ID.	Required	false
+contractId	string	The contract ID.	Required	false
+size	integer	The size to close.	Required	false
+Example Usage
+Example Request
+cURL Request
+curl -X 'POST' \
+  'https://api.topstepx.com/api/Position/partialCloseContract' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "accountId": 536,
+    "contractId": "CON.F.US.GMET.J25",
+    "size": 1
+  }'
+
+Example Response
+Success
+Error
+{
+    "success": true,
+    "errorCode": 0,
+    "errorMessage": null
+}
+
+Search for Positions
+API URL: POST https://api.topstepx.com/api/Position/searchOpen
+
+API Reference: /api/Position/searchOpen
+
+Description
+Search for open positions.
+
+Parameters
+Name	Type	Description	Required	Nullable
+accountId	integer	The account ID.	Required	false
+Example Usage
+Example Request
+cURL Request
+curl -X 'POST' \
+  'https://api.topstepx.com/api/Position/searchOpen' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "accountId": 536
+  }'
+
+Example Response
+Success
+Error
+{
+    "positions": [
+        {
+            "id": 6124,
+            "accountId": 536,
+            "contractId": "CON.F.US.GMET.J25",
+            "creationTimestamp": "2025-04-21T19:52:32.175721+00:00",
+            "type": 1,
+            "size": 2,
+            "averagePrice": 1575.750000000
+        }
+    ],
+    "success": true,
+    "errorCode": 0,
+    "errorMessage": null
+}
+
+
+Trades
+Authorized users have access to trade operations, allowing them to search for trades.
+
+📄️ Search for Trades
+<ApiHeader
+
+Search for Trades
+API URL: POST https://api.topstepx.com/api/Trade/search
+
+API Reference: /api/Trade/search
+
+Description
+Search for trades from the request parameters.
+
+Parameters
+Name	Type	Description	Required	Nullable
+accountId	integer	The account ID.	Required	false
+startTimestamp	datetime	The start of the timestamp filter.	Required	false
+endTimestamp	datetime	The end of the timestamp filter.	Optional	true
+Example Usage
+Example Request
+cURL Request
+curl -X 'POST' \
+  'https://api.topstepx.com/api/Trade/search' \
+  -H 'accept: text/plain' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "accountId": 203,
+    "startTimestamp": "2025-01-20T15:47:39.882Z",
+    "endTimestamp": "2025-01-30T15:47:39.882Z"
+  }'
+
+Example Response
+Success
+Error
+{
+    "trades": [
+        {
+            "id": 8604,
+            "accountId": 203,
+            "contractId": "CON.F.US.EP.H25",
+            "creationTimestamp": "2025-01-21T16:13:52.523293+00:00",
+            "price": 6065.250000000,
+            "profitAndLoss": 50.000000000,
+            "fees": 1.4000,
+            "side": 1,
+            "size": 1,
+            "voided": false,
+            "orderId": 14328
+        },
+        {
+            "id": 8603,
+            "accountId": 203,
+            "contractId": "CON.F.US.EP.H25",
+            "creationTimestamp": "2025-01-21T16:13:04.142302+00:00",
+            "price": 6064.250000000,
+            "profitAndLoss": null,    //a null value indicates a half-turn trade
+            "fees": 1.4000,
+            "side": 0,
+            "size": 1,
+            "voided": false,
+            "orderId": 14326
+        }
+    ],
+    "success": true,
+    "errorCode": 0,
+    "errorMessage": null
+}
+
+Realtime Updates
+Realtime Updates for various events
+
+📄️ Real Time Data Overview
+The ProjectX Real Time API utilizes SignalR library (via WebSocket) to provide real-time access to data updates
+
+Real Time Data Overview
+The ProjectX Real Time API utilizes SignalR library (via WebSocket) to provide real-time access to data updates involving accounts, orders, positions, balances and quotes.
+
+There are two hubs: user and market.
+
+The user hub will provide real-time updates to a user's accounts, orders, and positions.
+The market hub will provide market data such as market trade events, DOM events, etc.
+What is SignalR?
+SignalR is a real-time web application framework developed by Microsoft that simplifies the process of adding real-time functionality to web applications. It allows for bidirectional communication between clients (such as web browsers) and servers, enabling features like live chat, notifications, and real-time updates without the need for constant client-side polling or manual handling of connections.
+
+SignalR abstracts away the complexities of real-time communication by providing high-level APIs for developers. It supports various transport protocols, including WebSockets, Server-Sent Events (SSE), Long Polling, and others, automatically selecting the most appropriate transport mechanism based on the capabilities of the client and server.
+
+The framework handles connection management, message routing, and scaling across multiple servers, making it easier for developers to build scalable and responsive web applications. SignalR is available for multiple platforms, including .NET and JavaScript, allowing developers to build real-time applications using their preferred programming languages and frameworks.
+
+Further information on SignalR can be found here.
+
+Example Usage
+Market Hub
+// Import the necessary modules from @microsoft/signalr
+const { HubConnectionBuilder, HttpTransportType } = require('@microsoft/signalr');
+
+function setupSignalRConnection() {
+    const JWT_TOKEN = 'your_bearer_token';
+    const marketHubUrl = 'https://rtc.topstepx.com/hubs/market?access_token=YOUR_JWT_TOKEN';
+    const CONTRACT_ID = 'CON.F.US.RTY.H25';
+
+    const rtcConnection = new HubConnectionBuilder()
+        .withUrl(marketHubUrl, {
+            skipNegotiation: true,
+            transport: HttpTransportType.WebSockets,
+            accessTokenFactory: () => JWT_TOKEN,
+            timeout: 10000
+        })
+        .withAutomaticReconnect()
+        .build();
+
+    rtcConnection.start()
+        .then(() => {
+            const subscribe = () => {
+                rtcConnection.invoke('SubscribeContractQuotes', CONTRACT_ID);
+                rtcConnection.invoke('SubscribeContractTrades', CONTRACT_ID);
+                rtcConnection.invoke('SubscribeContractMarketDepth', CONTRACT_ID);
+            };
+
+            const unsubscribe = () => {
+                rtcConnection.invoke('UnsubscribeContractQuotes', CONTRACT_ID);
+                rtcConnection.invoke('UnsubscribeContractTrades', CONTRACT_ID);
+                rtcConnection.invoke('UnsubscribeContractMarketDepth', CONTRACT_ID);
+            };
+
+            rtcConnection.on('GatewayQuote', (contractId, data)  => {
+                console.log('Received market quote data', data);
+            });
+
+            rtcConnection.on('GatewayTrade', (contractId, data) => {
+                console.log('Received market trade data', data);
+            });
+
+            rtcConnection.on('GatewayDepth', (contractId, data) => {
+                console.log('Received market depth data', data);
+            });
+
+            subscribe();
+
+            rtcConnection.onreconnected((connectionId) => {
+                console.log('RTC Connection Reconnected');
+                subscribe();
+            });
+        })
+        .catch((err) => {
+            console.error('Error starting connection:', err);
+        });
+}
+// Call the function to set up and start the connection
+setupSignalRConnection();
+
+User Hub
+
+// Import the necessary modules from @microsoft/signalr
+const { HubConnectionBuilder, HttpTransportType } = require('@microsoft/signalr');
+
+function setupSignalRConnection() {
+    const JWT_TOKEN = 'your_bearer_token';
+    const SELECTED_ACCOUNT_ID = 123; // your currently selected/visible account ID
+    const userHubUrl = 'https://rtc.topstepx.com/hubs/user?access_token=YOUR_JWT_TOKEN';
+    
+    const rtcConnection = new HubConnectionBuilder()
+        .withUrl(userHubUrl, {
+            skipNegotiation: true,
+            transport: HttpTransportType.WebSockets,
+            accessTokenFactory: () => JWT_TOKEN,
+            timeout: 10000
+        })
+        .withAutomaticReconnect()
+        .build();
+
+    rtcConnection.start()
+        .then(() => {
+            const subscribe = () => {
+                rtcConnection.invoke('SubscribeAccounts');
+                rtcConnection.invoke('SubscribeOrders', SELECTED_ACCOUNT_ID);
+                rtcConnection.invoke('SubscribePositions', SELECTED_ACCOUNT_ID);
+                rtcConnection.invoke('SubscribeTrades', SELECTED_ACCOUNT_ID);
+            };
+
+            const unsubscribe = () => {
+                rtcConnection.invoke('UnsubscribeAccounts');
+                rtcConnection.invoke('UnsubscribeOrders', SELECTED_ACCOUNT_ID);
+                rtcConnection.invoke('UnsubscribePositions', SELECTED_ACCOUNT_ID);
+                rtcConnection.invoke('UnsubscribeTrades', SELECTED_ACCOUNT_ID);
+            };
+
+            rtcConnection.on('GatewayUserAccount', (data) => {
+                console.log('Received account update', data);
+            });
+
+            rtcConnection.on('GatewayUserOrder', (data) => {
+                console.log('Received order update', data);
+            });
+
+            rtcConnection.on('GatewayUserPosition', (data) => {
+                console.log('Received position update', data);
+            });
+
+            rtcConnection.on('GatewayUserTrade', (data) => {
+                console.log('Received trade update', data);
+            });
+
+            subscribe();
+
+            rtcConnection.onreconnected((connectionId) => {
+                console.log('RTC Connection Reconnected');
+                subscribe();
+            });
+        })
+        .catch((err) => {
+            console.error('Error starting connection:', err);
+        });
+}
+// Call the function to set up and start the connection
+setupSignalRConnection();
+
+Real-Time Event Payloads
+User Hub Events
+GatewayUserAccount
+Example Payload:
+
+{
+  id: 123,
+  name: "Main Trading Account",
+  balance: 10000.50,
+  canTrade: true,
+  isVisible: true,
+  simulated: false
+}
+
+Field	Type	Description
+id	int	The account ID
+name	string	The name of the account
+balance	number	The current balance of the account
+canTrade	bool	Whether the account is eligible for trading
+isVisible	bool	Whether the account should be visible
+simulated	bool	Whether the account is simulated or live
+GatewayUserPosition
+Example Payload:
+
+{
+  id: 456,
+  accountId: 123,
+  contractId: "CON.F.US.EP.U25",
+  creationTimestamp: "2024-07-21T13:45:00Z",
+  type: 1, // Long
+  size: 2,
+  averagePrice: 2100.25
+}
+
+Field	Type	Description
+id	int	The position ID
+accountId	int	The account associated with the position
+contractId	string	The contract ID associated with the position
+creationTimestamp	string	The timestamp when the position was created or opened
+type	int (PositionType enum)	The type of the position (long/short)
+size	int	The size of the position
+averagePrice	number	The average price of the position
+GatewayUserOrder
+Example Payload:
+
+{
+  id: 789,
+  accountId: 123,
+  contractId: "CON.F.US.EP.U25",
+  symbolId: "F.US.EP",
+  creationTimestamp: "2024-07-21T13:45:00Z",
+  updateTimestamp: "2024-07-21T13:46:00Z",
+  status: 1, // Open
+  type: 1, // Limit
+  side: 0, // Bid
+  size: 1,
+  limitPrice: 2100.50,
+  stopPrice: null,
+  fillVolume: 0,
+  filledPrice: null,
+  customTag: "strategy-1"
+}
+
+Field	Type	Description
+id	long	The order ID
+accountId	int	The account associated with the order
+contractId	string	The contract ID on which the order is placed
+symbolId	string	The symbol ID corresponding to the contract
+creationTimestamp	string	The timestamp when the order was created
+updateTimestamp	string	The timestamp when the order was last updated
+status	int (OrderStatus enum)	The current status of the order
+type	int (OrderType enum)	The type of the order
+side	int (OrderSide enum)	The side of the order (bid/ask)
+size	int	The size of the order
+limitPrice	number	The limit price for the order, if applicable
+stopPrice	number	The stop price for the order, if applicable
+fillVolume	int	The number of contracts filled on the order
+filledPrice	number	The price at which the order was filled, if any
+customTag	string	The custom tag associated with the order, if any
+GatewayUserTrade
+Example Payload:
+
+{
+  id: 101112,
+  accountId: 123,
+  contractId: "CON.F.US.EP.U25",
+  creationTimestamp: "2024-07-21T13:47:00Z",
+  price: 2100.75,
+  profitAndLoss: 50.25,
+  fees: 2.50,
+  side: 0, // Bid
+  size: 1,
+  voided: false,
+  orderId: 789
+}
+
+Field	Type	Description
+id	long	The trade ID
+accountId	int	The account ID associated with the trade
+contractId	string	The contract ID on which the trade occurred
+creationTimestamp	string	The timestamp when the trade was created
+price	number	The price at which the trade was executed
+profitAndLoss	number	The total profit and loss of the trade, if available
+fees	number	The total fees associated with the trade
+side	int (OrderSide enum)	The side of the trade (bid/ask)
+size	int	The size of the trade
+voided	bool	Whether the trade is voided
+orderId	long	The order ID associated with the trade
+Market Hub Events
+GatewayQuote
+Example Payload:
+
+{
+  symbol: "F.US.EP",
+  symbolName: "/ES",
+  lastPrice: 2100.25,
+  bestBid: 2100.00,
+  bestAsk: 2100.50,
+  change: 25.50,
+  changePercent: 0.14,
+  open: 2090.00,
+  high: 2110.00,
+  low: 2080.00,
+  volume: 12000,
+  lastUpdated: "2024-07-21T13:45:00Z",
+  timestamp: "2024-07-21T13:45:00Z"
+}
+
+Field	Type	Description
+symbol	string	The symbol ID
+symbolName	string	Friendly symbol name (currently unused)
+lastPrice	number	The last traded price
+bestBid	number	The current best bid price
+bestAsk	number	The current best ask price
+change	number	The price change since previous close
+changePercent	number	The percent change since previous close
+open	number	The opening price
+high	number	The session high price
+low	number	The session low price
+volume	number	The total traded volume
+lastUpdated	string	The last updated time
+timestamp	string	The quote timestamp
+GatewayDepth
+Example Payload:
+
+{
+  timestamp: "2024-07-21T13:45:00Z",
+  type: 1, // Ask
+  price: 2100.00,
+  volume: 10,
+  currentVolume: 5
+}
+
+Field	Type	Description
+timestamp	string	The timestamp of the DOM update
+type	int (DomType Enum)	DOM type
+price	number	The price level
+volume	number	The total volume at this price level
+currentVolume	int	The current volume at this price level
+GatewayTrade
+Example Payload:
+
+{
+  symbolId: "F.US.EP",
+  price: 2100.25,
+  timestamp: "2024-07-21T13:45:00Z",
+  type: 0, // Buy
+  volume: 2
+}
+
+Field	Type	Description
+symbolId	string	The symbol ID
+price	number	The trade price
+timestamp	string	The trade timestamp
+type	int (TradeLogType enum)	TradeLog type
+volume	number	The trade volume
+Enum Definitions
+public enum DomType
+{
+    Unknown    = 0,
+    Ask        = 1,
+    Bid        = 2,
+    BestAsk    = 3,
+    BestBid    = 4,
+    Trade      = 5,
+    Reset      = 6,
+    Low        = 7,
+    High       = 8,
+    NewBestBid = 9,
+    NewBestAsk = 10,
+    Fill       = 11,
+}
+
+public enum OrderSide
+{
+    Bid = 0,
+    Ask = 1
+}
+
+public enum OrderType
+{
+    Unknown      = 0,
+    Limit        = 1,
+    Market       = 2,
+    StopLimit    = 3,
+    Stop         = 4,
+    TrailingStop = 5,
+    JoinBid      = 6,
+    JoinAsk      = 7,
+}
+
+public enum OrderStatus
+{
+    None      = 0,
+    Open      = 1,
+    Filled    = 2,
+    Cancelled = 3,
+    Expired   = 4,
+    Rejected  = 5,
+    Pending   = 6
+}
+
+public enum TradeLogType
+{
+    Buy  = 0,
+    Sell = 1,
+}
+
+public enum PositionType
+{
+    Undefined = 0,
+    Long      = 1,
+    Short     = 2
+}
+
+
+
+
