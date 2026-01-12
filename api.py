@@ -87,6 +87,9 @@ def post(path, payload):
         logging.error("Error on POST %s: %s", url, resp.text)
     resp.raise_for_status()
     data = resp.json()
+    if data.get("success") is False:
+        error_message = data.get("message") or data.get("error") or "Unknown API error"
+        raise RuntimeError(f"API request failed: {error_message}")
     logging.debug("Response JSON: %s", data)
     return data
 
