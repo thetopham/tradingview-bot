@@ -101,7 +101,7 @@ class PositionManager:
             return cached[1]
 
         try:
-            accounts = search_accounts(only_active_accounts=True)
+            accounts = search_accounts(only_active_accounts=True, account_id=acct_id)
         except Exception as exc:
             self.logger.error("Failed to fetch account list: %s", exc)
             return cached[1] if cached else None

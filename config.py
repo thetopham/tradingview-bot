@@ -59,24 +59,23 @@ def load_config():
         for k, v in os.environ.items() if k.startswith("ACCOUNT_")
     }
     sim_account_settings_by_id = {}
-    if config['BROKER_MODE'] == "sim":
-        sim_accounts = {}
-        sim_accounts_json = (config.get("SIM_ACCOUNTS_JSON") or "").strip()
+    sim_accounts = {}
+    sim_accounts_json = (config.get("SIM_ACCOUNTS_JSON") or "").strip()
+    sim_accounts_path = (config.get("SIM_ACCOUNTS_PATH") or "").strip()
+    if config['BROKER_MODE'] == "sim" or sim_accounts_json or sim_accounts_path:
         if sim_accounts_json:
             try:
                 sim_accounts = json.loads(sim_accounts_json)
             except json.JSONDecodeError as exc:
                 raise RuntimeError("SIM_ACCOUNTS_JSON must be valid JSON.") from exc
-        else:
-            sim_accounts_path = (config.get("SIM_ACCOUNTS_PATH") or "").strip()
-            if sim_accounts_path:
-                try:
-                    with open(sim_accounts_path, "r", encoding="utf-8") as handle:
-                        sim_accounts = json.load(handle)
-                except FileNotFoundError as exc:
-                    raise RuntimeError("SIM_ACCOUNTS_PATH not found.") from exc
-                except json.JSONDecodeError as exc:
-                    raise RuntimeError("SIM_ACCOUNTS_PATH must contain valid JSON.") from exc
+        elif sim_accounts_path:
+            try:
+                with open(sim_accounts_path, "r", encoding="utf-8") as handle:
+                    sim_accounts = json.load(handle)
+            except FileNotFoundError as exc:
+                raise RuntimeError("SIM_ACCOUNTS_PATH not found.") from exc
+            except json.JSONDecodeError as exc:
+                raise RuntimeError("SIM_ACCOUNTS_PATH must contain valid JSON.") from exc
         if sim_accounts and not isinstance(sim_accounts, dict):
             raise RuntimeError("SIM_ACCOUNTS_JSON or SIM_ACCOUNTS_PATH must be a JSON object.")
 

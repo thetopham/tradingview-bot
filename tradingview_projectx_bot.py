@@ -39,6 +39,7 @@ LOCAL_TZ        = config['MT']
 GET_FLAT_START  = config['GET_FLAT_START']
 GET_FLAT_END    = config['GET_FLAT_END']
 BROKER_MODE     = config.get('BROKER_MODE', 'live')
+SIM_ACCOUNTS_ENABLED = any(str(name).lower().startswith("sim") for name in ACCOUNTS.keys())
 
 AI_TEST_ENDPOINTS = {
     "beta": config.get("N8N_OVERSEER_URL_TEST1"),
@@ -207,9 +208,9 @@ def handle_webhook_logic(data):
 
 if __name__ == "__main__":
     try:
-        if str(BROKER_MODE).lower() == "sim":
+        if str(BROKER_MODE).lower() == "sim" or SIM_ACCOUNTS_ENABLED:
             initialize_trade_state()
-        else:
+        if str(BROKER_MODE).lower() != "sim":
             authenticate()
             signalr_listener = launch_signalr_listener(
                 get_token=get_token,
