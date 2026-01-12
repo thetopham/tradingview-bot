@@ -80,6 +80,11 @@ def _load_trade_state():
         logging.info("Loaded trade state: %s sessions", len(trade_meta))
 
 
+def initialize_trade_state():
+    _load_trade_state()
+    cleanup_stale_metadata()
+
+
 def _save_trade_state(force=False):
     global _last_save_ts
 
@@ -677,76 +682,85 @@ def on_position_update(args):
 
 
     if size == 0:
-        last_close = recent_closures.get(key)
-        if last_close and time.time() - last_close < 5:
-            logging.warning(
-                "[on_position_update] Duplicate close detected within 5s for acct=%s cid=%s; skipping log",
-                account_id,
-                contract_id,
-            )
-            return
-
-        recent_closures[key] = time.time()
-        meta = trade_meta.pop(key, None)
-        _save_trade_state()
-        logging.info(f"[on_position_update] Position closed for acct={account_id}, cid={contract_id}")
-        logging.info(f"[on_position_update] meta at close: {meta}")
-
-        if meta:
-            ai_decision_id = meta.get("ai_decision_id")
-            entry_time = meta.get("entry_time") or position_data.get("creationTimestamp")
-            if entry_time and not meta.get("entry_time"):
-                meta["entry_time"] = entry_time
-            logging.info(f"[on_position_update] Calling log_trade_results_to_supabase with ai_decision_id={ai_decision_id}")
-            log_trade_results_to_supabase(
-                acct_id=account_id,
-                cid=contract_id,
-                entry_time=entry_time,
-                ai_decision_id=ai_decision_id,
-                meta=meta,
-            )
-        else:
-            logging.warning(f"[on_position_update] No meta found for closed position, creating minimal log entry")
-
-            last_position = positions_state.get(account_id, {}).get(contract_id, {})
-
-            import uuid
-
-            session_id = str(uuid.uuid4())[:8]
-            trace_id = _build_trace_id(entry_time, None, session_id=session_id)
-
-            account_name = "unknown"
-            for name, id in ACCOUNTS.items():
-                if id == account_id:
-                    account_name = name
-                    break
-
-            minimal_meta = {
-                "strategy": "unknown",
-                "signal": "UNKNOWN",
-                "symbol": contract_id,
-                "account": account_name,
-                "size": last_position.get("size", 0),
-                "alert": "Position closed without metadata",
-                "comment": "Trade result logged without original metadata",
-                "session_id": session_id,
-                "trace_id": trace_id,
-            }
-
-            entry_time = last_position.get("creationTimestamp", datetime.now(MT) - timedelta(hours=1))
-
-            log_trade_results_to_supabase(
-                acct_id=account_id,
-                cid=contract_id,
-                entry_time=entry_time,
-                ai_decision_id=None,
-                meta=minimal_meta,
-            )
+        process_closed_position(account_id, contract_id, position_data)
 
         
         
 def on_trade_update(args):
     logging.info(f"[Trade Update] {args}")
+
+
+def process_closed_position(acct_id: int, cid: str, position_data: dict | None = None):
+    key = _tm_key(acct_id, cid)
+    last_close = recent_closures.get(key)
+    if last_close and time.time() - last_close < 5:
+        logging.warning(
+            "[process_closed_position] Duplicate close detected within 5s for acct=%s cid=%s; skipping log",
+            acct_id,
+            cid,
+        )
+        return
+
+    recent_closures[key] = time.time()
+    meta = trade_meta.pop(key, None)
+    _save_trade_state()
+    logging.info("[process_closed_position] Position closed for acct=%s, cid=%s", acct_id, cid)
+    logging.info("[process_closed_position] meta at close: %s", meta)
+
+    position_data = position_data or {}
+
+    if meta:
+        ai_decision_id = meta.get("ai_decision_id")
+        entry_time = meta.get("entry_time") or position_data.get("creationTimestamp")
+        if entry_time and not meta.get("entry_time"):
+            meta["entry_time"] = entry_time
+        logging.info(
+            "[process_closed_position] Calling log_trade_results_to_supabase with ai_decision_id=%s",
+            ai_decision_id,
+        )
+        log_trade_results_to_supabase(
+            acct_id=acct_id,
+            cid=cid,
+            entry_time=entry_time,
+            ai_decision_id=ai_decision_id,
+            meta=meta,
+        )
+    else:
+        logging.warning("[process_closed_position] No meta found for closed position, creating minimal log entry")
+
+        last_position = position_data or positions_state.get(acct_id, {}).get(cid, {})
+
+        import uuid
+
+        entry_time = last_position.get("creationTimestamp", datetime.now(MT) - timedelta(hours=1))
+        session_id = str(uuid.uuid4())[:8]
+        trace_id = _build_trace_id(entry_time, None, session_id=session_id)
+
+        account_name = "unknown"
+        for name, id in ACCOUNTS.items():
+            if id == acct_id:
+                account_name = name
+                break
+
+        minimal_meta = {
+            "strategy": "unknown",
+            "signal": "UNKNOWN",
+            "symbol": cid,
+            "account": account_name,
+            "size": last_position.get("size", 0),
+            "alert": "Position closed without metadata",
+            "comment": "Trade result logged without original metadata",
+            "session_id": session_id,
+            "trace_id": trace_id,
+        }
+
+        log_trade_results_to_supabase(
+            acct_id=acct_id,
+            cid=cid,
+            entry_time=entry_time,
+            ai_decision_id=None,
+            meta=minimal_meta,
+        )
 
 
 def cleanup_stale_metadata(max_age_hours=24):
