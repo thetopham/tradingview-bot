@@ -26,6 +26,8 @@ trade_state.json
 trade_state.json.*
 account_equity_state.json
 account_equity_state.json.*
+simbroker_state.json
+simbroker_state.json.*
 
 ########################################
 # Logs / generated outputs

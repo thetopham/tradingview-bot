@@ -25,6 +25,7 @@ def load_config():
             return default
 
     config = {
+        'BROKER_MODE': os.getenv("BROKER_MODE", "live").strip().lower(),
         'TV_PORT': int(os.getenv("TV_PORT", 5000)),
         'PX_BASE': os.getenv("PROJECTX_BASE_URL"),
         'USER_NAME': os.getenv("PROJECTX_USERNAME"),
@@ -73,6 +74,15 @@ def load_config():
 
         'REGIME_ATR_MIN_POINTS': _env_float_opt("REGIME_ATR_MIN_POINTS", None),
         'REGIME_ATR_MAX_POINTS': _env_float_opt("REGIME_ATR_MAX_POINTS", None),
+
+        # SimBroker defaults
+        'SIMBROKER_STATE_PATH': os.getenv("SIMBROKER_STATE_PATH", "simbroker_state.json"),
+        'SIM_ACCOUNT_BALANCE': float(os.getenv("SIM_ACCOUNT_BALANCE", 50000.0)),
+        'SIM_BRACKET_SL_USD': float(os.getenv("SIM_BRACKET_SL_USD", 30.0)),
+        'SIM_BRACKET_TP_USD': float(os.getenv("SIM_BRACKET_TP_USD", 60.0)),
+        'SIM_TICK_SIZE': float(os.getenv("SIM_TICK_SIZE", 0.25)),
+        'SIM_TICK_VALUE': float(os.getenv("SIM_TICK_VALUE", 1.25)),
+        'SIM_FILL_POLICY': os.getenv("SIM_FILL_POLICY", "worst").strip().lower(),
     }
 
     config['ACCOUNTS'] = {

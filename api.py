@@ -22,6 +22,7 @@ PX_BASE = config['PX_BASE']
 SUPABASE_URL = config['SUPABASE_URL']
 SUPABASE_KEY = config['SUPABASE_KEY']
 MT = config['MT']
+BROKER_MODE = config.get('BROKER_MODE', 'live')
 MES = "MES"
 
 _PRICE_CACHE: Dict[str, Optional[Tuple[float, str]]] = {
@@ -30,6 +31,7 @@ _PRICE_CACHE: Dict[str, Optional[Tuple[float, str]]] = {
     "value": None,
 }
 _SUPABASE_CLIENT = None
+_SIM_BROKER = None
 
 def reset_supabase_client():
     global _SUPABASE_CLIENT
@@ -67,9 +69,21 @@ def get_supabase_client():
     return _SUPABASE_CLIENT
 
 
+def _get_sim_broker():
+    global _SIM_BROKER
+    if _SIM_BROKER is None:
+        from simbroker import SimBroker
+        _SIM_BROKER = SimBroker(config)
+    return _SIM_BROKER
+
+
 
 # ─── API Functions ────────────────────────────────────
 def post(path, payload):
+    if BROKER_MODE == "sim":
+        broker = _get_sim_broker()
+        return broker.dispatch(path, payload)
+
     ensure_token()
     url = f"{PX_BASE}{path}"
     logging.debug("POST %s payload=%s", url, payload)
