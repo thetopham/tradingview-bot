@@ -21,6 +21,8 @@ PX_BASE = config['PX_BASE']
 SUPABASE_URL = config['SUPABASE_URL']
 SUPABASE_KEY = config['SUPABASE_KEY']
 MT = config['MT']
+BROKER_MODE = config['BROKER_MODE']
+SIM_STATE_PATH = config['SIM_STATE_PATH']
 MES = "MES"
 
 _PRICE_CACHE: Dict[str, Optional[Tuple[float, str]]] = {
@@ -29,10 +31,18 @@ _PRICE_CACHE: Dict[str, Optional[Tuple[float, str]]] = {
     "value": None,
 }
 _SUPABASE_CLIENT = None
+_SIM_BROKER = None
 
 def reset_supabase_client():
     global _SUPABASE_CLIENT
     _SUPABASE_CLIENT = None
+
+def _get_sim_broker():
+    global _SIM_BROKER
+    if _SIM_BROKER is None:
+        from simbroker import SimBroker
+        _SIM_BROKER = SimBroker(SIM_STATE_PATH, config)
+    return _SIM_BROKER
 
 def _timeframe_filters(max_minutes: int = 1) -> List[str]:
     """Return timeframes up to the requested minute window (defaults to 1m)."""
@@ -69,6 +79,8 @@ def get_supabase_client():
 
 # ─── API Functions ────────────────────────────────────
 def post(path, payload):
+    if str(BROKER_MODE).lower() == "sim":
+        return _get_sim_broker().handle_post(path, payload)
     ensure_token()
     url = f"{PX_BASE}{path}"
     logging.debug("POST %s payload=%s", url, payload)
@@ -89,6 +101,13 @@ def post(path, payload):
     data = resp.json()
     logging.debug("Response JSON: %s", data)
     return data
+
+
+def sim_update(acct_id: int, cid: str) -> List[Dict]:
+    if str(BROKER_MODE).lower() != "sim":
+        return []
+    resp = _get_sim_broker().sim_update(acct_id, cid)
+    return resp.get("closed", []) if isinstance(resp, dict) else []
 
 
 def place_market(acct_id, cid, side, size):
