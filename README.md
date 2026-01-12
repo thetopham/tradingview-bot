@@ -81,6 +81,21 @@ Optional:
 
 - `OVERRIDE_CONTRACT_ID=CON.F.US.MES.H26` (forces MES contract; see `api.get_contract`)
 
+### Sim accounts
+
+Use sim mode with generated accounts:
+
+```bash
+BROKER_MODE=sim
+SIM_ACCOUNTS_PATH=./sim_accounts.json
+```
+
+Generate a SIM accounts file:
+
+```bash
+python scripts/gen_sim_accounts.py --count 50 --prefix sim --id-start 20001 --balance 50000 --default-sl 30 --default-tp 60 --override "sim002=50,100;sim010=40,80"
+```
+
 ### 3) Run
 
 ```bash
