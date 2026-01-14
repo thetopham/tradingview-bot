@@ -486,20 +486,20 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=N
     position_summary = _summarize_positions(positions or [])
     simple_position_context = position_context or _compute_simple_position_context(positions or [], sym)
     timeframe = _infer_timeframe(alert)
-    market_state = None
-    market_regime = None
-    try:
-        market_state = get_market_state(timeframe=timeframe, symbol=sym)
-        market_regime = market_state.get("regime") if market_state else None
-    except Exception as exc:
-        logging.warning("Market regime lookup failed: %s", exc)
+    #market_state = None
+    #market_regime = None
+   #try:
+   #     market_state = get_market_state(timeframe=timeframe, symbol=sym)
+   #     market_regime = market_state.get("regime") if market_state else None
+   # except Exception as exc:
+   #     logging.warning("Market regime lookup failed: %s", exc)
 
     if isinstance(simple_position_context, dict):
         position_context_payload = dict(simple_position_context)
     else:
         position_context_payload = {"context": simple_position_context}
-    position_context_payload["market_state"] = market_state
-    position_context_payload["market_regime"] = market_regime
+    #position_context_payload["market_state"] = market_state
+    #position_context_payload["market_regime"] = market_regime
 
     now = datetime.now(MT)
     if in_get_flat(now):
@@ -528,8 +528,8 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=N
         "position_summary": position_summary,
         "position_context": position_context_payload,
         "timeframe": timeframe,
-        "market_state": market_state,
-        "market_regime": market_regime,
+        #"market_state": market_state,
+        #"market_regime": market_regime,
     }
     try:
         resp = session.post(ai_url, json=payload, timeout=150)
