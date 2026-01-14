@@ -1,0 +1,1398 @@
+{
+  "name": "simple-5m-practice-1-6-2026-optimize",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Start here: Step-by Step Youtube Tutorial :star:\n\n[![Technical Analyst AI Agent using LLM Vision](https://img.youtube.com/vi/yjBHheCB6Ek/sddefault.jpg)](https://youtu.be/yjBHheCB6Ek)\n",
+        "height": 550,
+        "width": 507,
+        "color": 7
+      },
+      "id": "69ab5c27-d223-4210-b062-4a18c6b708cf",
+      "name": "Sticky Note5",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        160,
+        -608
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "practice",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -832,
+        352
+      ],
+      "id": "d87142b6-81cf-48df-930e-fec4af262355",
+      "name": "Webhook",
+      "webhookId": "17a04eb8-9303-41ca-88e8-2702e3c655d0"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.2,
+      "position": [
+        3936,
+        352
+      ],
+      "id": "4100a60f-0d3f-4a39-a0b8-cca1c19a884d",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-5-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        2368,
+        544
+      ],
+      "id": "d98dfd0f-f377-473d-87f5-eaa825d094a6",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "hOvrgCZvpztkucKb",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -832,
+        528
+      ],
+      "id": "15153e4a-dcdd-4849-be72-2b383734b7e4",
+      "name": "When clicking ‘Test workflow’"
+    },
+    {
+      "parameters": {
+        "tableId": "ai_trading_log",
+        "dataToSend": "autoMapInputData"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        3344,
+        352
+      ],
+      "id": "77bb9832-d494-4340-a418-4fe57c45e0f3",
+      "name": "Supabase",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $input.first().json.text;\n\n// Normalize to string\nraw = String(raw ?? \"\").trim();\n\n// Strip code fences if present\nraw = raw\n  .replace(/^```json\\s*/i, \"\")\n  .replace(/^```\\s*/i, \"\")\n  .replace(/```$/i, \"\")\n  .trim();\n\n// Try parse directly; if it fails, extract first {...} JSON block\nlet obj;\ntry {\n  obj = JSON.parse(raw);\n} catch (e) {\n  const start = raw.indexOf(\"{\");\n  const end = raw.lastIndexOf(\"}\");\n  if (start >= 0 && end > start) {\n    obj = JSON.parse(raw.slice(start, end + 1));\n  } else {\n    throw e;\n  }\n}\n\n// Hardening: make reason single-line\nif (typeof obj.reason === \"string\") {\n  obj.reason = obj.reason.replace(/\\r?\\n|\\r/g, \" \").replace(/\\s+/g, \" \").trim();\n}\n\n// Optional: enforce size as integer\nif (obj.size !== undefined) {\n  obj.size = Number.parseInt(obj.size, 10);\n}\n\n// Return as a proper n8n item\nreturn [{ json: obj }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2736,
+        352
+      ],
+      "id": "02ad9d81-2b20-45c1-b6d3-4d5f42e9bc8f",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -832,
+        144
+      ],
+      "id": "4fc07ba1-3c62-4a87-8158-ee4a33d6b6d5",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-pro-preview-05-06",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        2560,
+        720
+      ],
+      "id": "83e43d0a-bba0-4896-aa9c-36686012700e",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "F4FVFeD0uuK5mXJ7",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "object",
+        "operation": "create",
+        "bucketName": "tradingview-chart",
+        "objectName": "=charts/{{ $json.ai_decision_id }}/5m.jpg",
+        "createData": {},
+        "createQuery": {},
+        "encryptionHeaders": {},
+        "requestOptions": {}
+      },
+      "name": "Upload to GCS",
+      "type": "n8n-nodes-base.googleCloudStorage",
+      "typeVersion": 1,
+      "position": [
+        3824,
+        544
+      ],
+      "id": "17b9c506-3ed6-4359-826b-b001a16afc4d",
+      "retryOnFail": true,
+      "credentials": {
+        "googleCloudStorageOAuth2Api": {
+          "id": "kT6LnTnLCRqZwDOj",
+          "name": "Google Cloud Storage account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('set url').item.json.url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3600,
+        544
+      ],
+      "id": "685c0878-038f-4774-b94a-27dd3e433e8c",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "27b01d5c-b00a-4266-b6aa-ae9a2472d2db",
+              "name": "url",
+              "value": "=https://storage.googleapis.com/tradingview-chart/charts/{{ $('Supabase').item.json.ai_decision_id }}/5m.jpg",
+              "type": "string"
+            },
+            {
+              "id": "6d0b4721-0211-4acb-9d58-882bd7bfe0a8",
+              "name": "timeframe",
+              "value": "=5m",
+              "type": "string"
+            },
+            {
+              "id": "45c55a40-6d76-4234-9217-b249ec4d4656",
+              "name": "id",
+              "value": "={{ $('Supabase').item.json.ai_decision_id }}",
+              "type": "number"
+            },
+            {
+              "id": "b5c9f6f5-0d42-4303-9716-9c88bf061b12",
+              "name": "chart_time",
+              "value": "={{ $now }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        4064,
+        544
+      ],
+      "id": "acebd6c6-982d-4c9d-8dff-b7dc9f25eaf1",
+      "name": "Edit Fields2"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "ai_trading_log",
+        "filterType": "string",
+        "filterString": "=ai_decision_id=eq.{{ $json.id }}",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "urls",
+              "fieldValue": "={{ $json.url }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        4304,
+        544
+      ],
+      "id": "ad6e293a-7fb6-4999-b52a-66fe6e7fd106",
+      "name": "Supabase1",
+      "retryOnFail": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the trading overseer for MES (5-minute loop).\n\nYou ONLY decide:\n1) signal: BUY | SELL | HOLD | FLAT\n2) reason: plain English, no fluff\n3) size: 1 | 2 | 3\n4) next check message to future self\n\nWhen to enter:\nif volatility is high, prefer hold.\nif volatility is low, and trending up or down, then enter\nif market is flat or choppy, then hold\nenter on breakout, retest, resumption (long or short, depending on what support/resistance broke and then retested and resumed)\nenter on low volatility trending\n\nDefinitions:\n- BUY/SELL = enter or reverse position\n- HOLD = no action\n- FLAT = flatten current position (exit)\n\nRe-occuring process:\n- This process runs every 5 minutes.\n- Your decision should assume you will be asked again in ~5 minutes.\n- If uncertain, prefer HOLD and reassess next run.\n- If you include a “future self” note, keep it short and relevant for the next_check.\n- next_check must be ≤120 characters (one sentence).\n- next_check should describe what to look for next process, not a summary.\n\nCHART LEGEND (5m):\n- EMA 9 (Close) = BLUE\n- EMA 21 (Close) = YELLOW\n- VWAP (Session) = RED\n- MACD (12,26,9) = histogram + lines in MACD pane\n- ATR (14, RMA) = red line in ATR pane\n\nRisk/Bracket (informational):\nSL = -$30 \nTP = +$60 \n(Topstep changes point distance with size; risk stays ~$30) Use larger size only if tighter sl/tp fits current volatility/structure.\nSize meaning: choose bracket tightness (TP/SL distance), not leverage.\n\nBracket distances by size (SOURCE OF TRUTH = datafeed snapshot fields):\n- See: brackets (points + $) and bracket_summary in the JSON below.\n- You MUST choose size based on these exact distances. Do not invent SL/TP.\n\nDATAFEED + DERIVED (5m numeric, source of truth):\n{{ JSON.stringify($('5m derived snapshot').item.json, null, 2) }}\n\nCURRENT POSITION (source of truth):\nhas_position={{ $('Webhook').item.json.body.position_context.current_position.has_position }}\nside={{ $('Webhook').item.json.body.position_context.current_position.side || 'none' }}\nentry={{ $('Webhook').item.json.body.position_context.current_position.entry_price }}\ncontracts={{ $('Webhook').item.json.body.position_context.current_position.size }}\nunrealized_pnl=${{ $('Webhook').item.json.body.position_context.current_position.unrealized_pnl }}\nduration_mins={{ $('Webhook').item.json.body.position_context.current_position.duration_minutes }}\nwarnings={{ JSON.stringify($('Webhook').item.json.body.position_context.warnings || []) }}\n\n\nACCOUNT METRICS\naccount_balance={{ $('Webhook').item.json.body.position_context.account_metrics.account_balance }}\naccount_peak={{ $('Webhook').item.json.body.position_context.topstep.equity_peak_usd }}\ndrawdown_used={{ $('Webhook').item.json.body.position_context.topstep.trailing_dd_used_usd }}\ndrawdown_remaining={{ $('Webhook').item.json.body.position_context.topstep.trailing_dd_remaining_usd }}\ndaily_pnl={{ $('Webhook').item.json.body.position_context.account_metrics.daily_pnl }}\nwin_rate={{ $('Webhook').item.json.body.position_context.account_metrics.win_rate }}\nconsecutive_losses={{ $('Webhook').item.json.body.position_context.account_metrics.consecutive_losses }}\n\nACCOUNT RULES: Start $50k. If account_balance < $48k => failed. If account_balance > $50k, a $2k trailing stop applies (fail if drawdown_remaining <= $0). If drawdown_remaining is low, be selective about entries).\n\nCONTINUITY (last closed trade):\nminutes_since_last_close={{ $('Continuity Context').item.json.minutes_since_last_close || 'null' }}\nlast_trade_outcome={{ $('Continuity Context').item.json.last_trade_outcome || 'none' }}\nlast_trade_pnl={{ $('Continuity Context').item.json.last_trade_pnl || 'null' }}\nlast_trade_signal={{ $('Continuity Context').item.json.last_trade_signal || 'none' }}\n\n\nIf previous_next_check is non-empty, briefly state whether it is now satisfied; then proceed with the new decision. Do not copy it forward unless it still applies.\nIf signal is HOLD and you’re already in a position, next_check should focus on exit/flatten triggers (not entries).\nprevious_next_check={{ $('Edit Fields3').item.json.next_check || '' }}\n\nReason format (required):\n- reason: current thesis + current position/account data (NO invalidation here)\n- invalidation: one sentence describing what would make this wrong by next run \n- next_check: optional, ≤120 chars, one sentence\nIf previous_next_check is non-empty, respond with \"Prev check: satisfied/unsatisfied\"\n\n\nRETURN ONLY THIS JSON:\n{\n  \"timestamp\":\"{{ $now }}\",\n  \"strategy\":\"simple\",\n  \"timeframe\":\"5m\",\n  \"signal\":\"HOLD\",\n  \"symbol\":\"CON.F.US.MES.H26\",\n  \"account\":\"{{ $('Webhook').item.json.body.account }}\",\n  \"size\": 1,\n  \"reason\":\"\",\n  \"invalidation\":\"\",\n  \"next_check\":\"\",\n  \"urls\":\"{{ $('set url').item.json.url }}\",\n  \"prompt_version\":\"simple-5m-practice-1-13-2026-optimize\"\n}\n\n",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "messageType": "imageBinary"
+            }
+          ]
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [
+        2368,
+        352
+      ],
+      "id": "f44c115f-c6fe-42c3-a1a1-a43a18cf2e2e",
+      "name": "Basic LLM Chain",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-opus-4-20250514",
+          "mode": "list",
+          "cachedResultName": "Claude Opus 4"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        2352,
+        720
+      ],
+      "id": "2474adec-ec9e-45ed-92cb-c88ebcbfb494",
+      "name": "Anthropic Chat Model",
+      "credentials": {
+        "anthropicApi": {
+          "id": "SYGdKwRCUXN1yoB4",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "ai_trading_log",
+        "limit": 1,
+        "filterType": "string",
+        "filterString": "=account=eq.{{ $json.body.account }}&order=ai_decision_id.desc&limit=1"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -576,
+        352
+      ],
+      "id": "16a31d80-9cfd-46d8-bcf9-90a8092da55d",
+      "name": "Get many rows",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a91f16c2-6718-4c9a-b64e-14605fbf446a",
+              "name": "ai_decision_id",
+              "value": "={{ $json.ai_decision_id }}",
+              "type": "number"
+            },
+            {
+              "id": "27962e82-7e85-47ec-8768-7d9e9ad684fa",
+              "name": "signal",
+              "value": "={{ $json.signal }}",
+              "type": "string"
+            },
+            {
+              "id": "89685755-83de-4be6-9fbc-6e6a2f4aac88",
+              "name": "reason",
+              "value": "={{ $json.reason }}",
+              "type": "string"
+            },
+            {
+              "id": "111a91a0-86b9-4d6c-8386-2d29b295e6a5",
+              "name": "timestamp",
+              "value": "={{ $json.timestamp }}",
+              "type": "string"
+            },
+            {
+              "id": "02222c54-6f7f-4fe9-a384-5396a4c90d2d",
+              "name": "next_check",
+              "value": "={{ $json.next_check }}",
+              "type": "string"
+            },
+            {
+              "id": "5e6fd031-196d-4b15-8fa3-82bc50ebf52a",
+              "name": "invalidation",
+              "value": "={{ $json.invalidation }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -336,
+        352
+      ],
+      "id": "9d7e4573-c93f-416a-bfb9-b958dea07538",
+      "name": "Edit Fields3"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Expect the most recent CLOSED 5m bar (align to 5-minute boundary)\nconst now = new Date();\nconst ms = now.getTime();\nconst fiveMin = 5 * 60 * 1000;\n\n// use the previous completed bar close time\nconst expected = new Date(Math.floor(ms / fiveMin) * fiveMin);\n\nreturn [{ json: { expected_ts: expected.toISOString() } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        352
+      ],
+      "id": "97843d07-eeff-4cbc-bcc9-d54efd5d766a",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 5m derived snapshot (n8n Code node)\n// Expects input shaped like: { data: [ ...rows... ] } where rows are from tv_datafeed (limit=5)\n\nconst rows = ($input.first().json.data || []).filter(Boolean);\nif (!rows.length) return [{ json: { error: \"No tv_datafeed rows\" } }];\n\n// Supabase returns ts DESC (newest first). Normalize to ASC for slope/momentum.\nrows.sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts));\n\nconst N = rows.length;\nconst first = rows[0];\nconst last = rows[N - 1];\nconst prev = rows[Math.max(N - 2, 0)];\n\nconst num = (x) => (x === null || x === undefined ? null : Number(x));\nconst r = (x) =>\n  (x === null || x === undefined || Number.isNaN(Number(x)))\n    ? null\n    : Math.round(Number(x) * 100) / 100;\n\n// Latest bar core values\nconst c = num(last.c);\nconst vwap = num(last.vwap);\nconst ema9 = num(last.ema9);\nconst ema21 = num(last.ema21);\nconst atr = num(last.atr);\n\nconst macd_last = num(last.macd_hist);\nconst macd_prev = num(prev.macd_hist);\nconst macd_first = num(first.macd_hist);\n\n// Deltas vs value / structure\nconst c_minus_vwap_pts = (c != null && vwap != null) ? (c - vwap) : null;\nconst c_minus_ema21_pts = (c != null && ema21 != null) ? (c - ema21) : null;\n\n// Slopes over N bars (oldest -> newest)\nconst first_c = num(first.c);\nconst last_c = num(last.c);\nconst first_ema9 = num(first.ema9);\nconst last_ema9 = num(last.ema9);\nconst first_ema21 = num(first.ema21);\nconst last_ema21 = num(last.ema21);\n\nconst c_slope_n = (last_c != null && first_c != null) ? (last_c - first_c) : null;\nconst ema9_slope_n = (last_ema9 != null && first_ema9 != null) ? (last_ema9 - first_ema9) : null;\nconst ema21_slope_n = (last_ema21 != null && first_ema21 != null) ? (last_ema21 - first_ema21) : null;\n\n// MACD deltas\nconst macd_delta_1 = (macd_last != null && macd_prev != null) ? (macd_last - macd_prev) : null;\nconst macd_delta_n = (macd_last != null && macd_first != null) ? (macd_last - macd_first) : null;\n\n// Rounded deltas for stable boolean logic\nconst macd_delta_1_r = r(macd_delta_1);\nconst macd_delta_n_r = r(macd_delta_n);\n\n// Flags\nconst macd_falling = (macd_delta_1_r != null) ? (macd_delta_1_r < 0) : null;\nconst macd_below_zero = (macd_last != null) ? (macd_last < 0) : null;\nconst ema_bearish = (ema9 != null && ema21 != null) ? (ema9 < ema21) : null;\n\n// Simple trend strength score (-3..+3)\nconst trend_score = Number(\n  (ema9 != null && ema21 != null ? Math.sign(ema9 - ema21) : 0) +\n  (ema9_slope_n != null ? Math.sign(ema9_slope_n) : 0) +\n  (macd_delta_n_r != null ? Math.sign(macd_delta_n_r) : 0)\n);\n\n// Direction-aware “momentum improved” booleans\nconst momentum_improved_long =\n  (macd_delta_1_r != null && macd_delta_1_r > 0) &&\n  (trend_score >= 2) &&\n  (ema_bearish === false);\n\nconst momentum_improved_short =\n  (macd_delta_1_r != null && macd_delta_1_r < 0) &&\n  (trend_score <= -2) &&\n  (ema_bearish === true);\n\n// Optional extra context (cheap + useful)\nconst ema_spread = (ema9 != null && ema21 != null) ? (ema9 - ema21) : null;\n\n// Brackets (points + $) — TP $60, SL $30, sized by contract count\nconst POINT_VALUE_USD = 5;\nconst brackets = {\n  1: { sl_pts: 6, tp_pts: 12 },\n  2: { sl_pts: 3, tp_pts: 6 },\n  3: { sl_pts: 2, tp_pts: 4 },\n};\n\nfor (const k of Object.keys(brackets)) {\n  const size = Number(k);\n  brackets[size].sl_usd = brackets[size].sl_pts * POINT_VALUE_USD * size;\n  brackets[size].tp_usd = brackets[size].tp_pts * POINT_VALUE_USD * size;\n}\n\n// ATR multiples\nconst atr_ok = (atr != null && atr > 0);\nconst tp_to_atr_size1 = atr_ok ? (brackets[1].tp_pts / atr) : null;\nconst sl_to_atr_size1 = atr_ok ? (brackets[1].sl_pts / atr) : null;\nconst tp_to_atr_size2 = atr_ok ? (brackets[2].tp_pts / atr) : null;\nconst sl_to_atr_size2 = atr_ok ? (brackets[2].sl_pts / atr) : null;\nconst tp_to_atr_size3 = atr_ok ? (brackets[3].tp_pts / atr) : null;\nconst sl_to_atr_size3 = atr_ok ? (brackets[3].sl_pts / atr) : null;\n\n// 5-bar series (transparent context; oldest->newest)\nconst series_n = rows.map(x => ({\n  ts: x.ts ?? null,\n  o: num(x.o),\n  h: num(x.h),\n  l: num(x.l),\n  c: num(x.c),\n  v: num(x.v),\n  ema9: num(x.ema9),\n  ema21: num(x.ema21),\n  vwap: num(x.vwap),\n  atr: num(x.atr),\n  macd_hist: num(x.macd_hist),\n}));\n\nreturn [{\n  json: {\n    // latest bar fields\n    ts: last.ts,\n    c,\n    ema9,\n    ema21,\n    vwap,\n    atr,\n    macd_hist: macd_last,\n\n    // continuity helpers\n    momentum_improved_long,\n    momentum_improved_short,\n\n    // short history\n    series_n,\n    series_len: N,\n\n    // slopes / deltas / flags\n    c_slope_n: r(c_slope_n),\n    ema9_slope_n: r(ema9_slope_n),\n    ema21_slope_n: r(ema21_slope_n),\n\n    macd_delta_1: macd_delta_1_r,\n    macd_delta_n: macd_delta_n_r,\n    macd_falling,\n    macd_below_zero,\n\n    ema_bearish,\n    trend_score,\n    ema_spread: r(ema_spread),\n\n    c_minus_vwap_pts: r(c_minus_vwap_pts),\n    c_minus_ema21_pts: r(c_minus_ema21_pts),\n\n    // ATR multiples\n    tp_to_atr_size1: r(tp_to_atr_size1),\n    sl_to_atr_size1: r(sl_to_atr_size1),\n    tp_to_atr_size2: r(tp_to_atr_size2),\n    sl_to_atr_size2: r(sl_to_atr_size2),\n    tp_to_atr_size3: r(tp_to_atr_size3),\n    sl_to_atr_size3: r(sl_to_atr_size3),\n\n    // bracket metadata\n    point_value_usd: POINT_VALUE_USD,\n    brackets,\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        352
+      ],
+      "id": "c61bfced-b58b-44b8-a36d-1535b0193dc2",
+      "name": "5m derived snapshot"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7d733105-b0e5-4590-ba13-b908adce16f5",
+              "name": "ai_decision_id",
+              "value": "={{ $json.ai_decision_id }}",
+              "type": "number"
+            },
+            {
+              "id": "3e67b373-ce51-4c87-8289-696bf7fb3967",
+              "name": "strategy",
+              "value": "={{ $json.strategy }}",
+              "type": "string"
+            },
+            {
+              "id": "4dde2ce1-3ee9-4aea-a062-05f7f4c0cbc4",
+              "name": "signal",
+              "value": "={{ $json.signal }}",
+              "type": "string"
+            },
+            {
+              "id": "ccfff928-1534-4361-9503-869da76ddb84",
+              "name": "symbol",
+              "value": "={{ $json.symbol }}",
+              "type": "string"
+            },
+            {
+              "id": "dab5ee6a-35c8-43b2-833c-cc9dc6abc9e1",
+              "name": "account",
+              "value": "={{ $json.account }}",
+              "type": "string"
+            },
+            {
+              "id": "442178dc-509b-438c-96cd-83b5b7de5070",
+              "name": "size",
+              "value": "={{ $json.size }}",
+              "type": "string"
+            },
+            {
+              "id": "03ac8761-f64a-4b19-a875-a23712f08924",
+              "name": "reason",
+              "value": "={{ $json.reason }}",
+              "type": "string"
+            },
+            {
+              "id": "708379d8-d8ad-4fcc-8ce6-8d5047af084d",
+              "name": "prompt_version",
+              "value": "={{ $json.prompt_version }}",
+              "type": "string"
+            },
+            {
+              "id": "df320b9d-4eb1-47bc-8a1e-720bfc323d04",
+              "name": "next_check",
+              "value": "={{ $json.next_check }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3680,
+        352
+      ],
+      "id": "510d3cf0-c7dd-4f61-8600-c5ec10737f26",
+      "name": "Build Response"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Supabase3').item.json.chart_url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1696,
+        272
+      ],
+      "id": "676018c2-74fa-484e-bb45-778178add34f",
+      "name": "HTTP Request2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "04a3fd08-7396-47d6-830d-da9165fa0bc0",
+              "leftValue": "={{ (new Date().getTime() - new Date($json[\"updated_at\"]).getTime()) / 60000 }}",
+              "rightValue": 4.8,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1264,
+        352
+      ],
+      "id": "357c4286-247c-4ace-9f71-ac7e6f26c1e4",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "charts",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "timeframe",
+              "keyValue": "5m"
+            },
+            {
+              "keyName": "symbol",
+              "keyValue": "MES"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1088,
+        352
+      ],
+      "id": "1c9f7f34-d930-4afa-8132-4529fd580018",
+      "name": "Supabase3",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "charts",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "symbol",
+              "condition": "eq",
+              "keyValue": "MES"
+            },
+            {
+              "keyName": "timeframe",
+              "condition": "eq",
+              "keyValue": "5m"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "chart_url",
+              "fieldValue": "={{ $json.url }}"
+            },
+            {
+              "fieldId": "updated_at",
+              "fieldValue": "={{ $now }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1696,
+        448
+      ],
+      "id": "942f819e-4a7d-4507-acd5-8778c896cc57",
+      "name": "Supabase4",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.chart_url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1856,
+        448
+      ],
+      "id": "f26490ee-6f94-423c-b5a9-f99134eda024",
+      "name": "HTTP Request3"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.chart-img.com/v2/tradingview/layout-chart/storage/cLDFUbRS",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "tradingview-session-id",
+              "value": "fmry87ifzmqxiv1diq9ntlyw2t6psl8r"
+            },
+            {
+              "name": "tradingview-session-id-sign",
+              "value": "v3:a39hC5vQJ9UlpHGkFWPFq0g+hGYdJHvGbqwjoQJEA4s="
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "format",
+              "value": "jpeg"
+            },
+            {
+              "name": "interval",
+              "value": "5m"
+            },
+            {
+              "name": "width",
+              "value": "1920"
+            },
+            {
+              "name": "height",
+              "value": "1080"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a6b014b7-8628-476a-a804-6bf8d081073d",
+      "name": "Tradingview Chart1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1520,
+        448
+      ],
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ZleHrixI7F5TA8Yb",
+          "name": "chart-img"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "694cc668-54e1-4b18-94e7-51a381764295",
+              "name": "url",
+              "value": "={{ $json.chart_url }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "includeBinary": true
+        }
+      },
+      "id": "a28799d2-20ee-4b17-91ef-cfd2f1374527",
+      "name": "set url",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        2160,
+        352
+      ],
+      "typeVersion": 3.3
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "tv_datafeed_5m",
+        "limit": 5,
+        "filterType": "string",
+        "filterString": "=symbol=eq.MES&order=ts.desc&limit=5"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        128,
+        352
+      ],
+      "id": "aeadfd1a-41f7-467c-a96d-667d90145803",
+      "name": "Get datafeed_5m1",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        336,
+        352
+      ],
+      "id": "8690d6f3-e3cb-47a4-996f-b9d793fba825",
+      "name": "Aggregate1"
+    },
+    {
+      "parameters": {
+        "url": "https://nlwcoonenivfxxmcvhmi.supabase.co/rest/v1/ai_trade_feed",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "account",
+              "value": "=eq.{{ $('Webhook').item.json.body.account }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            },
+            {
+              "name": "order",
+              "value": "exit_time.desc"
+            },
+            {
+              "name": "select",
+              "value": "exit_time,net_pnl,signal,size,ai_decision_id"
+            },
+            {
+              "name": "exit_time",
+              "value": "not.is.null"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        704,
+        352
+      ],
+      "id": "c07ba2d0-fcc7-4b5e-a578-f9e428b114d4",
+      "name": "HTTP Request5",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const nowMs = Date.now();\nconst row = $input.first().json || null;\n\nconst parseTs = (t) => {\n  const ms = t ? Date.parse(t) : NaN;\n  return Number.isFinite(ms) ? ms : null;\n};\n\nconst exit_time = row?.exit_time ?? null;\nconst exitMs = parseTs(exit_time);\n\nconst minutes_since_last_close =\n  exitMs == null ? null : Math.round(((nowMs - exitMs) / 60000) * 10) / 10;\n\nconst pnlNum = row?.net_pnl == null ? null : Number(row.net_pnl);\n\nlet last_trade_outcome = null; // WIN | LOSS | BE | null\nif (pnlNum != null && Number.isFinite(pnlNum)) {\n  last_trade_outcome = pnlNum > 0 ? \"WIN\" : (pnlNum < 0 ? \"LOSS\" : \"BE\");\n}\n\nreturn [{\n  json: {\n    minutes_since_last_close,\n    last_trade_outcome,\n    last_trade_pnl: pnlNum,\n    last_trade_signal: row?.signal ?? null,\n    last_trade_size: row?.size ?? null,\n    last_trade_ai_decision_id: row?.ai_decision_id ?? null,\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        352
+      ],
+      "id": "d37e2e55-ea3a-42ed-b0c9-940dc6db63f5",
+      "name": "Continuity Context"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8a663d2f-c5a7-4470-bf3d-d67a70ee305d",
+              "name": "timestamp",
+              "value": "={{ $json.timestamp }}",
+              "type": "string"
+            },
+            {
+              "id": "aad702fc-8a31-4ca0-adef-79d71efab1aa",
+              "name": "strategy",
+              "value": "={{ $json.strategy }}",
+              "type": "string"
+            },
+            {
+              "id": "ffb3d412-531b-40d8-810b-f2624811d2f3",
+              "name": "timeframe",
+              "value": "={{ $json.timeframe }}",
+              "type": "string"
+            },
+            {
+              "id": "efed2567-343a-42ca-a053-f44b23eaa08a",
+              "name": "signal",
+              "value": "={{ $json.signal }}",
+              "type": "string"
+            },
+            {
+              "id": "4465e9f9-6c42-4452-ba4f-5180cc702b8f",
+              "name": "symbol",
+              "value": "={{ $json.symbol }}",
+              "type": "string"
+            },
+            {
+              "id": "90c66d0e-4b3d-4f7b-ac3d-42999d891327",
+              "name": "account",
+              "value": "={{ $json.account }}",
+              "type": "string"
+            },
+            {
+              "id": "930fd54d-ccb2-46ae-9aad-f9d5a424ecc6",
+              "name": "size",
+              "value": "={{ $json.size }}",
+              "type": "string"
+            },
+            {
+              "id": "92615c7b-8d41-46eb-96bf-3586ddec1cb5",
+              "name": "reason",
+              "value": "={{ $json.reason }}",
+              "type": "string"
+            },
+            {
+              "id": "ae4ed384-bfde-4778-bcc2-8106a0bd85ba",
+              "name": "invalidation",
+              "value": "={{ $json.invalidation }}",
+              "type": "string"
+            },
+            {
+              "id": "6bb59b5f-9b41-438a-abfe-763fc23701e8",
+              "name": "next_check",
+              "value": "={{ $json.next_check }}",
+              "type": "string"
+            },
+            {
+              "id": "c009e280-62cf-45fe-a22e-6026bb86257b",
+              "name": "urls",
+              "value": "={{ $json.urls }}",
+              "type": "string"
+            },
+            {
+              "id": "de3a999d-2cdd-4bec-8bb1-3c35feb7b7ef",
+              "name": "prompt_version",
+              "value": "={{ $json.prompt_version }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3008,
+        352
+      ],
+      "id": "a7395f0f-7078-4316-814d-f0139fc3b069",
+      "name": "Edit Fields"
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n.thetopham.com",
+            "user-agent": "python-requests/2.32.5",
+            "content-length": "2666",
+            "accept": "*/*",
+            "accept-encoding": "gzip, br",
+            "cdn-loop": "cloudflare; loops=1",
+            "cf-connecting-ip": "71.218.241.177",
+            "cf-ipcountry": "US",
+            "cf-ray": "9bc90f2aee61fa09-MCI",
+            "cf-visitor": "{\"scheme\":\"https\"}",
+            "cf-warp-tag-id": "29e9cc42-9423-4c4c-b614-9033a9dbee66",
+            "connection": "keep-alive",
+            "content-type": "application/json",
+            "x-forwarded-for": "71.218.241.177",
+            "x-forwarded-proto": "https"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "account": "practice",
+            "strategy": "simple",
+            "signal": "",
+            "symbol": "CON.F.US.MES.H26",
+            "size": 3,
+            "alert": "APScheduler 5m overseer",
+            "positions": [],
+            "position_summary": [],
+            "position_context": {
+              "current_position": {
+                "has_position": false,
+                "size": 0,
+                "side": null,
+                "entry_price": null,
+                "current_price": null,
+                "current_pnl": 0,
+                "unrealized_pnl": 0,
+                "realized_pnl": 0,
+                "duration_minutes": 0,
+                "stop_count": 0,
+                "target_count": 0
+              },
+              "account_metrics": {
+                "daily_pnl": 0,
+                "win_rate": 0,
+                "consecutive_losses": 0,
+                "open_positions": 0,
+                "risk_level": "low",
+                "can_trade": true,
+                "realized_pnl_today_usd": 0,
+                "account_balance": 146474.4
+              },
+              "risk_limits": {
+                "max_daily_loss": -999999,
+                "profit_target": 99999999,
+                "max_consecutive_losses": 99999,
+                "consecutive_loss_guard_enabled": true
+              },
+              "topstep": {
+                "account_size_usd": 146474.4,
+                "session_start_equity_usd": 146474.4,
+                "equity_peak_usd": 146474.4,
+                "trailing_max_loss_usd": 2000,
+                "trailing_loss_limit_usd": -2000,
+                "trailing_dd_used_usd": 0,
+                "trailing_dd_remaining_usd": 2000,
+                "trailing_dd_used_pct": 0,
+                "risk_state": "green",
+                "dd_soft_50_pct": 0.5,
+                "dd_soft_75_pct": 0.75
+              },
+              "warnings": [],
+              "suggestions": [],
+              "market_state": {
+                "confidence": 0.771,
+                "consecutive_same": 0,
+                "current_since": "2026-01-12T02:00:15.546913+00:00",
+                "digestion_left": 0,
+                "last_updated": "2026-01-12T02:00:15.546913+00:00",
+                "metrics": {
+                  "efficiency_ratio_fast": 0.1688,
+                  "efficiency_ratio_slow": 0.382,
+                  "atr_ratio": 0.9729,
+                  "trend_lookback_fast": 10,
+                  "trend_lookback_slow": 30,
+                  "vol_lookback": 120,
+                  "er_threshold": 0.4,
+                  "atr_ratio_threshold": 1.5,
+                  "price_change_fast": 3.25,
+                  "price_change_slow": -22.25
+                },
+                "pending_count": 0,
+                "pending_regime": null,
+                "phase": "normal",
+                "regime": "ranging",
+                "risk_mode": "selective",
+                "stable_count": 0,
+                "symbol": "MES",
+                "timeframe": "5m",
+                "trade_allowed": true,
+                "trend_dimension": "ranging",
+                "volatility_dimension": "normal"
+              },
+              "market_regime": "ranging"
+            },
+            "timeframe": "5m",
+            "market_state": {
+              "confidence": 0.771,
+              "consecutive_same": 0,
+              "current_since": "2026-01-12T02:00:15.546913+00:00",
+              "digestion_left": 0,
+              "last_updated": "2026-01-12T02:00:15.546913+00:00",
+              "metrics": {
+                "efficiency_ratio_fast": 0.1688,
+                "efficiency_ratio_slow": 0.382,
+                "atr_ratio": 0.9729,
+                "trend_lookback_fast": 10,
+                "trend_lookback_slow": 30,
+                "vol_lookback": 120,
+                "er_threshold": 0.4,
+                "atr_ratio_threshold": 1.5,
+                "price_change_fast": 3.25,
+                "price_change_slow": -22.25
+              },
+              "pending_count": 0,
+              "pending_regime": null,
+              "phase": "normal",
+              "regime": "ranging",
+              "risk_mode": "selective",
+              "stable_count": 0,
+              "symbol": "MES",
+              "timeframe": "5m",
+              "trade_allowed": true,
+              "trend_dimension": "ranging",
+              "volatility_dimension": "normal"
+            },
+            "market_regime": "ranging"
+          },
+          "webhookUrl": "https://n8n.thetopham.com/webhook/practice",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get many rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Webhook": {
+      "main": [
+        []
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Test workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get many rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Get many rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        []
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Upload to GCS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to GCS": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields2": {
+      "main": [
+        [
+          {
+            "node": "Supabase1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase1": {
+      "main": [
+        []
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model": {
+      "ai_languageModel": [
+        []
+      ]
+    },
+    "Get many rows": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields3": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Get datafeed_5m1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5m derived snapshot": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "set url",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tradingview Chart1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase3": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase4": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request3": {
+      "main": [
+        [
+          {
+            "node": "set url",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tradingview Chart1": {
+      "main": [
+        [
+          {
+            "node": "Supabase4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "set url": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get datafeed_5m1": {
+      "main": [
+        [
+          {
+            "node": "Aggregate1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate1": {
+      "main": [
+        [
+          {
+            "node": "5m derived snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request5": {
+      "main": [
+        [
+          {
+            "node": "Continuity Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continuity Context": {
+      "main": [
+        [
+          {
+            "node": "Supabase3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "availableInMCP": false,
+    "errorWorkflow": "OpjLMCnGpfwKeXLW"
+  },
+  "versionId": "a075a245-7927-4063-b345-8245d4ff32d1",
+  "meta": {
+    "templateId": "2569",
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9783a33f8d5600da0ff08d35d1dc9051c104e0a37fceb74a2ffe1557dcda02bc"
+  },
+  "id": "dQXRhfGuTzgpF4Wz",
+  "tags": []
+}
