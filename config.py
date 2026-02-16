@@ -38,6 +38,10 @@ def load_config():
         k[len("ACCOUNT_"):].lower(): int(v)
         for k, v in os.environ.items() if k.startswith("ACCOUNT_")
     }
+    config['INVERTED_SIGNAL_ROUTING'] = {
+        k[len("INVERT_TO_"):].lower(): v.lower()
+        for k, v in os.environ.items() if k.startswith("INVERT_TO_") and v
+    }
     if not config['ACCOUNTS']:
         raise RuntimeError("No accounts loaded from .env. Add ACCOUNT_<NAME>=<ID>.")
     config['DEFAULT_ACCOUNT'] = next(iter(config['ACCOUNTS']))

@@ -30,6 +30,7 @@ TV_PORT         = config['TV_PORT']
 WEBHOOK_SECRET  = config['WEBHOOK_SECRET']
 ACCOUNTS        = config['ACCOUNTS']
 DEFAULT_ACCOUNT = config['DEFAULT_ACCOUNT']
+INVERTED_SIGNAL_ROUTING = config.get('INVERTED_SIGNAL_ROUTING', {})
 LOCAL_TZ        = config['MT']
 GET_FLAT_START  = config['GET_FLAT_START']
 GET_FLAT_END    = config['GET_FLAT_END']
@@ -63,6 +64,11 @@ def tv_webhook():
     Thread(target=handle_webhook_logic, args=(data,)).start()
     return jsonify(status="accepted", msg="Processing started"), 202
 
+def _invert_signal(signal: str) -> str:
+    inverse_map = {"BUY": "SELL", "SELL": "BUY", "FLAT": "FLAT", "HOLD": "HOLD"}
+    return inverse_map.get((signal or "").upper(), (signal or "").upper())
+
+
 def handle_webhook_logic(data):
     try:
         strat = (data.get("strategy") or "simple").lower()
@@ -91,6 +97,18 @@ def handle_webhook_logic(data):
                 exit_ai_decision_id=data.get("ai_decision_id"),
             )
             flatten_contract(acct_id, cid, timeout=10)
+            mirror_account = INVERTED_SIGNAL_ROUTING.get(acct)
+            mirror_acct_id = ACCOUNTS.get(mirror_account) if mirror_account else None
+            if mirror_acct_id:
+                annotate_trade_exit_intent(
+                    mirror_acct_id,
+                    cid,
+                    exit_trigger="manual_flatten_webhook_inverted",
+                    exit_reason=data.get("reason"),
+                    exit_ai_decision_id=data.get("ai_decision_id"),
+                )
+                flatten_contract(mirror_acct_id, cid, timeout=10)
+                logging.info("Manual flat mirrored to %s (%s)", mirror_account, mirror_acct_id)
             logging.info(f"Manual flatten signal processed for {acct_id} {cid}")
             return
 
@@ -166,8 +184,22 @@ def handle_webhook_logic(data):
                     exit_reason=ai_decision.get("reason"),
                     exit_ai_decision_id=ai_decision.get("ai_decision_id"),
                 )
-                logging.info(f"AI flatten signal processed for {acct_id} {ai_cid}")
                 flatten_contract(acct_id, ai_cid, timeout=10)
+
+                mirror_account = INVERTED_SIGNAL_ROUTING.get(acct)
+                mirror_acct_id = ACCOUNTS.get(mirror_account) if mirror_account else None
+                if mirror_acct_id:
+                    annotate_trade_exit_intent(
+                        mirror_acct_id,
+                        ai_cid,
+                        exit_trigger="ai_flatten_inverted",
+                        exit_reason=ai_decision.get("reason"),
+                        exit_ai_decision_id=ai_decision.get("ai_decision_id"),
+                    )
+                    flatten_contract(mirror_acct_id, ai_cid, timeout=10)
+                    logging.info("AI flat mirrored to %s (%s)", mirror_account, mirror_acct_id)
+
+                logging.info(f"AI flatten signal processed for {acct_id} {ai_cid}")
                 return
 
             # Overwrite user values with AI's preferred decision
@@ -182,14 +214,33 @@ def handle_webhook_logic(data):
             ai_decision_id = ai_decision.get("ai_decision_id", ai_decision_id)
             prompt_version = ai_decision.get("prompt_version")
             cid = get_contract(sym)
-            
-        
+
+        mirror_account = INVERTED_SIGNAL_ROUTING.get(acct)
+        mirror_acct_id = None
+        mirror_sig = None
+        if mirror_account:
+            mirror_acct_id = ACCOUNTS.get(mirror_account)
+            if mirror_acct_id is None:
+                logging.error("Inverted routing misconfigured: source=%s target=%s (missing ACCOUNT_%s)", acct, mirror_account, mirror_account.upper())
+            else:
+                mirror_sig = _invert_signal(sig)
+                logging.info(
+                    "[INVERTED ROUTE] source_account=%s signal=%s -> target_account=%s inverted_signal=%s",
+                    acct,
+                    sig,
+                    mirror_account,
+                    mirror_sig,
+                )
+
         # --- Strategy Dispatch ---
         if strat != "simple":
             logging.error("Strategy '%s' is not implemented in this build (supported: simple)", strat)
             return
 
         run_simple(acct_id, sym, sig, size, alert, ai_decision_id, prompt_version=prompt_version)
+
+        if mirror_acct_id and mirror_sig in {"BUY", "SELL"}:
+            run_simple(mirror_acct_id, sym, mirror_sig, size, alert, ai_decision_id, prompt_version=prompt_version)
     except Exception as e:
         import traceback
         logging.error(f"Exception in handle_webhook_logic: {e}\n{traceback.format_exc()}")
