@@ -10,6 +10,7 @@ from config import load_config
 session = requests.Session()
 
 config = load_config()
+BROKER_MODE = config['BROKER_MODE']
 PX_BASE = config['PX_BASE']
 USER_NAME = config['USER_NAME']
 API_KEY = config['API_KEY']
@@ -55,6 +56,8 @@ def in_get_flat(now=None):
 
 def authenticate():
     global _token, _token_expiry
+    if BROKER_MODE == "sim":
+        raise RuntimeError("ProjectX authentication is disabled in sim mode")
     logging.info("Authenticating to Topstep API...")
     resp = session.post(
         f"{PX_BASE}/api/Auth/loginKey",

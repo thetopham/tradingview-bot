@@ -1,0 +1,9 @@
+# Simulation mode does not need SignalR or ProjectX credentials.
+Flask
+requests
+python-dotenv
+pytz
+python-dateutil
+supabase
+gunicorn
+tradingview-bot-v2 @ git+https://github.com/thetopham/tradingview-bot-v2.git@675b7c9855acf8dd5c406825c724891a8f295c96

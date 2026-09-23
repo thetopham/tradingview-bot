@@ -22,6 +22,19 @@ SUPABASE_URL = config['SUPABASE_URL']
 SUPABASE_KEY = config['SUPABASE_KEY']
 MT = config['MT']
 MES = "MES"
+BROKER_MODE = config['BROKER_MODE']
+_SIM_ADAPTER = None
+
+
+def get_sim_adapter():
+    """Load the v2 simulator only when the explicit sim mode is selected."""
+    global _SIM_ADAPTER
+    if BROKER_MODE != "sim":
+        raise RuntimeError("simulated broker is not selected")
+    if _SIM_ADAPTER is None:
+        from brokers.sim_adapter import SimAdapter
+        _SIM_ADAPTER = SimAdapter(config['SIM_BROKER_DB'], ACCOUNTS)
+    return _SIM_ADAPTER
 
 _PRICE_CACHE: Dict[str, Optional[Tuple[float, str]]] = {
     "symbol": None,
@@ -69,6 +82,8 @@ def get_supabase_client():
 
 # ─── API Functions ────────────────────────────────────
 def post(path, payload):
+    if BROKER_MODE == "sim":
+        raise RuntimeError("ProjectX API calls are disabled in sim mode")
     ensure_token()
     url = f"{PX_BASE}{path}"
     logging.debug("POST %s payload=%s", url, payload)
@@ -137,6 +152,8 @@ def place_market_bracket(acct_id, cid, side, size, *, stop_loss_ticks=None, take
     return post("/api/Order/place", payload)
 
 def search_open(acct_id):
+    if BROKER_MODE == "sim":
+        return get_sim_adapter().open_orders(acct_id)
     orders = post("/api/Order/searchOpen", {"accountId": acct_id}).get("orders", [])
     logging.debug("Open orders for %s: %s", acct_id, orders)
     return orders
@@ -148,12 +165,17 @@ def cancel(acct_id, order_id):
     return resp
 
 def search_pos(acct_id):
+    if BROKER_MODE == "sim":
+        return get_sim_adapter().positions(acct_id)
     pos = post("/api/Position/searchOpen", {"accountId": acct_id}).get("positions", [])
     logging.debug("Open positions for %s: %s", acct_id, pos)
     return pos
 
 def search_accounts(only_active_accounts: bool = True) -> List[Dict]:
     """Return account records with balance/canTrade flags."""
+
+    if BROKER_MODE == "sim":
+        return get_sim_adapter().accounts(only_active_accounts)
 
     payload = {"onlyActiveAccounts": bool(only_active_accounts)}
     accounts = post("/api/Account/search", payload).get("accounts", [])
@@ -167,10 +189,14 @@ def close_pos(acct_id, cid):
     return resp
 
 def search_trades(acct_id, since):
+    if BROKER_MODE == "sim":
+        return get_sim_adapter().trades(acct_id, since)
     trades = post("/api/Trade/search", {"accountId": acct_id, "startTimestamp": since.isoformat()}).get("trades", [])
     return trades
 
 def flatten_contract(acct_id, cid, timeout=10):
+    if BROKER_MODE == "sim":
+        raise RuntimeError("simulated FLAT requires a closed-bar decision envelope")
     logging.info("Flattening contract %s for acct %s", cid, acct_id)
     end = time.time() + timeout
     while time.time() < end:
@@ -255,6 +281,10 @@ def get_current_market_price(symbol: str = "MES", max_age_seconds: int = 120) ->
     Falls back gracefully between 1m tv_datafeed bars and latest_chart_analysis,
     and caches the last value for a few seconds to avoid repeated lookups.
     """
+
+    if BROKER_MODE == "sim":
+        price = get_sim_adapter().latest_price(max_age_seconds)
+        return (price, "simulated_last_bar") if price is not None else (None, None)
 
     try:
         now_ts = time.time()

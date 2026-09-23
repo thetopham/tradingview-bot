@@ -10,21 +10,26 @@ from flask import Flask, request, jsonify
 from logging_config import setup_logging
 from config import load_config
 from api import (
-    flatten_contract, get_contract, ai_trade_decision, search_pos
+    flatten_contract, get_contract, ai_trade_decision, search_pos, get_sim_adapter
     )
 from position_manager import PositionManager
-from strategies import run_simple
-from scheduler import start_scheduler
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token, auth_lock
-from signalr_listener import launch_signalr_listener, annotate_trade_exit_intent
 from dashboard import dashboard_bp
 from threading import Thread
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import logging
+import os
 
 # --- Logging/Config/Globals ---
 setup_logging()
 config = load_config()
+BROKER_MODE = config['BROKER_MODE']
+if BROKER_MODE != "sim":
+    from strategies import run_simple
+    from scheduler import start_scheduler
+    from signalr_listener import launch_signalr_listener, annotate_trade_exit_intent
+elif not config.get('WEBHOOK_SECRET'):
+    raise RuntimeError("WEBHOOK_SECRET is required in sim mode")
 
 TV_PORT         = config['TV_PORT']
 WEBHOOK_SECRET  = config['WEBHOOK_SECRET']
@@ -43,6 +48,10 @@ AI_TEST_ENDPOINTS = {
     "epsilon": config.get("N8N_OVERSEER_URL_TEST5"),
     "practice": config.get("N8N_OVERSEER_URL_TEST6"),
 }
+AI_TEST_ENDPOINTS.update({
+    name: os.getenv(f"N8N_OVERSEER_URL_{name.upper()}") or AI_TEST_ENDPOINTS.get(name)
+    for name in ACCOUNTS
+})
 
 POSITION_MANAGER = PositionManager(ACCOUNTS)
 
@@ -52,17 +61,87 @@ app.register_blueprint(dashboard_bp)
 # --- Health Check Route (optional, but recommended for uptime monitoring) ---
 @app.route("/healthz")
 def healthz():
-    return jsonify(status="ok", time=str(datetime.now(LOCAL_TZ)))
+    return jsonify(status="ok", broker_mode=BROKER_MODE, time=str(datetime.now(LOCAL_TZ)))
 
 @app.route("/webhook", methods=["POST"])
 def tv_webhook():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     if data.get("secret") != WEBHOOK_SECRET:
         return jsonify(error="unauthorized"), 403
+
+    if BROKER_MODE == "sim":
+        try:
+            result = process_sim_webhook(data)
+        except (ValueError, KeyError, TypeError) as exc:
+            logging.warning("Simulated webhook rejected: %s", exc)
+            return jsonify(error=str(exc)), 422
+        return jsonify(status="simulated", account=result), 200
 
     # Respond immediately to TradingView/n8n
     Thread(target=handle_webhook_logic, args=(data,)).start()
     return jsonify(status="accepted", msg="Processing started"), 202
+
+
+@app.route("/sim/events", methods=["GET"])
+def sim_events():
+    if BROKER_MODE != "sim":
+        return jsonify(error="not found"), 404
+    if request.headers.get("X-Webhook-Secret") != WEBHOOK_SECRET:
+        return jsonify(error="unauthorized"), 403
+    try:
+        after_id = int(request.args.get("after_id", "0"))
+        limit = int(request.args.get("limit", "100"))
+        events = get_sim_adapter().events_after(after_id, limit)
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 422
+    return jsonify(events=events, next_cursor=events[-1]["id"] if events else after_id)
+
+
+def process_sim_webhook(data):
+    """Run the existing overseer against a closed bar, then advance v2 only."""
+    account = (data.get("account") or DEFAULT_ACCOUNT).lower()
+    if account not in ACCOUNTS:
+        raise ValueError(f"unknown simulated account: {account}")
+    bar = data.get("bar")
+    if not isinstance(bar, dict) or not bar.get("timestamp"):
+        raise ValueError("simulated webhook requires a closed bar with timestamp")
+    adapter = get_sim_adapter()
+    max_lag = config['SIM_MAX_BAR_LAG_SECONDS']
+    if max_lag < 0:
+        raise ValueError("SIM_MAX_BAR_LAG_SECONDS cannot be negative")
+    if max_lag:
+        from tvbot_v2.simulate.brokerless_executor import utc
+        minutes = int(adapter.status(account)["timeframe"][:-1])
+        bar_close = utc(str(bar["timestamp"])) + timedelta(minutes=minutes)
+        if datetime.now(timezone.utc) - bar_close > timedelta(seconds=max_lag):
+            raise ValueError("closed bar is too old for forward simulation")
+    recorded = data.get("decision")
+    if recorded is None:
+        prior = adapter.processed_snapshot(account, str(bar["timestamp"]))
+        if prior is not None:
+            return prior
+        ai_url = AI_TEST_ENDPOINTS.get(account)
+        if ai_url:
+            timeframe = adapter.status(account)["timeframe"]
+            recorded = ai_trade_decision(
+                account, data.get("strategy") or "simple", data.get("signal") or "HOLD",
+                data.get("symbol") or "MES", data.get("size", 1),
+                f"{timeframe} {data.get('alert') or ''}", ai_url,
+                positions=adapter.positions(ACCOUNTS[account]),
+                position_context=adapter.account_context(account),
+            )
+            if not isinstance(recorded, dict) or recorded.get("error"):
+                recorded = {"signal": "HOLD", "size": 1,
+                            "reason": "Overseer unavailable; holding", "source": "overseer_error"}
+        else:
+            recorded = {"signal": data.get("signal") or "HOLD", "size": data.get("size", 1),
+                        "reason": data.get("reason", ""), "source": "webhook"}
+    if not isinstance(recorded, dict):
+        raise ValueError("decision must be an object")
+    decision = dict(recorded)
+    decision["size"] = int(decision.get("size", 1))
+    decision.setdefault("source", "n8n_overseer" if AI_TEST_ENDPOINTS.get(account) else "webhook")
+    return adapter.process_closed_bar(account, bar, decision)
 
 def _invert_signal(signal: str) -> str:
     inverse_map = {"BUY": "SELL", "SELL": "BUY", "FLAT": "FLAT", "HOLD": "HOLD"}
@@ -247,15 +326,19 @@ def handle_webhook_logic(data):
 
 if __name__ == "__main__":
     try:
-        authenticate()
-        signalr_listener = launch_signalr_listener(
-            get_token=get_token,
-            get_token_expiry=get_token_expiry,
-            authenticate=authenticate,
-            auth_lock=auth_lock
-        )
-        scheduler = start_scheduler(app)
-        app.logger.info("Starting server.")
-        app.run(host="0.0.0.0", port=TV_PORT, threaded=True)
+        if BROKER_MODE == "sim":
+            app.logger.info("Starting simulated broker webhook; ProjectX and SignalR disabled")
+            app.run(host="127.0.0.1", port=TV_PORT, threaded=True)
+        else:
+            authenticate()
+            signalr_listener = launch_signalr_listener(
+                get_token=get_token,
+                get_token_expiry=get_token_expiry,
+                authenticate=authenticate,
+                auth_lock=auth_lock
+            )
+            scheduler = start_scheduler(app)
+            app.logger.info("Starting server.")
+            app.run(host="0.0.0.0", port=TV_PORT, threaded=True)
     except Exception as e:
         logging.exception(f"Fatal error during startup: {e}")
