@@ -19,7 +19,9 @@ def _bar(timestamp, *, low=5999, close=6000):
 def legacy_sim(tmp_path, monkeypatch):
     db = tmp_path / "sim.sqlite"
     SimLedger(db).register((SimVariant("epsilon", "30m", "prodex_test",
-                                       {1: Bracket(1, 24, 48)}),))
+                                       {1: Bracket(1, 24, 48)}),
+                            SimVariant("zeta", "30m", "variant_test",
+                                       {1: Bracket(1, 24, 48)})))
     monkeypatch.setenv("BROKER_MODE", "sim")
     monkeypatch.setenv("SIM_BROKER_DB", str(db))
     monkeypatch.setenv("WEBHOOK_SECRET", "test-only")
@@ -187,3 +189,28 @@ def test_forward_mode_rejects_stale_bar(legacy_sim):
         "decision": {"signal": "BUY", "size": 1}})
     assert response.status_code == 422
     assert "too old" in response.json["error"]
+
+
+def test_datafeed_fans_out_to_independent_same_timeframe_accounts(legacy_sim):
+    client = legacy_sim.app.test_client()
+    url = "/sim/feed?source_table=tv_datafeed_30m"
+    headers = {"X-Webhook-Secret": "test-only"}
+    first = {"ts": "2026-09-22T14:30:06Z", "timeframe": "30", "symbol": "MES",
+             "o": 6000, "h": 6001, "l": 5999, "c": 6000, "v": 100,
+             "decisions": {"epsilon": {"signal": "BUY", "size": 1},
+                           "zeta": {"signal": "SELL", "size": 1}}}
+    assert client.post(url, json=first).status_code == 403
+    response = client.post(url, json=first, headers=headers)
+    assert response.status_code == 200
+    assert response.json["bar_ts"] == "2026-09-22T14:00:00+00:00"
+    assert set(response.json["accounts"]) == {"epsilon", "zeta"}
+    assert response.json["accounts"]["epsilon"]["pending"]["signal"] == "BUY"
+    assert response.json["accounts"]["zeta"]["pending"]["signal"] == "SELL"
+    assert client.post(url, json=first, headers=headers).json == response.json
+    second = {**first, "ts": "2026-09-22T15:00:06Z",
+              "decisions": {"epsilon": {"signal": "HOLD", "size": 1},
+                            "zeta": {"signal": "HOLD", "size": 1}}}
+    advanced = client.post(url, json=second, headers=headers)
+    assert advanced.status_code == 200
+    assert advanced.json["accounts"]["epsilon"]["position"]["direction"] == 1
+    assert advanced.json["accounts"]["zeta"]["position"]["direction"] == -1

@@ -113,6 +113,46 @@ def sim_results():
     return jsonify(results=results, next_cursor=results[-1]["id"] if results else after_id)
 
 
+@app.route("/sim/feed", methods=["POST"])
+def sim_feed():
+    """Fan one validated closed TradingView bar out to every matching account."""
+    if BROKER_MODE != "sim":
+        return jsonify(error="not found"), 404
+    if request.headers.get("X-Webhook-Secret") != WEBHOOK_SECRET:
+        return jsonify(error="unauthorized"), 403
+    data = request.get_json(silent=True) or {}
+    source_table = request.args.get("source_table") or data.get("source_table")
+    if source_table not in {"tv_datafeed_5m", "tv_datafeed_15m", "tv_datafeed_30m"}:
+        return jsonify(error="source_table must identify a supported MES datafeed"), 422
+    try:
+        from tvbot_v2.feed.normalize import normalize_bar
+        normalized = normalize_bar(data.get("row", data), source_table)
+    except (ValueError, TypeError, KeyError) as exc:
+        return jsonify(error=str(exc)), 422
+    timeframe = normalized["timeframe"]
+    bar = {"timestamp": normalized["ts"], "open": normalized["open"],
+           "high": normalized["high"], "low": normalized["low"],
+           "close": normalized["close"], "volume": normalized["volume"] or 0}
+    matching = [item["account"] for item in get_sim_adapter().ledger.status()
+                if item["timeframe"] == timeframe]
+    if not matching:
+        return jsonify(error=f"no simulated accounts use {timeframe}"), 422
+    decisions = data.get("decisions") or {}
+    if not isinstance(decisions, dict):
+        return jsonify(error="decisions must be an account-keyed object"), 422
+    snapshots, errors = {}, {}
+    for name in matching:
+        envelope = {"account": name, "bar": bar}
+        if name in decisions:
+            envelope["decision"] = decisions[name]
+        try:
+            snapshots[name] = process_sim_webhook(envelope)
+        except (ValueError, KeyError, TypeError) as exc:
+            errors[name] = str(exc)
+    return jsonify(status="partial" if errors else "simulated", timeframe=timeframe,
+                   bar_ts=bar["timestamp"], accounts=snapshots, errors=errors), (207 if errors else 200)
+
+
 def process_sim_webhook(data):
     """Run the existing overseer against a closed bar, then advance v2 only."""
     account = (data.get("account") or DEFAULT_ACCOUNT).lower()
