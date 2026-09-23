@@ -532,7 +532,9 @@ def ai_trade_decision(account, strat, sig, sym, size, alert, ai_url, positions=N
     #position_context_payload["market_regime"] = market_regime
 
     now = datetime.now(MT)
-    if in_get_flat(now):
+    # The simulated broker applies its own session rules at the bar boundary.
+    # This legacy ProjectX wall-clock guard must not suppress replay decisions.
+    if BROKER_MODE != "sim" and in_get_flat(now):
         logging.info(
             "In get-flat window (%s–%s %s); skipping AI decision call.",
             config['GET_FLAT_START'].strftime("%H:%M"),

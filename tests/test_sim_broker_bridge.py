@@ -214,3 +214,26 @@ def test_datafeed_fans_out_to_independent_same_timeframe_accounts(legacy_sim):
     assert advanced.status_code == 200
     assert advanced.json["accounts"]["epsilon"]["position"]["direction"] == 1
     assert advanced.json["accounts"]["zeta"]["position"]["direction"] == -1
+
+
+def test_sim_overseer_uses_broker_session_instead_of_legacy_wall_clock(legacy_sim, monkeypatch):
+    api = sys.modules["api"]
+    monkeypatch.setattr(api, "in_get_flat", lambda now: True)
+    calls = []
+
+    class Response:
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return {"signal": "BUY", "size": 1}
+
+    def post(url, **kwargs):
+        calls.append((url, kwargs["json"]["position_context"]))
+        return Response()
+
+    monkeypatch.setattr(api.session, "post", post)
+    decision = api.ai_trade_decision("epsilon", "simple", "HOLD", "MES", 1,
+                                     "30m", "http://overseer.invalid",
+                                     position_context={"test": True})
+    assert decision["signal"] == "BUY"
+    assert calls == [("http://overseer.invalid", {"test": True})]
