@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
+from contextlib import closing
 from typing import Any
 
 from tvbot_v2.simulate.brokerless_executor import SimBroker
@@ -28,6 +29,8 @@ class SimAdapter:
         self.broker = SimBroker(self.ledger)
         self.account_ids = account_ids
         self.names_by_id = {value: key for key, value in account_ids.items()}
+        from brokers.sim_results import SimResults
+        self.results = SimResults(self)
 
     def name(self, account_id: int) -> str:
         try:
@@ -80,7 +83,7 @@ class SimAdapter:
     def trades(self, account_id: int, since: datetime) -> list[dict[str, Any]]:
         name = self.name(account_id)
         snapshot = self.status(name)
-        with self.ledger.connection() as conn:
+        with closing(self.ledger.connection()) as conn:
             rows = conn.execute(
                 "SELECT * FROM sim_trade WHERE account=? AND generation=? ORDER BY id",
                 (name, snapshot["generation"])).fetchall()
@@ -88,19 +91,23 @@ class SimAdapter:
         for row in rows:
             if datetime.fromisoformat(row["exit_ts"]) < since:
                 continue
-            entry_side = 0 if row["direction"] == "long" else 1
-            for phase, side, price, timestamp, pnl in (
-                ("ENTRY", entry_side, row["entry_price"], row["entry_ts"], None),
-                ("EXIT", 1 - entry_side, row["exit_price"], row["exit_ts"], row["gross_pnl"]),
-            ):
-                fills.append({"id": f"SIM-{phase}-{row['id']}", "accountId": int(account_id),
-                              "contractId": SIM_CONTRACT, "orderId": f"SIM-{phase}-{row['id']}",
-                              "side": side, "size": row["quantity"], "price": price,
-                              "profitAndLoss": pnl, "fees": round(
-                                  (row["gross_pnl"] - row["net_pnl"]) / 2, 2),
-                              "creationTimestamp": timestamp, "voided": False,
-                              "raw_source": "sim_broker"})
+            fills.extend(self.trade_fills(row, account_id))
         return fills
+
+    @staticmethod
+    def trade_fills(row: Any, account_id: int) -> list[dict[str, Any]]:
+        entry_side = 0 if row["direction"] == "long" else 1
+        fee = round((row["gross_pnl"] - row["net_pnl"]) / 2, 2)
+        return [{"id": f"SIM-{phase}-{row['id']}", "accountId": int(account_id),
+                 "contractId": SIM_CONTRACT, "orderId": f"SIM-{phase}-{row['id']}",
+                 "side": side, "size": row["quantity"], "price": price,
+                 "profitAndLoss": pnl, "fees": fee,
+                 "creationTimestamp": timestamp, "voided": False,
+                 "raw_source": "sim_broker"}
+                for phase, side, price, timestamp, pnl in (
+                    ("ENTRY", entry_side, row["entry_price"], row["entry_ts"], None),
+                    ("EXIT", 1 - entry_side, row["exit_price"], row["exit_ts"], row["gross_pnl"]),
+                )]
 
     def account_context(self, name: str) -> dict[str, Any]:
         snapshot = self.status(name)
@@ -123,7 +130,7 @@ class SimAdapter:
                 "warnings": [snapshot["status"]] if snapshot["status"] != "active" else []}
 
     def latest_price(self, max_age_seconds: int) -> float | None:
-        with self.ledger.connection() as conn:
+        with closing(self.ledger.connection()) as conn:
             rows = conn.execute("SELECT last_bar_ts,last_bar_close,variant_json FROM sim_account "
                                 "WHERE last_bar_ts IS NOT NULL").fetchall()
         from tvbot_v2.simulate.portfolio import SimVariant
@@ -142,11 +149,13 @@ class SimAdapter:
         candidate.setdefault("account", name)
         candidate.setdefault("timeframe", snapshot["timeframe"])
         candidate.setdefault("bar_ts", bar["timestamp"])
-        return self.broker.process_envelope({"account": name, "bar": bar, "decision": candidate})
+        result = self.broker.process_envelope({"account": name, "bar": bar, "decision": candidate})
+        self.results.enqueue(name)
+        return result
 
     def processed_snapshot(self, name: str, bar_ts: str) -> dict[str, Any] | None:
         snapshot = self.status(name)
-        with self.ledger.connection() as conn:
+        with closing(self.ledger.connection()) as conn:
             row = conn.execute("SELECT snapshot_json FROM sim_bar WHERE account=? AND generation=? AND bar_ts=?",
                                (name, snapshot["generation"], utc(bar_ts).isoformat())).fetchone()
         return json.loads(row["snapshot_json"]) if row else None
@@ -154,7 +163,7 @@ class SimAdapter:
     def events_after(self, after_id: int, limit: int = 100) -> list[dict[str, Any]]:
         if after_id < 0 or not 1 <= limit <= 500:
             raise ValueError("invalid event cursor or limit")
-        with self.ledger.connection() as conn:
+        with closing(self.ledger.connection()) as conn:
             rows = conn.execute("SELECT id,account,generation,bar_ts,event_type,payload_json,created_at "
                                 "FROM sim_event WHERE id>? ORDER BY id LIMIT ?",
                                 (after_id, limit)).fetchall()

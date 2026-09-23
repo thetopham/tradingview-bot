@@ -48,11 +48,19 @@ Submit a **closed** MES bar with a timezone-aware **bar-open** timestamp. A supp
 
 The response contains the updated ledger snapshot. A BUY/SELL/FLAT decision acts no earlier than the next contiguous bar open. If the same bar is retried without an explicit decision, the bridge returns the saved snapshot before calling n8n again. Duplicate decisions are checked by the v2 broker. `GET /healthz` remains the local health check. The bridge binds to `127.0.0.1` when run directly; this keeps its webhook off the public interface during validation.
 
-`GET /sim/events?after_id=0&limit=100` returns normalized ledger events and a `next_cursor` for the next poll. Pass `X-Webhook-Secret` in the request header. A future result dispatcher can consume `trade_closed` events from this endpoint, replacing the old SignalR close trigger without coupling the simulator to the transport.
+`GET /sim/events?after_id=0&limit=100` returns normalized ledger events and a `next_cursor` for the next poll. Pass `X-Webhook-Secret` in the request header. `GET /sim/results?after_id=0&limit=100` returns durable, ProjectX-shaped `trade_results` payloads built from closed v2 trades. The outbox is backfilled from the ledger when the adapter starts and uses the v2 trade ID plus account and generation as its unique key. This replaces SignalR's position-close trigger without coupling simulated execution to delivery.
+
+To check how many results are awaiting Supabase, set `SIM_BROKER_DB` and run:
+
+```bash
+.venv/bin/python scripts/publish_sim_results.py --dry-run
+```
+
+Once a valid `SUPABASE_URL` and `SUPABASE_KEY` are configured, run the same command without `--dry-run`. It checks `trace_id` in `trade_results` before inserting and marks each outbox row only after a successful response. A failed delivery remains pending for the next run. Run this from a single scheduled worker. The command does not affect fills or account state.
 
 ## Current boundary and next checks
 
 - The v2 ledger is authoritative for fills, fees, positions, trailing loss, and pass/fail events. The bridge renders ProjectX-shaped read views for the old dashboard/position manager without making a broker call.
-- Closed simulated trades are **not yet copied to the legacy `trade_results` Supabase table**. The old repo's dry-run proof established the payload shape, and the bridge can now render compatible entry and exit fills. The next dispatcher must publish each closed trade once, keep its v2 trade ID, and reconcile against the existing `ai_trade_feed` view.
+- Closed simulated trades are queued locally in `sim_result_outbox` and exposed through `/sim/results`. Delivery to Supabase is implemented as a separate command, but it has **not been enabled on the Pi** because the available legacy key is invalid against local Supabase. The `ai_trade_feed` view has not yet been checked against newly published simulated rows.
 - The live n8n workflow currently pulls its own feed. It has not been changed to include a canonical closed bar in the webhook response. Until it does, submit only test envelopes to the local bridge. A missing bar is rejected rather than guessed from wall-clock time or a stale quote.
 - The Pi's legacy `.env` points at an obsolete Supabase host. Local Supabase at `192.168.0.35:8000` is reachable but requires a valid key. Do not reuse the old key or start the old scheduler for this bridge.

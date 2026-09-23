@@ -87,6 +87,54 @@ def test_sim_stop_generates_legacy_trade_views(legacy_sim):
     assert trades[0]["contractId"] == "CON.F.US.MES.SIM"
     assert api.search_pos(account_id) == []
 
+    # The close event is projected exactly once into a durable replacement
+    # for the old SignalR-triggered trade_results write.
+    assert client.get("/sim/results").status_code == 403
+    result_response = client.get("/sim/results?after_id=0",
+                                 headers={"X-Webhook-Secret": "test-only"})
+    assert result_response.status_code == 200
+    results = result_response.json["results"]
+    assert len(results) == 1
+    payload = results[0]["payload"]
+    assert payload["account"] == "epsilon"
+    assert payload["signal"] == "BUY"
+    assert payload["size"] == 1
+    assert payload["trace_id"].startswith("sim:epsilon:1:")
+    assert payload["raw_trades"] == trades
+    assert payload["net_pnl"] == pytest.approx(
+        payload["total_pnl"] - payload["fees_total"])
+    assert client.post("/webhook", json={"secret": "test-only", "account": "epsilon",
+                                         "bar": _bar("2026-09-22T15:00:00Z", low=5993),
+                                         "decision": {"signal": "HOLD", "size": 1}}).status_code == 200
+    assert len(client.get("/sim/results?after_id=0",
+                          headers={"X-Webhook-Secret": "test-only"}).json["results"]) == 1
+    cursor = result_response.json["next_cursor"]
+    assert client.get(f"/sim/results?after_id={cursor}",
+                      headers={"X-Webhook-Secret": "test-only"}).json["results"] == []
+
+    from scripts.publish_sim_results import publish_pending
+    class Response:
+        def __init__(self, body=None):
+            self.body = body
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return self.body
+    class Session:
+        def __init__(self):
+            self.posts = []
+        def get(self, *args, **kwargs):
+            return Response([])
+        def post(self, *args, **kwargs):
+            self.posts.append(kwargs["json"])
+            return Response()
+    session = Session()
+    adapter = api.get_sim_adapter()
+    assert publish_pending(adapter, "https://example.invalid", "test-key", session=session) == 1
+    assert session.posts == [payload]
+    assert publish_pending(adapter, "https://example.invalid", "test-key", session=session) == 0
+    assert len(session.posts) == 1
+
 
 def test_sim_webhook_rejects_missing_bar(legacy_sim):
     response = legacy_sim.app.test_client().post("/webhook", json={

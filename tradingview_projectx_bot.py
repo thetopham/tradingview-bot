@@ -97,6 +97,22 @@ def sim_events():
     return jsonify(events=events, next_cursor=events[-1]["id"] if events else after_id)
 
 
+@app.route("/sim/results", methods=["GET"])
+def sim_results():
+    """Read durable legacy-shaped closed trades without SignalR."""
+    if BROKER_MODE != "sim":
+        return jsonify(error="not found"), 404
+    if request.headers.get("X-Webhook-Secret") != WEBHOOK_SECRET:
+        return jsonify(error="unauthorized"), 403
+    try:
+        after_id = int(request.args.get("after_id", "0"))
+        limit = int(request.args.get("limit", "100"))
+        results = get_sim_adapter().results.after(after_id, limit)
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 422
+    return jsonify(results=results, next_cursor=results[-1]["id"] if results else after_id)
+
+
 def process_sim_webhook(data):
     """Run the existing overseer against a closed bar, then advance v2 only."""
     account = (data.get("account") or DEFAULT_ACCOUNT).lower()
