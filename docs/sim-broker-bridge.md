@@ -67,7 +67,21 @@ For a profile with 30-minute decisions and 1-minute execution, the 30-minute rou
 
 The route fans the bar out to **every** configured account with the matching timeframe. Each account can call its own n8n overseer URL. For isolated replay, an optional `decisions` object may contain account-keyed decisions; production feed rows have none. The response lists account snapshots and any per-account errors. Retrying a bar is safe.
 
-On the Pi, the published `datafeed_5m`, `datafeed_15m`, and `datafeed_30m` workflows forward their inserted Supabase rows to this route with a dedicated n8n Header Auth credential. The bridge binds to Pi loopback and the private n8n Docker gateway at port 5001. Epsilon calls `MES 30m ProDex numeric simulator`; alpha, beta, gamma, and delta call the simulator-only numeric ProDex workflows in `n8n/sim/`. They use the local feed and continuity lookup and exclude the expired chart-image service. The old chart workflows remain available separately but are not used by these five accounts. Each new numeric workflow has a distinct entry thesis; the broker's fixed $30/$60 bracket choices remain the same for now.
+On the Pi, the published `datafeed_5m`, `datafeed_15m`, and `datafeed_30m` workflows forward their inserted Supabase rows to this route with a dedicated n8n Header Auth credential. The bridge binds to Pi loopback and the private n8n Docker gateway at port 5001. Epsilon calls `MES 30m ProDex numeric simulator`; alpha, beta, gamma, and delta call the simulator-only numeric ProDex workflows in `n8n/sim/`. They use the local feed and continuity lookup and exclude the expired chart-image service. The old chart workflows remain available separately but are not used by these five accounts. Each new numeric workflow has a distinct entry thesis.
+
+### Live bracket settings
+
+The running `tradingview-bot-sim` service reads its ledger path from `SIM_BROKER_DB` in its private environment file. On 2026-09-23 this is `data/sim_broker_local.sqlite`; `data/sim_broker.sqlite` is an older, inactive ledger with different settings. Check the service's configured path before reading account profiles or balances.
+
+All five active accounts currently execute on the **1-minute** feed, while their decisions arrive on 5-minute (alpha, beta, gamma), 15-minute (delta), or 30-minute (epsilon) candles. All five have the same choices below; account-specific brackets are supported by the v2 profile format but have not yet been assigned to these live accounts.
+
+| Decision `size` | MES contracts | Stop | Target | Gross stop / target |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 1 | 24 ticks (6 points) | 48 ticks (12 points) | −$30 / +$60 |
+| 2 | 2 | 12 ticks (3 points) | 24 ticks (6 points) | −$30 / +$60 |
+| 3 | 3 | 8 ticks (2 points) | 16 ticks (4 points) | −$30 / +$60 |
+
+One MES tick is 0.25 index points and $1.25 per contract. The broker fills an eligible decision at the next 1-minute open with one tick of entry slippage, then sets stop and target from that actual entry price. Each following 1-minute OHLC bar can trigger an exit. If both levels are touched in the same bar, the stop wins. Stops can fill beyond their level on a gap and incur one tick of adverse slippage. Fees are $1.22 round turn per MES contract. The maximum-loss rule can also close a position independently of its bracket. These costs and rules make realized P&L differ from the gross table.
 
 The Pi's n8n container needs its persistent `nodes/node_modules/@openai` directory mounted read-only into `/usr/local/lib/node_modules/n8n/node_modules/@openai`. ProDex's SDK is dynamically imported from n8n's install tree; without that mount it fails after a container replacement. Keep this mount in the Pi's local `n8n-docker-caddy/docker-compose.yml` alongside the regular `n8n_data` volume. Check a direct overseer response after n8n upgrades or recreations before allowing new automatic decisions.
 
@@ -82,6 +96,8 @@ To check how many results are awaiting Supabase, set `SIM_BROKER_DB` and run:
 Once a valid `SUPABASE_URL` and `SUPABASE_KEY` are configured, run the same command without `--dry-run`. It checks `trace_id` in `trade_results` before inserting and marks each outbox row only after a successful response. A failed delivery remains pending for the next run. Run this from a single scheduled worker. The command does not affect fills or account state.
 
 On the Pi, keep these values in `/home/thetopham/.config/tradingview-bot-sim-results.env` with mode `0600`. Install `deploy/tradingview-bot-sim-results.service` and `.timer` to publish pending rows each minute. The n8n Supabase credential can supply the local instance's URL and service key; do not commit either value. Verify a published result by its `sim:<account>:<generation>:<trade>` trace ID. A manually submitted smoke trade has no AI decision ID, so it appears in `trade_results` but may not join into the `ai_trade_feed` view.
+
+The numeric ProDex workflows insert successful decisions into Supabase `ai_trading_log`. The `ai_trade_feed` table is refreshed by database triggers and combines these decisions with `trade_results` after a position closes; HOLD decisions therefore appear without trade P&L. On 2026-09-23 the restored Supabase database had `ai_decision_id` above 33,000 while its shared `documents_id_seq` was at 90. New decisions inserted at low IDs and disappeared from a descending-ID view. The sequence was advanced above the maximum ID across all tables that share it. After a future restore, verify both `MAX(ai_decision_id)` and the sequence's `last_value` before diagnosing missing logs. If the sequence is behind, run `scripts/repair_supabase_shared_sequence.sql` against the local database; it locks the tables while taking a consistent maximum. The feed refresh function also now falls back to the decision's `prompt_version` when a trade result has none.
 
 ## Current boundary and next checks
 
