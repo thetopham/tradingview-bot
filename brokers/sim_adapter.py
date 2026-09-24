@@ -137,7 +137,7 @@ class SimAdapter:
         values = []
         for row in rows:
             variant = SimVariant.from_json(row["variant_json"])
-            closed = datetime.fromisoformat(row["last_bar_ts"]) + timedelta(minutes=variant.minutes)
+            closed = datetime.fromisoformat(row["last_bar_ts"]) + timedelta(minutes=variant.execution_minutes)
             if datetime.now(timezone.utc) - closed <= timedelta(seconds=max_age_seconds):
                 values.append((closed, row["last_bar_close"]))
         return max(values)[1] if values else None
@@ -152,6 +152,27 @@ class SimAdapter:
         result = self.broker.process_envelope({"account": name, "bar": bar, "decision": candidate})
         self.results.enqueue(name)
         return result
+
+    def process_decision(self, name: str, bar_ts: str,
+                         decision: dict[str, Any]) -> dict[str, Any]:
+        snapshot = self.status(name)
+        candidate = dict(decision)
+        candidate.setdefault("account", name)
+        candidate.setdefault("timeframe", snapshot["timeframe"])
+        candidate.setdefault("bar_ts", bar_ts)
+        return self.broker.submit_decision(name, bar_ts, candidate)
+
+    def process_execution_bar(self, name: str, bar: dict[str, Any]) -> dict[str, Any]:
+        result = self.broker.process_envelope({"account": name, "bar": bar})
+        self.results.enqueue(name)
+        return result
+
+    def processed_decision(self, name: str, bar_ts: str) -> dict[str, Any] | None:
+        snapshot = self.status(name)
+        with closing(self.ledger.connection()) as conn:
+            row = conn.execute("SELECT snapshot_json FROM sim_decision WHERE account=? AND generation=? AND bar_ts=?",
+                               (name, snapshot["generation"], utc(bar_ts).isoformat())).fetchone()
+        return json.loads(row["snapshot_json"]) if row else None
 
     def processed_snapshot(self, name: str, bar_ts: str) -> dict[str, Any] | None:
         snapshot = self.status(name)
