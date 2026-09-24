@@ -18,7 +18,9 @@ closed broker trade -> durable outbox -> Supabase trade_results
 ProDex decision -> Supabase ai_trading_log -> ai_trade_feed
 ```
 
-The bridge exposes ProjectX-shaped account, order, position, trade, and broker-event views for legacy callers while reading and writing only the local v2 ledger. `/sim/broker-events` is an authenticated polling interface that replaces the data the old SignalR listener supplied; it is not a SignalR server. The public `sim.thetopham.com` tunnel is restricted to the authenticated dashboard routes, not the order or feed endpoints.
+The bridge exposes ProjectX-shaped account, order, position, trade, and broker-event views for legacy callers while reading and writing only the local v2 ledger. `/sim/broker-events` is an optional authenticated polling view of ledger events, not a SignalR server. Broker fills, brackets, and trade-close detection do not depend on polling this endpoint. The public `sim.thetopham.com` tunnel is restricted to the authenticated dashboard routes, not the order or feed endpoints.
+
+The active Pi still uses short timer checks for other jobs: the decision timer looks for a newly cached strategy candle, the results timer retries delivery from the durable outbox to Supabase, and the browser refreshes the dashboard every 30 seconds. The n8n one-minute feed **pushes** each closed candle to the broker; there is no broker-status poll to discover fills.
 
 ## Repository roles
 
@@ -33,7 +35,7 @@ The active Pi checkout is `/home/thetopham/tradingview-bot-sim`. Its simulator c
 
 ## Historical implementation
 
-The [original system documentation](documentation/README.md), [coupling audit](docs/trading-bot-coupling-audit.md), and [compatibility design](docs/broker-compatibility-layer.md) preserve how the ProjectX/TopstepX and SignalR bot worked and how migration was planned. They are historical references. Do not start the old ProjectX service to operate the simulator.
+The [archival ProjectX/SignalR release](https://github.com/thetopham/tradingview-bot/releases/tag/legacy-projectx-signalr-final) preserves the exact last main-branch source commit before the simulator bridge. The [original system documentation](documentation/README.md), [coupling audit](docs/trading-bot-coupling-audit.md), and [compatibility design](docs/broker-compatibility-layer.md) preserve how the old bot worked and how migration was planned. These are historical references. Do not start the old ProjectX service to operate the simulator.
 
 ## Security
 
