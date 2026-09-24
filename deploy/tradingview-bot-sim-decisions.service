@@ -1,0 +1,15 @@
+[Unit]
+Description=Trigger simulated trading decisions from cached candles
+After=network-online.target tradingview-bot-sim.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=thetopham
+Group=thetopham
+WorkingDirectory=/home/thetopham/tradingview-bot-sim
+EnvironmentFile=/home/thetopham/.config/tradingview-bot-sim.env
+ExecStart=/home/thetopham/tradingview-bot-sim/.venv/bin/python scripts/run_sim_decisions.py
+TimeoutStartSec=240
+NoNewPrivileges=true
+

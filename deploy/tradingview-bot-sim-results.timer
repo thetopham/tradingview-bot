@@ -1,0 +1,12 @@
+[Unit]
+Description=Publish pending simulated trade results each minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=5s
+Persistent=true
+Unit=tradingview-bot-sim-results.service
+
+[Install]
+WantedBy=timers.target
+

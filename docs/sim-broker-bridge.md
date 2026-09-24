@@ -17,11 +17,14 @@ TV_PORT=5001
 WEBHOOK_SECRET=<local secret>
 DASHBOARD_PASSWORD=<local password>
 SIM_MAX_BAR_LAG_SECONDS=600
+SIM_DECISION_SOURCE=feed
 ```
 
 Simulation mode reads account names from the v2 ledger at startup. It assigns stable compatibility account IDs from SQLite row IDs, starting at 900001. Add accounts with the v2 `init --portfolio` command, then restart this legacy bridge to refresh its account map. Profile names must be lowercase for legacy webhook routing. New accounts can use `N8N_OVERSEER_URL_<ACCOUNT>`; the historical alpha through practice URL variables continue to work. `PROJECTX_*` settings are unused in sim mode.
 
 `SIM_MAX_BAR_LAG_SECONDS` rejects stale bars in forward operation. Set it to `0` only for an isolated replay or test database.
+
+For the Pi's separate decision scheduler, set `SIM_DECISION_SOURCE=scheduler` and install `deploy/tradingview-bot-sim-decisions.service` and `.timer`. The existing 30-minute n8n datafeed still forwards its saved candle, but `/sim/feed` caches it without calling the AI. Each timer run checks for a fresh cached candle and invokes the configured overseer once per account and candle. The resulting decision enters the local broker and is filled from the next eligible one-minute bar. This setting avoids running both the feed and scheduler as decision triggers. Accounts without configured overseer URLs are skipped. The old live-broker scheduler and its chart jobs remain disabled.
 
 ## Webhook contract
 
@@ -76,10 +79,12 @@ To check how many results are awaiting Supabase, set `SIM_BROKER_DB` and run:
 
 Once a valid `SUPABASE_URL` and `SUPABASE_KEY` are configured, run the same command without `--dry-run`. It checks `trace_id` in `trade_results` before inserting and marks each outbox row only after a successful response. A failed delivery remains pending for the next run. Run this from a single scheduled worker. The command does not affect fills or account state.
 
+On the Pi, keep these values in `/home/thetopham/.config/tradingview-bot-sim-results.env` with mode `0600`. Install `deploy/tradingview-bot-sim-results.service` and `.timer` to publish pending rows each minute. The n8n Supabase credential can supply the local instance's URL and service key; do not commit either value. Verify a published result by its `sim:<account>:<generation>:<trade>` trace ID. A manually submitted smoke trade has no AI decision ID, so it appears in `trade_results` but may not join into the `ai_trade_feed` view.
+
 ## Current boundary and next checks
 
 - The v2 ledger is authoritative for fills, fees, positions, trailing loss, and pass/fail events. The bridge renders ProjectX-shaped read views for the old dashboard/position manager without making a broker call.
-- Closed simulated trades are queued locally in `sim_result_outbox` and exposed through `/sim/results`. Delivery to Supabase is implemented as a separate command, but it has **not been enabled on the Pi** because the available legacy key is invalid against local Supabase. The `ai_trade_feed` view has not yet been checked against newly published simulated rows.
+- Closed simulated trades are queued locally in `sim_result_outbox` and exposed through `/sim/results`. The separate publisher delivers them to local Supabase with an idempotent trace ID. The Pi's current manual smoke trade was verified in `trade_results`; it has no AI decision ID, so the `ai_trade_feed` join does not include it.
 - The 30m feed is connected and normalizes the post-insert receipt timestamp into a closed bar. Epsilon is the only account with a configured ProDex overseer. The 5m and 15m variants still need their feed workflows connected and their own decision routes; otherwise they do not advance.
 - Keep the n8n header secret in its encrypted credential and the Pi environment file, never in exported workflow JSON. The original `tradingview-bot` service remains inactive; only `tradingview-bot-sim` runs.
-- The Pi's legacy `.env` points at an obsolete Supabase host. Local Supabase at `192.168.0.35:8000` is reachable but requires a valid key. Do not reuse the old key or start the old scheduler for this bridge.
+- The Pi's legacy `.env` points at an obsolete Supabase host. The result publisher uses a separate private environment file with the credential from the currently working n8n Supabase connection.

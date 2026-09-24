@@ -15,6 +15,7 @@ def load_config():
         'BROKER_MODE': broker_mode,
         'SIM_BROKER_DB': os.getenv("SIM_BROKER_DB"),
         'SIM_MAX_BAR_LAG_SECONDS': int(os.getenv("SIM_MAX_BAR_LAG_SECONDS", "0")),
+        'SIM_DECISION_SOURCE': os.getenv("SIM_DECISION_SOURCE", "feed").lower(),
         'TV_PORT': int(os.getenv("TV_PORT", 5000)),
         'PX_BASE': os.getenv("PROJECTX_BASE_URL"),
         'USER_NAME': os.getenv("PROJECTX_USERNAME"),
@@ -41,6 +42,8 @@ def load_config():
         'MAX_DAILY_LOSS': float(os.getenv("MAX_DAILY_LOSS", -250.0)),
         'MAX_CONSECUTIVE_LOSSES': int(os.getenv("MAX_CONSECUTIVE_LOSSES", 99999)),
     }
+    if config['SIM_DECISION_SOURCE'] not in {"feed", "scheduler"}:
+        raise ValueError("SIM_DECISION_SOURCE must be feed or scheduler")
     # Build account map
     if broker_mode == "sim":
         if not config['SIM_BROKER_DB'] or not Path(config['SIM_BROKER_DB']).is_file():
