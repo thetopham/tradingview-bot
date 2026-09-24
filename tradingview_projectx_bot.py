@@ -15,6 +15,7 @@ from api import (
 from position_manager import PositionManager
 from auth import in_get_flat, authenticate, get_token, get_token_expiry, ensure_token, auth_lock
 from dashboard import dashboard_bp
+from sim_dashboard import sim_dashboard_bp
 from threading import Thread
 from datetime import datetime, timedelta, timezone
 import logging
@@ -57,6 +58,8 @@ POSITION_MANAGER = PositionManager(ACCOUNTS)
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.register_blueprint(dashboard_bp)
+if BROKER_MODE == "sim":
+    app.register_blueprint(sim_dashboard_bp)
 
 # --- Health Check Route (optional, but recommended for uptime monitoring) ---
 @app.route("/healthz")

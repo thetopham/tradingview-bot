@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="30">
+  <title>Simulated accounts</title>
+  <style>
+    :root { color-scheme: light; --ink:#152235; --muted:#64748b; --line:#dde5ed; --green:#087957; --red:#bc3c47; --blue:#3c5dd7; }
+    * { box-sizing:border-box }
+    body { margin:0; background:#f3f6f9; color:var(--ink); font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif }
+    header { background:#132038; color:white; padding:30px max(24px,calc((100vw - 1320px)/2)); }
+    header .top { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; flex-wrap:wrap }
+    h1 { font-size:clamp(26px,3vw,38px); line-height:1.1; margin:7px 0 9px }
+    h2 { font-size:21px; margin:0 0 16px }
+    h3 { font-size:20px; margin:0 }
+    .eyebrow { color:#95b7fc; font-weight:750; text-transform:uppercase; font-size:11px; letter-spacing:.16em }
+    header p { color:#b9c7d8; margin:0 }
+    .updated { color:#d8e2ef; font-size:13px; text-align:right; padding-top:8px }
+    .updated small { display:block; color:#9fb0c5; margin-top:4px }
+    main { max-width:1368px; margin:auto; padding:24px }
+    .summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin-bottom:30px }
+    .metric,.account,.panel { background:#fff; border:1px solid var(--line); box-shadow:0 3px 14px rgba(24,41,65,.045); border-radius:16px }
+    .metric { padding:19px 20px }
+    .metric .label { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); font-weight:750 }
+    .metric .value { font-size:30px; font-weight:760; letter-spacing:-.04em; margin-top:4px }
+    .metric .hint { color:var(--muted); font-size:12px; margin-top:3px }
+    .section-title { display:flex; justify-content:space-between; gap:12px; align-items:baseline; margin-bottom:15px }
+    .section-title p { color:var(--muted); margin:0; font-size:13px }
+    .accounts { display:grid; grid-template-columns:repeat(auto-fit,minmax(310px,1fr)); gap:16px; margin-bottom:32px }
+    .account { padding:21px; min-width:0 }
+    .account-top { display:flex; justify-content:space-between; gap:10px; align-items:flex-start }
+    .subtle { color:var(--muted); font-size:13px }
+    .badge { display:inline-block; border-radius:999px; padding:4px 9px; font-size:11px; font-weight:750; text-transform:uppercase; letter-spacing:.04em; background:#e8edf5; color:#42546b; white-space:nowrap }
+    .badge.active,.badge.passed { background:#e3f5ed; color:var(--green) }
+    .badge.failed { background:#fde9e9; color:var(--red) }
+    .balance { font-size:29px; font-weight:760; letter-spacing:-.04em; margin-top:19px }
+    .balance-label { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.07em; font-weight:700 }
+    .pnl { font-size:13px; font-weight:700 }
+    .positive { color:var(--green) } .negative { color:var(--red) }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:13px; margin-top:18px; padding-top:18px; border-top:1px solid var(--line) }
+    .grid .value { font-weight:720; font-size:15px; margin-top:2px }
+    .grid .label { color:var(--muted); font-size:12px }
+    .progress { height:7px; border-radius:9px; background:#e9eef5; margin-top:10px; overflow:hidden }
+    .progress span { display:block; height:100%; background:var(--blue); border-radius:9px }
+    .detail { margin-top:18px; border-radius:11px; padding:12px 13px; background:#f4f7fb; font-size:13px }
+    .detail strong { display:block; margin-bottom:4px }
+    .detail p { margin:0; color:#43546a; overflow-wrap:anywhere }
+    .detail .minor { color:var(--muted); font-size:12px; margin-top:4px }
+    .position { background:#eef5ff }
+    .footerline { margin-top:16px; color:var(--muted); font-size:12px; display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap }
+    .panel { padding:20px; overflow:auto }
+    table { width:100%; border-collapse:collapse; min-width:620px; text-align:left }
+    th { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; padding:0 10px 11px }
+    td { border-top:1px solid var(--line); padding:12px 10px; font-size:13px }
+    .empty { color:var(--muted); padding:26px 8px }
+    .note { color:var(--muted); font-size:12px; margin:18px 0 5px }
+    @media(max-width:850px) { .summary { grid-template-columns:repeat(2,minmax(0,1fr)) } }
+    @media(max-width:520px) { header { padding:24px } main { padding:16px } .summary { gap:9px } .metric { padding:14px } .metric .value { font-size:23px } .account { padding:17px } .updated { text-align:left } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="top">
+      <div><div class="eyebrow">TradingView bot · simulated broker</div><h1>Simulated accounts</h1><p>Every strategy account, its current risk, and its most recent decision.</p></div>
+      <div class="updated">Updated {{ payload.updated_at }}<small>Refreshes every 30 seconds · Read only</small></div>
+    </div>
+  </header>
+  <main>
+    <section class="summary" aria-label="Overview">
+      <div class="metric"><div class="label">Accounts</div><div class="value">{{ payload.summary.total }}</div><div class="hint">{{ payload.summary.active }} active · {{ payload.summary.open_positions }} in a position</div></div>
+      <div class="metric"><div class="label">Realized P&amp;L</div><div class="value {{ 'negative' if payload.summary.net_pnl < 0 else 'positive' if payload.summary.net_pnl > 0 else '' }}">${{ '{:,.2f}'.format(payload.summary.net_pnl) }}</div><div class="hint">Current account generations</div></div>
+      <div class="metric"><div class="label">Equity change</div><div class="value {{ 'negative' if payload.summary.equity_change < 0 else 'positive' if payload.summary.equity_change > 0 else '' }}">${{ '{:,.2f}'.format(payload.summary.equity_change) }}</div><div class="hint">Includes open position value</div></div>
+      <div class="metric"><div class="label">Outcomes</div><div class="value">{{ payload.summary.passed }} / {{ payload.summary.failed }}</div><div class="hint">Passed / failed</div></div>
+    </section>
+    <section aria-label="Account details">
+      <div class="section-title"><h2>Accounts</h2><p>One minute candles drive fills and stops</p></div>
+      <div class="accounts">
+        {% for a in payload.accounts %}
+        <article class="account">
+          <div class="account-top"><div><h3>{{ a.account|capitalize }}</h3><div class="subtle">{{ a.strategy_id }} · {{ a.timeframe }} decisions · {{ a.execution_timeframe }} fills</div></div><span class="badge {{ 'paused' if a.manual_paused else a.status }}">{{ 'Paused' if a.manual_paused else a.status }}</span></div>
+          <div class="balance">${{ '{:,.2f}'.format(a.equity) }}</div><div class="balance-label">Current equity</div>
+          <div class="pnl {{ 'negative' if a.net_pnl < 0 else 'positive' if a.net_pnl > 0 else '' }}">{{ '+' if a.net_pnl > 0 else '' }}${{ '{:,.2f}'.format(a.net_pnl) }} realized · {{ '+' if a.unrealized_pnl > 0 else '' }}${{ '{:,.2f}'.format(a.unrealized_pnl) }} open</div>
+          <div class="grid">
+            <div><div class="label">Loss room left</div><div class="value {{ 'negative' if a.mll_remaining <= 300 else '' }}">${{ '{:,.2f}'.format(a.mll_remaining) }}</div></div>
+            <div><div class="label">Profit goal</div><div class="value">${{ '{:,.2f}'.format(a.effective_profit_target) }}</div></div>
+            <div><div class="label">Closed trades</div><div class="value">{{ a.trade_count }}{% if a.win_rate is not none %} · {{ (a.win_rate * 100)|round|int }}% wins{% endif %}</div></div>
+            <div><div class="label">Today</div><div class="value {{ 'negative' if a.current_day_pnl < 0 else 'positive' if a.current_day_pnl > 0 else '' }}">${{ '{:,.2f}'.format(a.current_day_pnl) }}</div></div>
+          </div>
+          <div class="progress" role="progressbar" aria-label="Profit goal progress" aria-valuenow="{{ a.progress_pct }}" aria-valuemin="0" aria-valuemax="100"><span style="width:{{ a.progress_pct }}%"></span></div>
+          {% if a.position %}<div class="detail position"><strong>{{ a.position_side }} {{ a.position.quantity }} MES @ {{ a.position.entry_price }}</strong><p>Stop {{ a.position.stop_price }} · Target {{ a.position.target_price }}</p></div>
+          {% elif a.pending %}<div class="detail position"><strong>{{ a.pending.signal }} awaiting the next eligible fill</strong><p>Size {{ a.pending.size }}</p></div>
+          {% endif %}
+          <div class="detail"><strong>Latest decision: {{ a.latest_decision.signal if a.latest_decision else 'None yet' }}</strong>
+            {% if a.latest_decision %}<p>{{ a.latest_decision.reason or 'No reason recorded.' }}</p><div class="minor">{{ a.latest_decision.received_time }} · {{ a.latest_decision.bar_time }} candle</div>{% else %}<p>Waiting for the first completed decision candle.</p>{% endif %}
+          </div>
+          <div class="footerline"><span>Last 1m candle: {{ a.last_bar_time or 'None yet' }}</span><span>{% if a.feed_age_minutes is not none %}{{ a.feed_age_minutes }} min ago{% endif %}</span></div>
+        </article>
+        {% else %}<p class="empty">No simulated accounts are registered yet.</p>{% endfor %}
+      </div>
+    </section>
+    <section aria-label="Recent closed trades"><div class="section-title"><h2>Recent closed trades</h2><p>Latest 30, from current account generations</p></div>
+      <div class="panel">{% if payload.trades %}<table><thead><tr><th>Closed</th><th>Account</th><th>Position</th><th>Result</th><th>Exit</th></tr></thead><tbody>
+        {% for t in payload.trades %}<tr><td>{{ t.exit_time }}</td><td>{{ t.account|capitalize }}</td><td>{{ t.direction|capitalize }} · {{ t.quantity }} MES</td><td class="{{ 'negative' if t.net_pnl < 0 else 'positive' if t.net_pnl > 0 else '' }}">${{ '{:,.2f}'.format(t.net_pnl) }}</td><td>{{ t.reason|replace('_',' ')|capitalize }}</td></tr>{% endfor %}
+      </tbody></table>{% else %}<div class="empty">No closed trades in the current runs.</div>{% endif %}</div>
+    </section>
+    <p class="note">Simulation figures reflect candle based fills and the current ledger rules. An open trade’s equity uses the most recent candle close.</p>
+  </main>
+</body>
+</html>

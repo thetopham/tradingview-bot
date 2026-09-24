@@ -90,3 +90,11 @@ On the Pi, keep these values in `/home/thetopham/.config/tradingview-bot-sim-res
 - The 5m, 15m, and 30m decision feeds are connected. Each new overseer was preflighted directly without submitting an order. The active one-minute feed advances fills and risk for all five accounts.
 - Keep the n8n header secret in its encrypted credential and the Pi environment file, never in exported workflow JSON. The original `tradingview-bot` service remains inactive; only `tradingview-bot-sim` runs.
 - The Pi's legacy `.env` points at an obsolete Supabase host. The result publisher uses a separate private environment file with the credential from the currently working n8n Supabase connection.
+
+## Simulated account dashboard
+
+`GET /sim/dashboard` shows every account in the v2 ledger, including new variants after the bridge restarts. It displays current equity, realized and open P&L, remaining maximum-loss room, profit-goal progress, position brackets, the latest decision, the last execution candle, and up to 30 recently closed trades. The page refreshes every 30 seconds. `GET /sim/dashboard/data` returns the same read-only snapshot as JSON. Neither endpoint queries ProjectX or Supabase. The existing `/dashboard` remains the legacy Supabase trade feed.
+
+Both new routes require `DASHBOARD_PASSWORD`; if it is unset they return 503. They should be published only over HTTPS or reached through an SSH tunnel. For the Pi tunnel, use `ssh -L 5001:127.0.0.1:5001 pi` and open `http://localhost:5001/sim/dashboard`. Use the dashboard password from the Pi's private simulator environment file. Browser user name is `dashboard`.
+
+The page reports the last one-minute candle even during market closure. A large age after the market closes is expected; compare the timestamp with market hours before treating it as a feed outage. Equity on open trades is marked from the most recent candle close.
