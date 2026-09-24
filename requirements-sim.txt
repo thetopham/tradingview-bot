@@ -6,4 +6,4 @@ pytz
 python-dateutil
 supabase
 gunicorn
-tradingview-bot-v2 @ git+https://github.com/thetopham/tradingview-bot-v2.git@675b7c9855acf8dd5c406825c724891a8f295c96
+tradingview-bot-v2 @ git+https://github.com/thetopham/tradingview-bot-v2.git@f37b3c2ddc38af70f1dcdcf3a666c29543d5a7a7
