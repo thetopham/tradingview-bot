@@ -57,12 +57,14 @@ class SimAdapter:
 
     def positions(self, account_id: int) -> list[dict[str, Any]]:
         name = self.name(account_id)
-        position = self.status(name)["position"]
+        snapshot = self.status(name)
+        position = snapshot["position"]
         if position is None:
             return []
         return [{"accountId": int(account_id), "contractId": SIM_CONTRACT,
                  "type": 1 if position["direction"] == 1 else 2,
                  "size": position["quantity"], "averagePrice": position["entry_price"],
+                 "profitAndLoss": round(snapshot["equity"] - snapshot["balance"], 2),
                  "creationTimestamp": position["entry_ts"]}]
 
     def open_orders(self, account_id: int) -> list[dict[str, Any]]:
@@ -72,10 +74,14 @@ class SimAdapter:
         orders = []
         pending = snapshot["pending"]
         if pending and pending.get("order_id"):
+            pending_side = (0 if pending["signal"] == "BUY" else 1
+                            if pending["signal"] == "SELL" else
+                            (1 if position and position["direction"] == 1 else 0))
             orders.append({"id": f"SIM-{pending['order_id']}",
                            "accountId": int(account_id), "contractId": SIM_CONTRACT,
-                           "type": 2, "side": 0 if pending["signal"] == "BUY" else 1,
-                           "size": pending["size"], "status": 1,
+                           "type": 2, "side": pending_side,
+                           "size": (position["quantity"] if pending["signal"] == "FLAT" and position
+                                    else pending["size"]), "status": 1,
                            "creationTimestamp": pending["source_bar_ts"]})
         if position is None:
             return orders
