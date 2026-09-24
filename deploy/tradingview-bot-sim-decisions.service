@@ -10,6 +10,6 @@ Group=thetopham
 WorkingDirectory=/home/thetopham/tradingview-bot-sim
 EnvironmentFile=/home/thetopham/.config/tradingview-bot-sim.env
 ExecStart=/home/thetopham/tradingview-bot-sim/.venv/bin/python scripts/run_sim_decisions.py
-TimeoutStartSec=240
+TimeoutStartSec=300
 NoNewPrivileges=true
 
