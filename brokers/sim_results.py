@@ -72,11 +72,19 @@ class SimResults:
             (account, row["generation"], source_bar),
         ).fetchone() if source_bar else None
         decision = json.loads(decision_event["payload_json"]) if decision_event else {}
+        broker_order_id = entry.get("order_id")
+        if broker_order_id and broker_order_id.startswith("SIM-"):
+            order_row = conn.execute("SELECT metadata_json FROM sim_order WHERE id=? AND account=?",
+                                     (int(broker_order_id[4:]), account)).fetchone()
+            if order_row:
+                decision = {**decision, **json.loads(order_row["metadata_json"])}
         variant_row = conn.execute(
             "SELECT variant_json FROM sim_account WHERE name=?", (account,)
         ).fetchone()
         variant = json.loads(variant_row["variant_json"]) if variant_row else {}
         fills = self.adapter.trade_fills(row, account_id)
+        if broker_order_id:
+            fills[0]["orderId"] = broker_order_id
         trace_id = f"sim:{account}:{row['generation']}:{row['id']}"
         ai_decision_id = decision.get("decision_id")
         try:

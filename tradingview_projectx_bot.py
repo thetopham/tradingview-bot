@@ -71,7 +71,8 @@ def tv_webhook():
 
     if BROKER_MODE == "sim":
         try:
-            result = process_sim_webhook(data)
+            result = (process_sim_webhook(data) if isinstance(data.get("bar"), dict)
+                      else process_sim_order_webhook(data))
         except (ValueError, KeyError, TypeError) as exc:
             logging.warning("Simulated webhook rejected: %s", exc)
             return jsonify(error=str(exc)), 422
@@ -111,6 +112,22 @@ def sim_results():
     except ValueError as exc:
         return jsonify(error=str(exc)), 422
     return jsonify(results=results, next_cursor=results[-1]["id"] if results else after_id)
+
+
+@app.route("/sim/broker-events", methods=["GET"])
+def sim_broker_events():
+    """Poll ProjectX/SignalR-shaped messages from the local broker ledger."""
+    if BROKER_MODE != "sim":
+        return jsonify(error="not found"), 404
+    if request.headers.get("X-Webhook-Secret") != WEBHOOK_SECRET:
+        return jsonify(error="unauthorized"), 403
+    try:
+        after_id = int(request.args.get("after_id", "0"))
+        limit = int(request.args.get("limit", "100"))
+        messages, next_cursor = get_sim_adapter().broker_events_after(after_id, limit)
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 422
+    return jsonify(events=messages, next_cursor=next_cursor)
 
 
 @app.route("/sim/feed", methods=["POST"])
@@ -210,6 +227,53 @@ def process_sim_webhook(data):
     if status["execution_timeframe"] != status["timeframe"]:
         return adapter.process_decision(account, str(bar["timestamp"]), decision)
     return adapter.process_closed_bar(account, bar, decision)
+
+
+def process_sim_order_webhook(data):
+    """Keep the scheduler's original webhook and overseer contract in sim mode."""
+    account = (data.get("account") or DEFAULT_ACCOUNT).lower()
+    if account not in ACCOUNTS:
+        raise ValueError(f"unknown simulated account: {account}")
+    adapter = get_sim_adapter()
+    recorded = data.get("decision")
+    if recorded is None:
+        ai_url = AI_TEST_ENDPOINTS.get(account)
+        if not ai_url:
+            raise ValueError("simulated order requires a decision or configured overseer")
+        recorded = ai_trade_decision(
+            account, data.get("strategy") or "simple", data.get("signal") or "HOLD",
+            data.get("symbol") or "MES", data.get("size", 1),
+            data.get("alert") or f"{adapter.status(account)['timeframe']} overseer",
+            ai_url, positions=adapter.positions(ACCOUNTS[account]),
+            position_context=adapter.account_context(account),
+        )
+        if not isinstance(recorded, dict) or recorded.get("error"):
+            return {"signal": "HOLD", "reason": "Overseer unavailable; holding",
+                    "account": account, "order": None}
+    if not isinstance(recorded, dict):
+        raise ValueError("decision must be an object")
+    signal = str(recorded.get("signal", "HOLD")).upper()
+    if signal not in {"BUY", "SELL", "HOLD", "FLAT"}:
+        raise ValueError("decision has invalid signal")
+    size = int(recorded.get("size", 1))
+    if size not in (1, 2, 3):
+        raise ValueError("decision size must be 1, 2, or 3")
+    if signal == "HOLD":
+        return {"signal": signal, "account": account, "order": None}
+    from uuid import uuid4
+    decision_id = recorded.get("ai_decision_id") or recorded.get("decision_id")
+    client_order_id = str(data.get("client_order_id") or
+                          (f"ai:{account}:{decision_id}" if decision_id else uuid4().hex))
+    metadata = {"decision_id": decision_id, "prompt_version": recorded.get("prompt_version"),
+                "reason": recorded.get("reason")}
+    if signal == "FLAT":
+        order = adapter.broker.submit_order(account, "FLAT", size, client_order_id,
+                                            metadata=metadata)
+    else:
+        order = adapter.submit_market_order(ACCOUNTS[account], 0 if signal == "BUY" else 1,
+                                            size, client_order_id, metadata)
+    return {"signal": signal, "account": account, "order": order,
+            "position": adapter.status(account)["position"]}
 
 def _invert_signal(signal: str) -> str:
     inverse_map = {"BUY": "SELL", "SELL": "BUY", "FLAT": "FLAT", "HOLD": "HOLD"}
