@@ -1,5 +1,7 @@
 # Broker Compatibility Layer Design
 
+> **Historical May design.** The running September simulator is documented in the [user guide](https://github.com/thetopham/tradingview-bot-v2/blob/main/documentation/user-guide.md) and [bridge runbook](sim-broker-bridge.md). This design's proposed modes and "current" statements describe the earlier planning state.
+
 Date: 2026-05-07
 Repo: `/home/thetopham/tradingview-bot`
 Status: design plus Milestone 1 dry-run proof

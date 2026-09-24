@@ -1,5 +1,7 @@
 # Trading Bot Coupling Audit: Broker, Market, Symbol, and Schema
 
+> **Historical May audit.** For the running Pi simulator, use the [user guide](https://github.com/thetopham/tradingview-bot-v2/blob/main/documentation/user-guide.md) and [bridge runbook](sim-broker-bridge.md). References below to the "current" ProjectX stack are observations from the audit date.
+
 Date: 2026-05-07
 Repo: `/home/thetopham/tradingview-bot`
 Scope: audit/report-only pass over the current TradingView bot, ProjectX/TopstepX broker integration, SignalR listener, Supabase logging/reporting paths, scanner/report scripts, and exported n8n workflows.

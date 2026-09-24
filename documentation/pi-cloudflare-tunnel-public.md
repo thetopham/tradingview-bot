@@ -1,5 +1,7 @@
 # Pi: Cloudflare Tunnel (cloudflared) — Public (GitHub-safe) Rebuild Guide
 
+> **Current simulator note (2026-09-24):** The generic ingress sample below documents the old alert host and is not a safe drop-in configuration for the running simulator. `sim.thetopham.com` exposes only the authenticated `/sim/dashboard` and `/sim/dashboard/data` routes on private Flask port 5001, with a host-specific 404 fallback. Keep webhook, feed, and broker endpoints private. See [the bridge runbook](../docs/sim-broker-bridge.md#simulated-account-dashboard) before changing tunnel ingress.
+
 Sanitized from local Pi snapshot doc (do NOT include tunnel creds/cert in GitHub).
 
 This guide documents how to expose services running on a Raspberry Pi through **Cloudflare Tunnel** using `cloudflared`

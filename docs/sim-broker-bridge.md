@@ -1,5 +1,7 @@
 # Plugging the v2 simulator into the legacy bot
 
+For dashboard use and a plain-language overview, start with the [user guide](https://github.com/thetopham/tradingview-bot-v2/blob/main/documentation/user-guide.md). This runbook describes the Pi simulator bridge; the historical ProjectX service is masked.
+
 The legacy bot's original broker boundary was `api.py` plus the SignalR listener. `BROKER_MODE=sim` uses the persistent `tradingview-bot-v2` SQLite ledger for account, position, bracket order, and trade-fill views. It accepts decisions through the existing `/webhook` route. In this mode, startup does not authenticate to ProjectX, launch SignalR, or start the legacy broker scheduler. Direct ProjectX API calls are rejected before authentication.
 
 The original ProjectX service on the Pi remains disabled. The separate `tradingview-bot-sim` bridge is active and uses only the simulated broker.
@@ -63,7 +65,7 @@ The bridge also renders `api.place_market`, account, position, open-order, trade
 
 `POST /sim/feed?source_table=tv_datafeed` accepts the one-minute MES rows for accounts whose `execution_timeframe` is `1m`. It advances fills, brackets, marked equity, and risk without calling an overseer. It rejects a `decisions` object. The row's `ts` is a post-close receipt timestamp; the normalizer assigns the preceding one-minute bar only when the receipt is at most 50 seconds after its minute boundary. A TradingView bar-open timestamp in the alert is preferable because a delayed receipt can otherwise be assigned to the wrong minute. The simulation's 1-minute OHLC cannot reveal the order of stop and target touches within the minute, so it charges the stop in that case.
 
-For a profile with 30-minute decisions and 1-minute execution, the 30-minute route records the ProDex decision separately and queues it for the first eligible one-minute bar **whose open follows the response time**. This prevents a delayed model response from receiving an earlier candle's open price. The original `epsilon` account remains a 30-minute execution baseline; `epsilon_1m` is a separate profile that can use the same ProDex workflow and a different execution feed.
+For a profile with 30-minute decisions and 1-minute execution, the 30-minute route records the ProDex decision separately and queues it for the first eligible one-minute bar **whose open follows the response time**. This prevents a delayed model response from receiving an earlier candle's open price. The running `epsilon` and `epsilon_vision` accounts both use this one-minute execution path. `epsilon_1m` is an older optional example profile for isolated experiments, not an additional live Pi account.
 
 The route fans the bar out to **every** configured account with the matching timeframe. Each account can call its own n8n overseer URL. For isolated replay, an optional `decisions` object may contain account-keyed decisions; production feed rows have none. The response lists account snapshots and any per-account errors. Retrying a bar is safe.
 
@@ -103,7 +105,7 @@ The numeric ProDex workflows insert successful decisions into Supabase `ai_tradi
 
 - The v2 ledger is authoritative for fills, fees, positions, trailing loss, and pass/fail events. The bridge renders ProjectX-shaped read views for the old dashboard/position manager without making a broker call.
 - Closed simulated trades are queued locally in `sim_result_outbox` and exposed through `/sim/results`. The separate publisher delivers them to local Supabase with an idempotent trace ID. The Pi's current manual smoke trade was verified in `trade_results`; it has no AI decision ID, so the `ai_trade_feed` join does not include it.
-- The 5m, 15m, and 30m decision feeds are connected. Each new overseer was preflighted directly without submitting an order. The active one-minute feed advances fills and risk for all five accounts.
+- The 5m, 15m, and 30m decision feeds are connected. The active one-minute feed advances fills and risk for all ten current accounts. The paired image workflows were separately checked for binary image delivery; see [the paired experiment](paired-chart-vision-experiment.md).
 - Keep the n8n header secret in its encrypted credential and the Pi environment file, never in exported workflow JSON. The original `tradingview-bot` service remains inactive; only `tradingview-bot-sim` runs.
 - The Pi's legacy `.env` points at an obsolete Supabase host. The result publisher uses a separate private environment file with the credential from the currently working n8n Supabase connection.
 

@@ -1,136 +1,40 @@
-# TradingView ProjectX Bot (AI Day Trader Overseer)
+# TradingView bot: simulator bridge and dashboard
 
-This repo runs a lightweight execution + observability layer for an “AI day trader” workflow:
+This repository runs the **Flask bridge** between TradingView/n8n and the [TradingView Bot v2 simulated broker](https://github.com/thetopham/tradingview-bot-v2). It retains the original ProjectX adapter for historical reference, but the Pi's active `tradingview-bot-sim.service` uses `BROKER_MODE=sim`. The original `tradingview_bot.service` is masked. The running setup places no real broker orders.
 
-- **TradingView / scheduler webhook** hits the bot (`/webhook`)
-- Bot gathers **position + risk context** and calls an **AI decision endpoint** (n8n workflow using vision LLMs)
-- Bot **executes** the resulting signal (currently `simple` market entries)
-- A **SignalR listener** watches broker events and logs **trade_results** on close
-- A **dashboard** displays decisions + outcomes, and the merged feed can be used to **train a future model**
+**Start here:** [User guide](https://github.com/thetopham/tradingview-bot-v2/blob/main/documentation/user-guide.md) · [Simulator bridge runbook](docs/sim-broker-bridge.md) · [Numeric versus chart trial](docs/paired-chart-vision-experiment.md) · [Pi services](documentation/pi-systemd.md)
 
-> Primary goal: produce a clean dataset that captures the full loop  
-> **(context → hypothesis/reasoning → action → result/PnL)**.
+## Use the running simulator
 
-## Components
+Open the [authenticated account dashboard](https://sim.thetopham.com/sim/dashboard). The browser username is `dashboard`; use the password set in the Pi's private simulator environment. The dashboard shows all registered accounts, positions, brackets, P&L, loss room, recent decisions, and closed trades. It is read-only.
 
-- `tradingview_projectx_bot.py` – Flask app, webhook handler, AI routing, strategy dispatch
-- `position_manager.py` – builds position + account context for the AI (no autonomous actions)
-- `strategies.py` – execution strategies (currently `simple`)
-- `signalr_listener.py` – listens to broker events; logs results when a position closes
-- `api.py` – ProjectX REST calls + Supabase logging helpers
-- `dashboard.py` + `dashboard.html` – UI and API endpoint for merged feed
-- `n8n/` – exported n8n workflows
-  - `n8n/overseers/` – overseer AI flows for different accounts/timeframes
-  - `n8n/chart_fetch/` – 5m/15m/30m prefetch helper flows
-  - `n8n/datafeeds/` – merged data feed exports
+The Pi currently runs five numeric ProDex strategies and five corresponding chart-image variants. Alpha, beta, and gamma decide on five-minute candles; delta on fifteen-minute candles; epsilon on thirty-minute candles. All ten receive the same closed **one-minute MES feed for fills, stops, targets, and risk checks**. The one-minute feed does not call ProDex. New independent demo accounts can be added without a software count limit, provided each has a profile and an overseer route.
 
-## Documentation
-
-The canonical docs entry point lives in [`documentation/README.md`](documentation/README.md).
-Key sections:
-
-- **Setup**: [Accounts & Market Access](documentation/README.md#2-accounts--market-access), [Infrastructure](documentation/README.md#4-infrastructure), [Environment Variables](documentation/README.md#16-environment-variables)
-- **Architecture**: [System Overview](documentation/README.md#1-system-overview), [Core Components](documentation/README.md#5-core-components)
-- **Operations**: [Scheduler](documentation/README.md#13-scheduler-apscheduler), [Logging & Observability](documentation/README.md#15-logging--observability), [Dashboard](documentation/README.md#14-dashboard)
-
-## Local setup
-
-### 1) Install
-
-```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+```text
+TradingView/n8n 1m feed -> POST /sim/feed -> v2 broker ledger
+TradingView/n8n 5m/15m/30m feed -> cached candle -> decision timer -> n8n ProDex
+ProDex decision -> queued broker order -> next eligible 1m open
+closed broker trade -> durable outbox -> Supabase trade_results
+ProDex decision -> Supabase ai_trading_log -> ai_trade_feed
 ```
 
-### 2) Environment variables
+The bridge exposes ProjectX-shaped account, order, position, trade, and broker-event views for legacy callers while reading and writing only the local v2 ledger. `/sim/broker-events` is an authenticated polling interface that replaces the data the old SignalR listener supplied; it is not a SignalR server. The public `sim.thetopham.com` tunnel is restricted to the authenticated dashboard routes, not the order or feed endpoints.
 
-Create a `.env` file (or set env vars in your runtime):
+## Repository roles
 
-Required:
+- `tradingview_projectx_bot.py`: Flask webhook, simulation feed/decision routes, and bridge setup.
+- `brokers/sim_adapter.py`, `brokers/sim_decision_feed.py`, and `brokers/sim_results.py`: v2 ledger compatibility, cached strategy candles, and result delivery.
+- `templates/` and dashboard modules: simulated account and legacy Supabase views.
+- `deploy/` and `scripts/`: Pi service units, decision timer, and result publisher.
+- `n8n/`: exported workflows and historical examples. Active n8n definitions and credentials live in the Pi instance; an exported JSON file is not proof of what is currently published.
+- `documentation/README.md`: historical ProjectX system reference. It is not the current simulator operating guide.
 
-- `TV_PORT` – Flask port
-- `WEBHOOK_SECRET` – shared secret for `/webhook`
-- `SUPABASE_URL`, `SUPABASE_KEY`
-- ProjectX / TopstepX credentials expected by `auth.py`
+The active Pi checkout is `/home/thetopham/tradingview-bot-sim`. Its simulator configuration is in a private environment file. The active v2 ledger is `/home/thetopham/tradingview-bot-v2/data/sim_broker_local.sqlite`. Use a separate database for local tests or replays. See the [bridge runbook](docs/sim-broker-bridge.md) for setup, account routing, one-minute timestamp requirements, brackets, durable result publishing, and dashboard access.
 
-Accounts:
+## Historical implementation
 
-- `ACCOUNT_beta=topstep-account-number-goes-here` (example)
-- `ACCOUNT_epsilon=...`
+The [original system documentation](documentation/README.md), [coupling audit](docs/trading-bot-coupling-audit.md), and [compatibility design](docs/broker-compatibility-layer.md) preserve how the ProjectX/TopstepX and SignalR bot worked and how migration was planned. They are historical references. Do not start the old ProjectX service to operate the simulator.
 
-### Account names and AI/n8n routing
+## Security
 
-- Accounts are configured via `ACCOUNT_<NAME>=<id>` environment variables (for example, `ACCOUNT_BETA=123456`).
-- The bot lowercases those suffixes (`beta`, `epsilon`, etc.) and uses them as account keys when routing webhook payloads.
-- By default, both `beta` and `epsilon` use the main AI endpoint `N8N_AI_URL`.
-- Optional overseer test URLs (`N8N_OVERSEER_URL_TEST1` … `N8N_OVERSEER_URL_TEST6`) let you direct specific accounts to alternate n8n workflows.
-  - **TEST1 is reserved for the `beta` account.**
-  - **TEST2 is reserved for the `alpha` account.**
-  - TEST3/TEST4/TEST5 map to `gamma`/`delta`/`epsilon` respectively.
-  - TEST6 maps to `practice`.
-- Each webhook run collects account positions and position context, sends them to the configured n8n flow, and follows the returned JSON signal (`BUY`/`SELL`/`HOLD`/`FLAT`) before executing the `simple` strategy.
-
-AI endpoint:
-
-- `N8N_AI_URL=https://.../webhook/simple` (example)
-- Optional per-timeframe chart prefetch URLs: `N8N_5MCHART_FETCH_URL`, `N8N_15MCHART_FETCH_URL`, `N8N_30MCHART_FETCH_URL`
-- Optional overseer test URLs: `N8N_OVERSEER_URL_TEST1` … `N8N_OVERSEER_URL_TEST6`
-
-Optional:
-
-- `OVERRIDE_CONTRACT_ID=CON.F.US.MES.H26` (forces MES contract; see `api.get_contract`)
-
-### 3) Run
-
-```bash
-python tradingview_projectx_bot.py
-```
-
-Then open:
-
-- Dashboard: `http://localhost:<TV_PORT>/dashboard`
-
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable tradingview_bot.service
-sudo systemctl start tradingview_bot.service
-sudo systemctl status tradingview_bot.service
-sudo journalctl -u tradingview_bot.service -f
-```
-after github updates
-```bash
-git pull
-sudo systemctl daemon-reload
-sudo systemctl restart tradingview_bot.service
-```
-
-
-
-## Supabase schema
-
-Three source tables exist:
-
-- `ai_trading_log` – AI decisions (account, symbol, signal, size, reason, urls)
-- `trade_results` – realized results on close (entry/exit/pnl, raw_trades, trace/session ids)
-- 'ai_trade_feed' - pulls data from ai_trading_log with ai hypothesis and entry data and pnl results from trade_results then displays on dashboard
-
-
-
-## Notes
-
-- Trade logging depends on SignalR close events. If you see missing results:
-  - Check `/tmp/trade_results_missing.jsonl` and `/tmp/trade_results_fallback.jsonl`
-  - Ensure the bot can query ProjectX trades (`/api/Trade/search`)
-- The AI workflow should output **valid JSON only** to avoid parser issues in n8n.
-
-### Trading hours (Mountain Time)
-
-- Daily flatten window: **2:05pm–4:00pm MT (Mon–Fri)**
-- Markets are closed/flat all day **Saturday**
-- **Sunday reopen: 4:00pm MT**
-
-## Safety
-
-This code executes real orders. Use a sim account first and add risk controls before trading live.
+Keep webhook secrets, Supabase keys, Chart-Img sessions, OAuth credentials, and dashboard passwords out of Git and workflow exports. The v2 broker is a research simulator; its balances and fills are not Topstep balances or executions.

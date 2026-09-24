@@ -1,13 +1,14 @@
 # TradingView ProjectX Bot – Full System Documentation
 
+> **Historical ProjectX reference.** This document records the original real-broker design. It is not the Pi's current operating procedure. The active system is the simulated broker: start with the [user guide](https://github.com/thetopham/tradingview-bot-v2/blob/main/documentation/user-guide.md), [bridge runbook](../docs/sim-broker-bridge.md), and [current Pi services](pi-systemd.md). The original `tradingview_bot.service` is masked.
+
 > **Purpose**: This document explains **everything required to recreate the TradingView ProjectX AI trading system** from scratch — infrastructure, accounts, data flows, AI logic, scheduling, storage, risk rules, and dashboards.
 
 This is written as a **build-from-zero reference**, not marketing copy.
 
 ## Documentation index (authoritative)
 
-This file is the **canonical entry point** for documentation. Link here from other docs
-to avoid duplication.
+This file is the entry point for the **historical ProjectX design**. Use the links above for the running simulator.
 
 - **Setup**: [Accounts & Market Access](#2-accounts--market-access), [Infrastructure](#4-infrastructure), [Environment Variables](#16-environment-variables)
 - **Architecture**: [System Overview](#1-system-overview), [Core Components](#5-core-components), [Chart Image Pipeline](#5-3-chart-image-pipeline)

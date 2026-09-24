@@ -1,184 +1,35 @@
-## Pi: systemd services + timers
+# Pi simulator services
 
-This project runs as a **systemd service** on the Raspberry Pi and uses **systemd timers** for:
-1) a scheduled daily restart of the bot service  
-2) an hourly log upload/prune job to Supabase  
+This describes the running **simulation** service set, checked on 2026-09-24. The old `tradingview_bot.service`, its restart and log timers, and the ProjectX/SignalR path are masked. Do not start them to operate the simulator. For dashboard use, see the [user guide](https://github.com/thetopham/tradingview-bot-v2/blob/main/documentation/user-guide.md).
 
-All units live in: `/etc/systemd/system/`
+| Unit | Job | Current schedule |
+| --- | --- | --- |
+| `tradingview-bot-sim.service` | Flask bridge and authenticated dashboard, port 5001 | Long-running, enabled |
+| `tradingview-bot-sim-decisions.timer` | Checks cached 5m/15m/30m candles and calls each configured overseer once per fresh candle | Every minute at about `:05` |
+| `tradingview-bot-sim-results.timer` | Retries closed-trade delivery from local outbox to Supabase | Every minute |
+| `tvbot-strategy-farm.timer` | Read-only five-minute indicator screen and immutable report | Weekdays near 09:00 America/Denver |
 
----
+n8n runs in Docker on the Pi, with a local health endpoint on port 5678. The one-minute n8n datafeed advances broker fills and stops directly through the private Flask `/sim/feed` route; it does not call ProDex. The decision timer only calls ProDex when a fresh strategy candle is available. The strategy farm is separate from broker orders.
 
-### `tradingview_bot.service` (main bot)
+The bridge checkout is `/home/thetopham/tradingview-bot-sim`; the v2 checkout is `/home/thetopham/tradingview-bot-v2`. The service loads `/home/thetopham/.config/tradingview-bot-sim.env` privately and points at the v2 ledger `data/sim_broker_local.sqlite`. Result publishing uses its own private environment file. Never print or commit either file's contents. The published dashboard host exposes only `/sim/dashboard` and `/sim/dashboard/data`; broker routes remain private.
 
-**File:** `/etc/systemd/system/tradingview_bot.service`
+## Health and logs
 
-**Purpose:** Runs the TradingView AI Overseer bot as a long-running service.
-
-**Key settings:**
-- Runs as user/group: `thetopham`
-- Working directory: `/home/thetopham/tradingview-bot`
-- Loads env vars from: `/home/thetopham/tradingview-bot/.env`
-- Forces log settings:
-  - `LOG_FILE=/tmp/tradingview_projectx_bot.log`
-  - `LOG_LEVEL=INFO`
-- Starts the app:
-  - `/home/thetopham/tradingview-bot/venv/bin/python3 /home/thetopham/tradingview-bot/tradingview_projectx_bot.py`
-- Restart policy:
-  - `Restart=always`
-  - `RestartSec=5s`
-- Output:
-  - `StandardOutput=journal` (so logs also appear in `journalctl`)
-  - file logging still handled by the app via `LOG_FILE`
-
-**Unit content:**
-```ini
-[Unit]
-Description=TradingView AI Overseer Bot
-After=network.target
-
-[Service]
-User=thetopham
-Group=thetopham
-WorkingDirectory=/home/thetopham/tradingview-bot
-EnvironmentFile=/home/thetopham/tradingview-bot/.env
-Environment=LOG_FILE=/tmp/tradingview_projectx_bot.log
-Environment=LOG_LEVEL=INFO
-ExecStart=/home/thetopham/tradingview-bot/venv/bin/python3 /home/thetopham/tradingview-bot/tradingview_projectx_bot.py
-Restart=always
-RestartSec=5s
-StartLimitIntervalSec=0
-Type=simple
-StandardOutput=journal
-StandardError=inherit
-
-[Install]
-WantedBy=multi-user.target
-```
-
----
-
-### `tradingview_bot-restart.timer` + `tradingview_bot-restart.service` (scheduled restart)
-
-**Files:**
-- `/etc/systemd/system/tradingview_bot-restart.timer`
-- `/etc/systemd/system/tradingview_bot-restart.service`
-
-**Purpose:** Restarts `tradingview_bot.service` on a schedule (health/hygiene).
-
-**Schedule:**
-- Mon–Fri at **15:35:00 America/Denver**
-- Sun at **15:35:00 America/Denver**
-- `Persistent=true` (if the Pi was off, it runs the missed schedule on boot)
-- `AccuracySec=1s`
-
-**Timer content:**
-```ini
-[Unit]
-Description=Restart tradingview_bot.service at 15:35 (America/Denver) on trading days
-
-[Timer]
-OnCalendar=Mon..Fri *-*-* 15:35:00
-OnCalendar=Sun *-*-* 15:35:00
-Persistent=true
-AccuracySec=1s
-
-[Install]
-WantedBy=timers.target
-```
-
-**Service content:**
-```ini
-[Unit]
-Description=Scheduled restart of tradingview_bot.service
-
-[Service]
-Type=oneshot
-ExecStart=/bin/systemctl restart tradingview_bot.service
-```
-
----
-
-### `tradingview_botlog.timer` + `tradingview_botlog.service` (hourly log upload + prune)
-
-**Files:**
-- `/etc/systemd/system/tradingview_botlog.timer`
-- `/etc/systemd/system/tradingview_botlog.service`
-
-**Purpose:** Uploads & prunes bot logs to Supabase (runs `upload_botlog.py`).
-
-**Schedule:**
-- `OnCalendar=hourly`
-- `Persistent=true`
-
-**Timer content:**
-```ini
-[Unit]
-Description=Hourly uploader for trading bot logs
-
-[Timer]
-OnCalendar=hourly
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-**Service content:**
-```ini
-[Unit]
-Description=Upload & prune trading bot logs (Supabase)
-
-[Service]
-Type=oneshot
-User=thetopham
-WorkingDirectory=/home/thetopham/tradingview-bot
-EnvironmentFile=/home/thetopham/tradingview-bot/.env
-ExecStart=/home/thetopham/tradingview-bot/venv/bin/python /home/thetopham/tradingview-bot/upload_botlog.py
-```
-
----
-
-## Ops commands (runbook)
-
-### Service control
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable tradingview_bot.service
-sudo systemctl start tradingview_bot.service
-sudo systemctl restart tradingview_bot.service
-sudo systemctl status tradingview_bot.service
+systemctl is-active tradingview-bot-sim.service tradingview-bot-sim-decisions.timer tradingview-bot-sim-results.timer tvbot-strategy-farm.timer
+systemctl list-timers --all | grep -E 'tradingview-bot-sim|tvbot-strategy-farm'
+curl -fsS http://127.0.0.1:5001/healthz
+curl -fsS http://127.0.0.1:5678/healthz
+journalctl -u tradingview-bot-sim.service -n 100 --no-pager
+journalctl -u tradingview-bot-sim-decisions.service -n 100 --no-pager
+journalctl -u tradingview-bot-sim-results.service -n 100 --no-pager
+journalctl -u tvbot-strategy-farm.service -n 100 --no-pager
 ```
 
-##after github updates
-```bash
-git pull
-sudo systemctl daemon-reload
-sudo systemctl restart tradingview_bot.service
-```
+At the 2026-09-24 check, the simulator service and three timers were active; both local health endpoints returned HTTP 200. A stopped market can make the last one-minute candle old without indicating an outage. During market hours, inspect the feed workflow and timestamp if the candle stops advancing.
 
-### Logs (systemd journal)
-```bash
-sudo journalctl -u tradingview_bot.service -f
-sudo journalctl -u tradingview_botlog.service -n 200 --no-pager
-sudo journalctl -u tradingview_bot-restart.service -n 200 --no-pager
-```
+## Updating a checkout
 
-### Logs (file)
-```bash
-ls -lah /tmp/tradingview_projectx_bot.log*
-tail -n 200 /tmp/tradingview_projectx_bot.log
-```
+Pull reviewed code in the relevant Pi checkout. Documentation-only changes need **no service restart**. For Python bridge changes, verify that the v2 package installed in the bridge virtual environment still resolves to the v2 checkout before restarting `tradingview-bot-sim.service`. For a new account, initialize its profile in the v2 ledger, set a private `N8N_OVERSEER_URL_<ACCOUNT>` route, then restart the bridge so it reloads the account map. See the [bridge runbook](../docs/sim-broker-bridge.md) for the full sequence. Do not reset the live ledger or start the masked ProjectX units.
 
-### Timers
-```bash
-systemctl list-timers --all | grep -i trading
-systemctl status tradingview_botlog.timer
-systemctl status tradingview_bot-restart.timer
-```
-
-### Common troubleshooting
-```bash
-systemctl --failed --type=service
-sudo journalctl -u tradingview_bot.service -n 300 --no-pager
-systemctl cat tradingview_bot.service
-```
+The historical ProjectX service design is preserved in Git history and the [original system reference](README.md); it is not an operating procedure for this Pi setup.

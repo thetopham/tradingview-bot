@@ -1,5 +1,7 @@
 # Paired numeric and chart-image simulator trial
 
+For everyday dashboard use and fill interpretation, see the [user guide](https://github.com/thetopham/tradingview-bot-v2/blob/main/documentation/user-guide.md). Validation below records the initial 2026-09-24 setup, not a continuously refreshed performance result.
+
 The Pi runs five existing numeric ProDex strategies and five separate chart-image variants. Each pair keeps the same decision cadence, MES bracket choices, 50K Combine rules, and one-minute execution feed. Chart imagery is the intended model-input difference. This is simulated trading only.
 
 | Pair | Decision bar | Numeric account | Image account |
