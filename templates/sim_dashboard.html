@@ -27,7 +27,10 @@
     .metric .hint { color:var(--muted); font-size:12px; margin-top:3px }
     .section-title { display:flex; justify-content:space-between; gap:12px; align-items:baseline; margin-bottom:15px }
     .section-title p { color:var(--muted); margin:0; font-size:13px }
-    .accounts { display:grid; grid-template-columns:repeat(auto-fit,minmax(310px,1fr)); gap:16px; margin-bottom:32px }
+    .accounts { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr)); gap:16px; margin-bottom:32px }
+    .account[hidden] { display:none }
+    .search { width:min(100%,320px); border:1px solid var(--line); background:white; border-radius:10px; padding:9px 12px; color:var(--ink); font:inherit }
+    .search:focus { outline:2px solid #8aa5ff; outline-offset:2px }
     .account { padding:21px; min-width:0 }
     .account-top { display:flex; justify-content:space-between; gap:10px; align-items:flex-start }
     .subtle { color:var(--muted); font-size:13px }
@@ -75,9 +78,10 @@
     </section>
     <section aria-label="Account details">
       <div class="section-title"><h2>Accounts</h2><p>One minute candles drive fills and stops</p></div>
+      <label class="subtle" for="account-search">Find an account</label><br><input class="search" id="account-search" type="search" placeholder="Search by name or strategy" autocomplete="off" style="margin:6px 0 17px">
       <div class="accounts">
         {% for a in payload.accounts %}
-        <article class="account">
+        <article class="account" data-search="{{ a.account }} {{ a.strategy_id }} {{ a.status }}">
           <div class="account-top"><div><h3>{{ a.account|capitalize }}</h3><div class="subtle">{{ a.strategy_id }} · {{ a.timeframe }} decisions · {{ a.execution_timeframe }} fills</div></div><span class="badge {{ 'paused' if a.manual_paused else a.status }}">{{ 'Paused' if a.manual_paused else a.status }}</span></div>
           <div class="balance">${{ '{:,.2f}'.format(a.equity) }}</div><div class="balance-label">Current equity</div>
           <div class="pnl {{ 'negative' if a.net_pnl < 0 else 'positive' if a.net_pnl > 0 else '' }}">{{ '+' if a.net_pnl > 0 else '' }}${{ '{:,.2f}'.format(a.net_pnl) }} realized · {{ '+' if a.unrealized_pnl > 0 else '' }}${{ '{:,.2f}'.format(a.unrealized_pnl) }} open</div>
@@ -106,5 +110,17 @@
     </section>
     <p class="note">Simulation figures reflect candle based fills and the current ledger rules. An open trade’s equity uses the most recent candle close.</p>
   </main>
+  <script>
+    const search = document.getElementById('account-search');
+    const accounts = [...document.querySelectorAll('.account')];
+    search.value = sessionStorage.getItem('sim-account-search') || '';
+    function filterAccounts() {
+      const query = search.value.trim().toLowerCase();
+      for (const account of accounts) account.hidden = !account.dataset.search.toLowerCase().includes(query);
+      sessionStorage.setItem('sim-account-search', search.value);
+    }
+    search.addEventListener('input', filterAccounts);
+    filterAccounts();
+  </script>
 </body>
 </html>
