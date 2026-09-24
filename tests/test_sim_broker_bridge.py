@@ -128,6 +128,22 @@ def test_scheduler_webhook_queues_broker_order_for_one_minute_fill(one_minute_si
     assert client.get(f"/sim/broker-events?after_id={cursor}", headers=headers).json["events"] == []
 
 
+def test_projectx_broker_helpers_use_local_order_queue(one_minute_sim):
+    api = sys.modules["api"]
+    account_id = one_minute_sim.ACCOUNTS["epsilon"]
+    contract = api.get_contract("MES")
+    assert api.search_accounts()[0]["id"] == account_id
+    assert api.search_pos(account_id) == []
+    queued = api.place_market(account_id, contract, 0, 1,
+                              client_order_id="api-order-1")
+    assert queued["orderId"].startswith("SIM-")
+    assert api.search_open(account_id)[0]["id"] == queued["orderId"]
+    assert api.cancel(account_id, queued["orderId"]) == {"success": True}
+    assert api.search_open(account_id) == []
+    with pytest.raises(RuntimeError, match="disabled"):
+        api.post("/api/Order/place", {"accountId": account_id})
+
+
 def test_sim_webhook_persists_next_bar_fill_without_live_broker(legacy_sim, monkeypatch):
     bot = legacy_sim
     assert "signalr_listener" not in sys.modules
