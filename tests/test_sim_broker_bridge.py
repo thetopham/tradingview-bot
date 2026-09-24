@@ -82,6 +82,19 @@ def test_one_minute_feed_advances_execution_without_calling_overseer(one_minute_
         assert conn.execute("SELECT count(*) FROM sim_bar").fetchone()[0] == 1
 
 
+def test_sim_feed_account_selection_preserves_old_baselines(legacy_sim, monkeypatch):
+    monkeypatch.setitem(legacy_sim.config, "SIM_FEED_ACCOUNTS", {"epsilon"})
+    row = {"ts": "2026-09-22T14:30:06Z", "timeframe": "30", "symbol": "MES",
+           "o": 6000, "h": 6001, "l": 5999, "c": 6000, "v": 100,
+           "decisions": {"epsilon": {"signal": "HOLD", "size": 1}}}
+    response = legacy_sim.app.test_client().post(
+        "/sim/feed?source_table=tv_datafeed_30m", json=row,
+        headers={"X-Webhook-Secret": "test-only"})
+    assert response.status_code == 200
+    assert set(response.json["accounts"]) == {"epsilon"}
+    assert legacy_sim.get_sim_adapter().status("zeta")["last_bar_ts"] is None
+
+
 def test_sim_webhook_persists_next_bar_fill_without_live_broker(legacy_sim, monkeypatch):
     bot = legacy_sim
     assert "signalr_listener" not in sys.modules

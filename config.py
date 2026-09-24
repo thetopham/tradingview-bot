@@ -62,6 +62,13 @@ def load_config():
     }
     if not config['ACCOUNTS']:
         raise RuntimeError("No accounts loaded from .env. Add ACCOUNT_<NAME>=<ID>.")
+    feed_accounts = {
+        name.strip().lower() for name in os.getenv("SIM_FEED_ACCOUNTS", "").split(",")
+        if name.strip()
+    }
+    if broker_mode == "sim" and feed_accounts - config['ACCOUNTS'].keys():
+        raise RuntimeError("SIM_FEED_ACCOUNTS contains unknown simulated accounts")
+    config['SIM_FEED_ACCOUNTS'] = feed_accounts
     config['DEFAULT_ACCOUNT'] = next(iter(config['ACCOUNTS']))
     config['OVERRIDE_CONTRACT_ID'] = (
         "CON.F.US.MES.SIM" if broker_mode == "sim"

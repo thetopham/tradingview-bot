@@ -17,9 +17,12 @@ TV_PORT=5001
 WEBHOOK_SECRET=<local secret>
 DASHBOARD_PASSWORD=<local password>
 SIM_MAX_BAR_LAG_SECONDS=600
+SIM_FEED_ACCOUNTS=practice_1m,delta_1m,epsilon_1m
 ```
 
 Simulation mode reads account names from the v2 ledger at startup. It assigns stable compatibility account IDs from SQLite row IDs, starting at 900001. Add accounts with the v2 `init --portfolio` command, then restart this legacy bridge to refresh its account map. Profile names must be lowercase for legacy webhook routing. New accounts can use `N8N_OVERSEER_URL_<ACCOUNT>`; the historical alpha through practice URL variables continue to work. `PROJECTX_*` settings are unused in sim mode.
+
+`SIM_FEED_ACCOUNTS` is an optional comma-separated set of accounts that receive live `/sim/feed` bars. Unknown names fail at startup. Leaving it empty retains all-account fanout. Set it to the active one-minute execution accounts when retaining older account ledgers as baselines. Their 5m, 15m, or 30m workflow calls the overseer once per closed decision candle; the one-minute feed advances only execution.
 
 `SIM_MAX_BAR_LAG_SECONDS` rejects stale bars in forward operation. Set it to `0` only for an isolated replay or test database.
 

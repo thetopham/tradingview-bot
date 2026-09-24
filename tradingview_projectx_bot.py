@@ -134,8 +134,10 @@ def sim_feed():
            "high": normalized["high"], "low": normalized["low"],
            "close": normalized["close"], "volume": normalized["volume"] or 0}
     execution_feed = source_table == "tv_datafeed"
+    enabled = config['SIM_FEED_ACCOUNTS']
     matching = [item["account"] for item in get_sim_adapter().ledger.status()
-                if item["execution_timeframe" if execution_feed else "timeframe"] == timeframe]
+                if (not enabled or item["account"] in enabled)
+                and item["execution_timeframe" if execution_feed else "timeframe"] == timeframe]
     if not matching:
         return jsonify(error=f"no simulated accounts use {timeframe}"), 422
     decisions = data.get("decisions") or {}
