@@ -38,6 +38,50 @@ def legacy_sim(tmp_path, monkeypatch):
         sys.modules.pop(name, None)
 
 
+@pytest.fixture
+def one_minute_sim(tmp_path, monkeypatch):
+    db = tmp_path / "sim.sqlite"
+    SimLedger(db).register((SimVariant("epsilon", "30m", "prodex_test",
+                                       {1: Bracket(1, 24, 48)}, "1m"),))
+    monkeypatch.setenv("BROKER_MODE", "sim")
+    monkeypatch.setenv("SIM_BROKER_DB", str(db))
+    monkeypatch.setenv("WEBHOOK_SECRET", "test-only")
+    monkeypatch.delenv("PROJECTX_BASE_URL", raising=False)
+    monkeypatch.delenv("PROJECTX_USERNAME", raising=False)
+    monkeypatch.delenv("PROJECTX_API_KEY", raising=False)
+    import logging_config
+    monkeypatch.setattr(logging_config, "setup_logging", lambda: None)
+    for name in ("tradingview_projectx_bot", "dashboard", "position_manager", "api", "auth", "config"):
+        sys.modules.pop(name, None)
+    bot = importlib.import_module("tradingview_projectx_bot")
+    yield bot
+    for name in ("tradingview_projectx_bot", "dashboard", "position_manager", "api", "auth", "config"):
+        sys.modules.pop(name, None)
+
+
+def test_one_minute_feed_advances_execution_without_calling_overseer(one_minute_sim, monkeypatch):
+    bot = one_minute_sim
+    monkeypatch.setattr(bot, "ai_trade_decision", lambda *args, **kwargs:
+                        (_ for _ in ()).throw(AssertionError("overseer called on 1m feed")))
+    client = bot.app.test_client()
+    base = {"symbol": "MES", "timeframe": "1", "o": 6000, "h": 6001,
+            "l": 5999, "c": 6000, "v": 100}
+    first = client.post("/sim/feed?source_table=tv_datafeed", json={**base,
+                        "ts": "2026-09-22T14:30:02Z"},
+                        headers={"X-Webhook-Secret": "test-only"})
+    assert first.status_code == 200
+    assert first.json["bar_ts"] == "2026-09-22T14:29:00+00:00"
+    assert first.json["accounts"]["epsilon"]["position"] is None
+    decision = client.post("/webhook", json={"secret": "test-only", "account": "epsilon",
+                           "bar": _bar("2026-09-22T14:00:00Z"),
+                           "decision": {"signal": "BUY", "size": 1}})
+    assert decision.status_code == 200
+    assert decision.json["account"]["pending"]["signal"] == "BUY"
+    with bot.get_sim_adapter().ledger.connection() as conn:
+        assert conn.execute("SELECT count(*) FROM sim_decision").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM sim_bar").fetchone()[0] == 1
+
+
 def test_sim_webhook_persists_next_bar_fill_without_live_broker(legacy_sim, monkeypatch):
     bot = legacy_sim
     assert "signalr_listener" not in sys.modules

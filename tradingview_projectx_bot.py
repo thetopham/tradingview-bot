@@ -122,7 +122,7 @@ def sim_feed():
         return jsonify(error="unauthorized"), 403
     data = request.get_json(silent=True) or {}
     source_table = request.args.get("source_table") or data.get("source_table")
-    if source_table not in {"tv_datafeed_5m", "tv_datafeed_15m", "tv_datafeed_30m"}:
+    if source_table not in {"tv_datafeed", "tv_datafeed_5m", "tv_datafeed_15m", "tv_datafeed_30m"}:
         return jsonify(error="source_table must identify a supported MES datafeed"), 422
     try:
         from tvbot_v2.feed.normalize import normalize_bar
@@ -133,20 +133,26 @@ def sim_feed():
     bar = {"timestamp": normalized["ts"], "open": normalized["open"],
            "high": normalized["high"], "low": normalized["low"],
            "close": normalized["close"], "volume": normalized["volume"] or 0}
+    execution_feed = source_table == "tv_datafeed"
     matching = [item["account"] for item in get_sim_adapter().ledger.status()
-                if item["timeframe"] == timeframe]
+                if item["execution_timeframe" if execution_feed else "timeframe"] == timeframe]
     if not matching:
         return jsonify(error=f"no simulated accounts use {timeframe}"), 422
     decisions = data.get("decisions") or {}
     if not isinstance(decisions, dict):
         return jsonify(error="decisions must be an account-keyed object"), 422
+    if execution_feed and decisions:
+        return jsonify(error="1m execution feed cannot carry decisions"), 422
     snapshots, errors = {}, {}
     for name in matching:
         envelope = {"account": name, "bar": bar}
         if name in decisions:
             envelope["decision"] = decisions[name]
         try:
-            snapshots[name] = process_sim_webhook(envelope)
+            if execution_feed:
+                snapshots[name] = get_sim_adapter().process_execution_bar(name, bar)
+            else:
+                snapshots[name] = process_sim_webhook(envelope)
         except (ValueError, KeyError, TypeError) as exc:
             errors[name] = str(exc)
     return jsonify(status="partial" if errors else "simulated", timeframe=timeframe,
@@ -173,7 +179,10 @@ def process_sim_webhook(data):
             raise ValueError("closed bar is too old for forward simulation")
     recorded = data.get("decision")
     if recorded is None:
-        prior = adapter.processed_snapshot(account, str(bar["timestamp"]))
+        status = adapter.status(account)
+        prior = (adapter.processed_decision(account, str(bar["timestamp"]))
+                 if status["execution_timeframe"] != status["timeframe"]
+                 else adapter.processed_snapshot(account, str(bar["timestamp"])))
         if prior is not None:
             return prior
         ai_url = AI_TEST_ENDPOINTS.get(account)
@@ -197,6 +206,9 @@ def process_sim_webhook(data):
     decision = dict(recorded)
     decision["size"] = int(decision.get("size", 1))
     decision.setdefault("source", "n8n_overseer" if AI_TEST_ENDPOINTS.get(account) else "webhook")
+    status = adapter.status(account)
+    if status["execution_timeframe"] != status["timeframe"]:
+        return adapter.process_decision(account, str(bar["timestamp"]), decision)
     return adapter.process_closed_bar(account, bar, decision)
 
 def _invert_signal(signal: str) -> str:
