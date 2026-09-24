@@ -1,0 +1,538 @@
+{
+  "name": "MES 5m beta ProDex numeric simulator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "simple5m-beta-sim-prodex",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1088,
+        368
+      ],
+      "id": "5d78d94d-8b5e-4719-89f9-91eb1ae7eca6",
+      "name": "Webhook",
+      "webhookId": "8ad931e8-b067-4d03-83b4-42c4ea411ba7"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "ai_trading_log",
+        "limit": 1,
+        "filterType": "string",
+        "filterString": "=account=eq.{{ $json.body.account }}&order=ai_decision_id.desc&limit=1"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -800,
+        368
+      ],
+      "id": "57c78e35-501b-473d-b70a-0ebe4db6e071",
+      "name": "Get many rows",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a91f16c2-6718-4c9a-b64e-14605fbf446a",
+              "name": "ai_decision_id",
+              "value": "={{ $json.ai_decision_id ?? 0 }}",
+              "type": "number"
+            },
+            {
+              "id": "27962e82-7e85-47ec-8768-7d9e9ad684fa",
+              "name": "signal",
+              "value": "={{ $json.signal || 'HOLD' }}",
+              "type": "string"
+            },
+            {
+              "id": "89685755-83de-4be6-9fbc-6e6a2f4aac88",
+              "name": "reason",
+              "value": "={{ $json.reason || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "111a91a0-86b9-4d6c-8386-2d29b295e6a5",
+              "name": "timestamp",
+              "value": "={{ $json.timestamp || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "02222c54-6f7f-4fe9-a384-5396a4c90d2d",
+              "name": "next_check",
+              "value": "={{ $json.next_check || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "5e6fd031-196d-4b15-8fa3-82bc50ebf52a",
+              "name": "invalidation",
+              "value": "={{ $json.invalidation || '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -592,
+        368
+      ],
+      "id": "a6c834ee-199d-4c6a-8b94-f74878b7bfef",
+      "name": "Edit Fields3"
+    },
+    {
+      "parameters": {
+        "jsCode": "const minutes = 5;\nconst boundary = minutes * 60 * 1000;\nconst expected = new Date(Math.floor(Date.now() / boundary) * boundary);\nreturn [{ json: { expected_ts: expected.toISOString() } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -304,
+        368
+      ],
+      "id": "5a44da43-e2de-470b-9c82-1b8d22cd853d",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "tv_datafeed_5m",
+        "limit": 5,
+        "filterType": "string",
+        "filterString": "select=ts,o,h,l,c,v,ema9,ema21,vwap,atr,macd_hist&symbol=eq.MES&order=ts.desc&limit=5"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        368
+      ],
+      "id": "2ba24cf2-f9e6-43e7-adba-27e12d8fe335",
+      "name": "Get datafeed_5m",
+      "credentials": {
+        "supabaseApi": {
+          "id": "fUsfaQL5LExxKLWU",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        128,
+        368
+      ],
+      "id": "0f6b2c85-257b-418d-983f-c4486339a5dd",
+      "name": "Aggregate1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 5m derived snapshot (n8n Code node)\n// Expects input shaped like: { data: [ ...rows... ] } where rows are from tv_datafeed (limit=5)\n\nconst rows = ($input.first().json.data || []).filter(Boolean);\nif (!rows.length) return [{ json: { error: \"No tv_datafeed rows\" } }];\n\n// Supabase returns ts DESC (newest first). Normalize to ASC for slope/momentum.\nrows.sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts));\n\nconst N = rows.length;\nconst first = rows[0];\nconst last = rows[N - 1];\nconst prev = rows[Math.max(N - 2, 0)];\n\nconst num = (x) => (x === null || x === undefined ? null : Number(x));\nconst r = (x) =>\n  (x === null || x === undefined || Number.isNaN(Number(x)))\n    ? null\n    : Math.round(Number(x) * 100) / 100;\n\n// Latest bar core values\nconst c = num(last.c);\nconst vwap = num(last.vwap);\nconst ema9 = num(last.ema9);\nconst ema21 = num(last.ema21);\nconst atr = num(last.atr);\n\nconst macd_last = num(last.macd_hist);\nconst macd_prev = num(prev.macd_hist);\nconst macd_first = num(first.macd_hist);\n\n// Deltas vs value / structure\nconst c_minus_vwap_pts = (c != null && vwap != null) ? (c - vwap) : null;\nconst c_minus_ema21_pts = (c != null && ema21 != null) ? (c - ema21) : null;\n\n// Slopes over N bars (oldest -> newest)\nconst first_c = num(first.c);\nconst last_c = num(last.c);\nconst first_ema9 = num(first.ema9);\nconst last_ema9 = num(last.ema9);\nconst first_ema21 = num(first.ema21);\nconst last_ema21 = num(last.ema21);\n\nconst c_slope_n = (last_c != null && first_c != null) ? (last_c - first_c) : null;\nconst ema9_slope_n = (last_ema9 != null && first_ema9 != null) ? (last_ema9 - first_ema9) : null;\nconst ema21_slope_n = (last_ema21 != null && first_ema21 != null) ? (last_ema21 - first_ema21) : null;\n\n// MACD deltas\nconst macd_delta_1 = (macd_last != null && macd_prev != null) ? (macd_last - macd_prev) : null;\nconst macd_delta_n = (macd_last != null && macd_first != null) ? (macd_last - macd_first) : null;\n\n// Rounded deltas for stable boolean logic\nconst macd_delta_1_r = r(macd_delta_1);\nconst macd_delta_n_r = r(macd_delta_n);\n\n// Flags\nconst macd_falling = (macd_delta_1_r != null) ? (macd_delta_1_r < 0) : null;\nconst macd_below_zero = (macd_last != null) ? (macd_last < 0) : null;\nconst ema_bearish = (ema9 != null && ema21 != null) ? (ema9 < ema21) : null;\n\n// Simple trend strength score (-3..+3)\nconst trend_score = Number(\n  (ema9 != null && ema21 != null ? Math.sign(ema9 - ema21) : 0) +\n  (ema9_slope_n != null ? Math.sign(ema9_slope_n) : 0) +\n  (macd_delta_n_r != null ? Math.sign(macd_delta_n_r) : 0)\n);\n\n// Direction-aware “momentum improved” booleans\nconst momentum_improved_long =\n  (macd_delta_1_r != null && macd_delta_1_r > 0) &&\n  (trend_score >= 2) &&\n  (ema_bearish === false);\n\nconst momentum_improved_short =\n  (macd_delta_1_r != null && macd_delta_1_r < 0) &&\n  (trend_score <= -2) &&\n  (ema_bearish === true);\n\n// Optional extra context (cheap + useful)\nconst ema_spread = (ema9 != null && ema21 != null) ? (ema9 - ema21) : null;\n\n// Brackets (points + $) — TP $60, SL $30, sized by contract count\nconst POINT_VALUE_USD = 5;\nconst brackets = {\n  1: { sl_pts: 6, tp_pts: 12 },\n  2: { sl_pts: 3, tp_pts: 6 },\n  3: { sl_pts: 2, tp_pts: 4 },\n};\n\nfor (const k of Object.keys(brackets)) {\n  const size = Number(k);\n  brackets[size].sl_usd = brackets[size].sl_pts * POINT_VALUE_USD * size;\n  brackets[size].tp_usd = brackets[size].tp_pts * POINT_VALUE_USD * size;\n}\n\n// ATR multiples\nconst atr_ok = (atr != null && atr > 0);\nconst tp_to_atr_size1 = atr_ok ? (brackets[1].tp_pts / atr) : null;\nconst sl_to_atr_size1 = atr_ok ? (brackets[1].sl_pts / atr) : null;\nconst tp_to_atr_size2 = atr_ok ? (brackets[2].tp_pts / atr) : null;\nconst sl_to_atr_size2 = atr_ok ? (brackets[2].sl_pts / atr) : null;\nconst tp_to_atr_size3 = atr_ok ? (brackets[3].tp_pts / atr) : null;\nconst sl_to_atr_size3 = atr_ok ? (brackets[3].sl_pts / atr) : null;\n\n// 5-bar series (transparent context; oldest->newest)\nconst series_n = rows.map(x => ({\n  ts: x.ts ?? null,\n  o: num(x.o),\n  h: num(x.h),\n  l: num(x.l),\n  c: num(x.c),\n  v: num(x.v),\n  ema9: num(x.ema9),\n  ema21: num(x.ema21),\n  vwap: num(x.vwap),\n  atr: num(x.atr),\n  macd_hist: num(x.macd_hist),\n}));\n\nreturn [{\n  json: {\n    // latest bar fields\n    ts: last.ts,\n    c,\n    ema9,\n    ema21,\n    vwap,\n    atr,\n    macd_hist: macd_last,\n\n    // continuity helpers\n    momentum_improved_long,\n    momentum_improved_short,\n\n    // short history\n    series_n,\n    series_len: N,\n\n    // slopes / deltas / flags\n    c_slope_n: r(c_slope_n),\n    ema9_slope_n: r(ema9_slope_n),\n    ema21_slope_n: r(ema21_slope_n),\n\n    macd_delta_1: macd_delta_1_r,\n    macd_delta_n: macd_delta_n_r,\n    macd_falling,\n    macd_below_zero,\n\n    ema_bearish,\n    trend_score,\n    ema_spread: r(ema_spread),\n\n    c_minus_vwap_pts: r(c_minus_vwap_pts),\n    c_minus_ema21_pts: r(c_minus_ema21_pts),\n\n    // ATR multiples\n    tp_to_atr_size1: r(tp_to_atr_size1),\n    sl_to_atr_size1: r(sl_to_atr_size1),\n    tp_to_atr_size2: r(tp_to_atr_size2),\n    sl_to_atr_size2: r(sl_to_atr_size2),\n    tp_to_atr_size3: r(tp_to_atr_size3),\n    sl_to_atr_size3: r(sl_to_atr_size3),\n\n    // bracket metadata\n    point_value_usd: POINT_VALUE_USD,\n    brackets,\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        368
+      ],
+      "id": "814d4f66-4350-49e2-80a1-ba2ef408ef17",
+      "name": "5m derived snapshot"
+    },
+    {
+      "parameters": {
+        "url": "http://192.168.0.35:8000/rest/v1/ai_trade_feed",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "account",
+              "value": "=eq.{{ $('Webhook').item.json.body.account }}"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            },
+            {
+              "name": "order",
+              "value": "exit_time.desc"
+            },
+            {
+              "name": "select",
+              "value": "exit_time,net_pnl,signal,size,ai_decision_id"
+            },
+            {
+              "name": "exit_time",
+              "value": "not.is.null"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        528,
+        368
+      ],
+      "id": "c5df07b2-4387-44ae-8826-b01c641b4fdd",
+      "name": "HTTP Request5",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const nowMs = Date.now();\nconst row = $input.first().json || null;\n\nconst parseTs = (t) => {\n  const ms = t ? Date.parse(t) : NaN;\n  return Number.isFinite(ms) ? ms : null;\n};\n\nconst exit_time = row?.exit_time ?? null;\nconst exitMs = parseTs(exit_time);\n\nconst minutes_since_last_close =\n  exitMs == null ? null : Math.round(((nowMs - exitMs) / 60000) * 10) / 10;\n\nconst pnlNum = row?.net_pnl == null ? null : Number(row.net_pnl);\n\nlet last_trade_outcome = null; // WIN | LOSS | BE | null\nif (pnlNum != null && Number.isFinite(pnlNum)) {\n  last_trade_outcome = pnlNum > 0 ? \"WIN\" : (pnlNum < 0 ? \"LOSS\" : \"BE\");\n}\n\nreturn [{\n  json: {\n    minutes_since_last_close,\n    last_trade_outcome,\n    last_trade_pnl: pnlNum,\n    last_trade_signal: row?.signal ?? null,\n    last_trade_size: row?.size ?? null,\n    last_trade_ai_decision_id: row?.ai_decision_id ?? null,\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        368
+      ],
+      "id": "fd8ccab3-c18a-4ba0-a67d-48e88ba60d09",
+      "name": "Continuity Context"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the trading overseer for MES (5-minute loop).\n\nVariant beta.\n\nYou ONLY decide:\n1) signal: BUY | SELL | HOLD | FLAT\n2) reason: plain English, no fluff\n3) size: 1 | 2 | 3\n4) next check message to future self\n\nWhen to enter:\nBreakout and retest only. Enter after price breaks a recent high or low, retests that level, and resumes. A breakout without a retest is HOLD.\n\nDefinitions:\n- BUY/SELL = enter or reverse position\n- HOLD = no action\n- FLAT = flatten current position (exit)\n\nRe-occuring process:\n- This process runs every 5 minutes.\n- Your decision should assume you will be asked again in ~5 minutes.\n- If uncertain, prefer HOLD and reassess next run.\n- If you include a “future self” note, keep it short and relevant for the next_check.\n- next_check must be ≤120 characters (one sentence).\n- next_check should describe what to look for next process, not a summary.\n\nUse only the numeric datafeed snapshot; no chart image is supplied.\n\nRisk/Bracket (informational):\nSL = -$30 \nTP = +$60 \n(Topstep changes point distance with size; risk stays ~$30) Use larger size only if tighter sl/tp fits current volatility/structure.\nSize meaning: choose bracket tightness (TP/SL distance), not leverage.\n\nBracket distances by size (SOURCE OF TRUTH = datafeed snapshot fields):\n- See: brackets (points + $) and bracket_summary in the JSON below.\n- You MUST choose size based on these exact distances. Do not invent SL/TP.\n\nDATAFEED + DERIVED (5m numeric, source of truth):\n{{ JSON.stringify($('5m derived snapshot').item.json, null, 2) }}\n\n\nCURRENT POSITION (source of truth):\nhas_position={{ $('Webhook').item.json.body.position_context.current_position.has_position }}\nside={{ $('Webhook').item.json.body.position_context.current_position.side || 'none' }}\ncontracts={{ $('Webhook').item.json.body.position_context.current_position.size }}\nunrealized_pnl=${{ $('Webhook').item.json.body.position_context.current_position.unrealized_pnl }}\nduration_mins={{ $('Webhook').item.json.body.position_context.current_position.duration_minutes }}\nwarnings={{ JSON.stringify($('Webhook').item.json.body.position_context.warnings || []) }}\n\n\nACCOUNT METRICS\naccount_balance={{ $('Webhook').item.json.body.position_context.account_metrics.account_balance }}\naccount_peak={{ $('Webhook').item.json.body.position_context.topstep.equity_peak_usd }}\ndrawdown_used={{ $('Webhook').item.json.body.position_context.topstep.trailing_dd_used_usd }}\ndrawdown_remaining={{ $('Webhook').item.json.body.position_context.topstep.trailing_dd_remaining_usd }}\ndaily_pnl={{ $('Webhook').item.json.body.position_context.account_metrics.daily_pnl }}\nwin_rate={{ $('Webhook').item.json.body.position_context.account_metrics.win_rate }}\nconsecutive_losses={{ $('Webhook').item.json.body.position_context.account_metrics.consecutive_losses }}\n\nACCOUNT RULES: Start $50k. If account_balance < $48k => failed. If account_balance > $50k, a $2k trailing stop applies (fail if drawdown_remaining <= $0). If drawdown_remaining is low, be selective about entries).\n\nCONTINUITY (last closed trade):\nminutes_since_last_close={{ $('Continuity Context').item.json.minutes_since_last_close || 'null' }}\nlast_trade_outcome={{ $('Continuity Context').item.json.last_trade_outcome || 'none' }}\nlast_trade_pnl={{ $('Continuity Context').item.json.last_trade_pnl || 'null' }}\nlast_trade_signal={{ $('Continuity Context').item.json.last_trade_signal || 'none' }}\n\nIf previous_next_check is non-empty, briefly state whether it is now satisfied; then proceed with the new decision. Do not copy it forward unless it still applies.\nIf signal is HOLD and you’re already in a position, next_check should focus on exit/flatten triggers (not entries).\nprevious_next_check={{ $('Edit Fields3').item.json.next_check || '' }}\n\nReason format (required):\n- reason: current thesis + current position/account data (NO invalidation here)\n- invalidation: one sentence describing what would make this wrong by next run \n- next_check: optional, ≤120 chars, one sentence\nIf previous_next_check is non-empty, respond with \"Prev check: satisfied/unsatisfied\"\n\n\nRETURN ONLY THIS JSON:\n{\n  \"timestamp\":\"{{ $now }}\",\n  \"strategy\":\"simple\",\n  \"timeframe\":\"5m\",\n  \"signal\":\"HOLD\",\n  \"symbol\":\"CON.F.US.MES.SIM\",\n  \"account\":\"{{ $('Webhook').item.json.body.account }}\",\n  \"size\": 1,\n  \"reason\":\"\",\n  \"invalidation\":\"\",\n  \"next_check\":\"\",\n  \"urls\":\"\",\n  \"prompt_version\":\"sim-5m-beta-prodex-v1\"\n}\n\n"
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [
+        2192,
+        368
+      ],
+      "id": "af6f69cc-0ede-43ca-bda4-c66ec067fb8a",
+      "name": "Basic LLM Chain",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-prodex.prodexChatModel",
+      "typeVersion": 2,
+      "position": [
+        2224,
+        560
+      ],
+      "id": "0bd8790f-14ab-4fd0-ae85-1e51abe32eb9",
+      "name": "ProDex Chat Model"
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $input.first().json.text;\n\n// Normalize to string\nraw = String(raw ?? \"\").trim();\n\n// Strip code fences if present\nraw = raw\n  .replace(/^```json\\s*/i, \"\")\n  .replace(/^```\\s*/i, \"\")\n  .replace(/```$/i, \"\")\n  .trim();\n\n// Try parse directly; if it fails, extract first {...} JSON block\nlet obj;\ntry {\n  obj = JSON.parse(raw);\n} catch (e) {\n  const start = raw.indexOf(\"{\");\n  const end = raw.lastIndexOf(\"}\");\n  if (start >= 0 && end > start) {\n    obj = JSON.parse(raw.slice(start, end + 1));\n  } else {\n    throw e;\n  }\n}\n\n// Hardening: make reason single-line\nif (typeof obj.reason === \"string\") {\n  obj.reason = obj.reason.replace(/\\r?\\n|\\r/g, \" \").replace(/\\s+/g, \" \").trim();\n}\n\n// Optional: enforce size as integer\nif (obj.size !== undefined) {\n  obj.size = Number.parseInt(obj.size, 10);\n}\n\n// Return as a proper n8n item\nreturn [{ json: obj }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2560,
+        368
+      ],
+      "id": "fdc40a8d-63af-44d4-84d2-e27be581d982",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "tableId": "ai_trading_log",
+        "dataToSend": "autoMapInputData"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2800,
+        368
+      ],
+      "id": "a86f2a12-6c75-492f-ac02-b73725506b1b",
+      "name": "Supabase",
+      "credentials": {
+        "supabaseApi": {
+          "id": "id8sHbOkjIgqTd0J",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7d733105-b0e5-4590-ba13-b908adce16f5",
+              "name": "ai_decision_id",
+              "value": "={{ $json.ai_decision_id }}",
+              "type": "number"
+            },
+            {
+              "id": "3e67b373-ce51-4c87-8289-696bf7fb3967",
+              "name": "strategy",
+              "value": "={{ $json.strategy }}",
+              "type": "string"
+            },
+            {
+              "id": "4dde2ce1-3ee9-4aea-a062-05f7f4c0cbc4",
+              "name": "signal",
+              "value": "={{ $json.signal }}",
+              "type": "string"
+            },
+            {
+              "id": "ccfff928-1534-4361-9503-869da76ddb84",
+              "name": "symbol",
+              "value": "={{ $json.symbol }}",
+              "type": "string"
+            },
+            {
+              "id": "dab5ee6a-35c8-43b2-833c-cc9dc6abc9e1",
+              "name": "account",
+              "value": "={{ $json.account }}",
+              "type": "string"
+            },
+            {
+              "id": "442178dc-509b-438c-96cd-83b5b7de5070",
+              "name": "size",
+              "value": "={{ $json.size }}",
+              "type": "string"
+            },
+            {
+              "id": "03ac8761-f64a-4b19-a875-a23712f08924",
+              "name": "reason",
+              "value": "={{ $json.reason }}",
+              "type": "string"
+            },
+            {
+              "id": "708379d8-d8ad-4fcc-8ce6-8d5047af084d",
+              "name": "prompt_version",
+              "value": "={{ $json.prompt_version }}",
+              "type": "string"
+            },
+            {
+              "id": "df320b9d-4eb1-47bc-8a1e-720bfc323d04",
+              "name": "next_check",
+              "value": "={{ $json.next_check }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3088,
+        368
+      ],
+      "id": "d5a85460-3665-4b1b-97e6-9f53b99bc216",
+      "name": "Build Response"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.2,
+      "position": [
+        3344,
+        368
+      ],
+      "id": "a1617d9c-4a0c-4db1-82ab-11f4b8c9f0e1",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get many rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many rows": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields3": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Get datafeed_5m",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get datafeed_5m": {
+      "main": [
+        [
+          {
+            "node": "Aggregate1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate1": {
+      "main": [
+        [
+          {
+            "node": "5m derived snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5m derived snapshot": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request5": {
+      "main": [
+        [
+          {
+            "node": "Continuity Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continuity Context": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ProDex Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "OpjLMCnGpfwKeXLW",
+    "binaryMode": "separate"
+  },
+  "versionId": "6691aeee-bca3-4f83-a03f-d51cba66940e",
+  "meta": null,
+  "id": "1449a84ff77e4f11",
+  "tags": []
+}

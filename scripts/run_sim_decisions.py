@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
@@ -16,7 +17,7 @@ def run_pending(bot, now: datetime | None = None) -> list[tuple[str, str]]:
         raise RuntimeError("sim scheduler requires BROKER_MODE=sim and SIM_DECISION_SOURCE=scheduler")
     now = now or datetime.now(timezone.utc)
     adapter = bot.get_sim_adapter()
-    done = []
+    ready = []
     for snapshot in adapter.ledger.status():
         account = snapshot["account"]
         if not bot.AI_TEST_ENDPOINTS.get(account):
@@ -24,9 +25,14 @@ def run_pending(bot, now: datetime | None = None) -> list[tuple[str, str]]:
         bar = latest_fresh(bot.config["SIM_BROKER_DB"], snapshot["timeframe"], now)
         if not bar or adapter.processed_decision(account, bar["timestamp"]) is not None:
             continue
-        result = bot.process_sim_webhook({"account": account, "bar": bar})
-        done.append((account, result["decision"]["signal"]))
-    return done
+        ready.append((account, bar))
+    if not ready:
+        return []
+    with ThreadPoolExecutor(max_workers=min(5, len(ready))) as pool:
+        futures = [pool.submit(bot.process_sim_webhook, {"account": account, "bar": bar})
+                   for account, bar in ready]
+        return [(account, future.result()["decision"]["signal"])
+                for (account, _), future in zip(ready, futures)]
 
 
 def main() -> int:

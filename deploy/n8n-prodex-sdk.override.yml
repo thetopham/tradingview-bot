@@ -1,0 +1,6 @@
+# Merge with the Pi's n8n-docker-caddy compose file if ProDex is used.
+# The source is the persistent n8n_data volume mountpoint on that Pi.
+services:
+  n8n:
+    volumes:
+      - /var/lib/docker/volumes/n8n_data/_data/nodes/node_modules/@openai:/usr/local/lib/node_modules/n8n/node_modules/@openai:ro
