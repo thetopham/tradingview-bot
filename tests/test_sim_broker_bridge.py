@@ -1,6 +1,7 @@
 """The legacy webhook can use v2 without ProjectX authentication or SignalR."""
 
 from datetime import datetime, timezone
+import base64
 import importlib
 import sys
 
@@ -13,6 +14,52 @@ from tvbot_v2.simulate.portfolio import Bracket, SimVariant
 def _bar(timestamp, *, low=5999, close=6000):
     return {"timestamp": timestamp, "open": 6000, "high": 6001,
             "low": low, "close": close, "volume": 100}
+
+
+def test_sim_dashboard_is_private_and_reads_all_current_accounts(legacy_sim, monkeypatch):
+    bot = legacy_sim
+    client = bot.app.test_client()
+    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+    assert client.get("/sim/dashboard").status_code == 503
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "dashboard-test")
+    assert client.get("/sim/dashboard").status_code == 401
+    bad = base64.b64encode(b"dashboard:wrong").decode()
+    assert client.get("/sim/dashboard/data", headers={"Authorization": f"Basic {bad}"}).status_code == 401
+
+    with bot.get_sim_adapter().ledger.connection() as conn:
+        conn.execute("UPDATE sim_account SET last_bar_ts=?,last_bar_close=? WHERE name='epsilon'",
+                     ("2026-09-22T14:30:00+00:00", 6001))
+        conn.execute("INSERT INTO sim_position(account,generation,direction,quantity,entry_price,"
+                     "entry_ts,stop_price,target_price) VALUES (?,?,?,?,?,?,?,?)",
+                     ("epsilon", 1, 1, 1, 6000, "2026-09-22T14:29:00+00:00", 5994, 6012))
+        conn.execute("INSERT INTO sim_decision(account,generation,bar_ts,input_hash,decision_json,"
+                     "available_at,snapshot_json) VALUES (?,?,?,?,?,?,?)",
+                     ("epsilon", 1, "2026-09-22T14:00:00+00:00", "test",
+                      '{"signal":"BUY","reason":"Breakout <script>alert(1)</script>"}',
+                      "2026-09-22T14:31:00+00:00", "{}"))
+        conn.execute("INSERT INTO sim_trade(account,generation,entry_ts,exit_ts,direction,quantity,"
+                     "entry_price,exit_price,gross_pnl,net_pnl,reason) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                     ("zeta", 1, "2026-09-22T14:00:00+00:00", "2026-09-22T14:30:00+00:00",
+                      "short", 1, 6000, 5990, 50, 47, "target"))
+        conn.execute("UPDATE sim_account SET balance=50047 WHERE name='zeta'")
+
+    good = base64.b64encode(b"dashboard:dashboard-test").decode()
+    headers = {"Authorization": f"Basic {good}"}
+    response = client.get("/sim/dashboard/data", headers=headers)
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.json["summary"]["total"] == 2
+    assert response.json["summary"]["open_positions"] == 1
+    accounts = {item["account"]: item for item in response.json["accounts"]}
+    assert accounts["epsilon"]["equity"] == 50005
+    assert accounts["epsilon"]["latest_decision"]["signal"] == "BUY"
+    assert accounts["zeta"]["trade_count"] == 1
+    assert response.json["trades"][0]["net_pnl"] == 47
+    page = client.get("/sim/dashboard", headers=headers)
+    assert page.status_code == 200
+    assert b"Zeta" in page.data
+    assert b"&lt;script&gt;" in page.data
+    assert b"<script>alert(1)</script>" not in page.data
 
 
 @pytest.fixture
