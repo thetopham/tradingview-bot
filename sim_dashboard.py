@@ -15,6 +15,7 @@ from flask import Blueprint, Response, jsonify, render_template, request
 
 sim_dashboard_bp = Blueprint("sim_dashboard", __name__, template_folder="templates")
 MOUNTAIN = ZoneInfo("America/Denver")
+SPLIT_TEST_START = "2026-09-24T07:00:00+00:00"
 
 
 @sim_dashboard_bp.before_request
@@ -62,6 +63,23 @@ def _dashboard_payload() -> dict:
             "ON a.name=t.account AND a.generation=t.generation "
             "ORDER BY t.id DESC LIMIT 30"
         ).fetchall()
+        by_account = {item["account"]: item for item in accounts}
+        pair_counts = {}
+        for name in ("alpha", "beta", "gamma", "delta", "epsilon"):
+            numeric, vision = by_account.get(name), by_account.get(f"{name}_vision")
+            if not numeric or not vision:
+                continue
+            pair_counts[name] = conn.execute(
+                "SELECT COUNT(*) AS matched, COALESCE(SUM(CASE WHEN "
+                "json_extract(n.decision_json, '$.signal') = "
+                "json_extract(v.decision_json, '$.signal') THEN 1 ELSE 0 END), 0) "
+                "AS agreed FROM sim_decision v JOIN sim_decision n ON "
+                "n.account=? AND n.generation=? AND n.bar_ts=v.bar_ts "
+                "WHERE v.account=? AND v.generation=? "
+                "AND v.available_at>=? AND n.available_at>=?",
+                (name, numeric["generation"], f"{name}_vision", vision["generation"],
+                 SPLIT_TEST_START, SPLIT_TEST_START),
+            ).fetchone()
     latest = {row["account"]: row for row in decisions}
     for account in accounts:
         row = latest.get(account["account"])
@@ -101,6 +119,8 @@ def _dashboard_payload() -> dict:
             "bar_time": (numeric_decision or vision_decision or {}).get("bar_time"),
             "numeric_equity": numeric["equity"],
             "vision_equity": vision["equity"],
+            "matched_decisions": pair_counts[name]["matched"],
+            "agreed_decisions": pair_counts[name]["agreed"],
         })
     trade_rows = [{**dict(row), "exit_time": _local_time(row["exit_ts"])} for row in trades]
     return {
