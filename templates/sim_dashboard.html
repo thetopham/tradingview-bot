@@ -76,6 +76,12 @@
       <div class="metric"><div class="label">Equity change</div><div class="value {{ 'negative' if payload.summary.equity_change < 0 else 'positive' if payload.summary.equity_change > 0 else '' }}">${{ '{:,.2f}'.format(payload.summary.equity_change) }}</div><div class="hint">Includes open position value</div></div>
       <div class="metric"><div class="label">Outcomes</div><div class="value">{{ payload.summary.passed }} / {{ payload.summary.failed }}</div><div class="hint">Passed / failed</div></div>
     </section>
+    {% if payload.pairs %}<section aria-label="Numeric and chart pairs" style="margin-bottom:30px">
+      <div class="section-title"><h2>Chart image split test</h2><p>Same strategy and one minute broker feed</p></div>
+      <div class="panel"><table><thead><tr><th>Strategy</th><th>Numeric decision</th><th>Image + numeric decision</th><th>Latest candle</th><th>Numeric equity</th><th>Image equity</th></tr></thead><tbody>
+        {% for pair in payload.pairs %}<tr><td><strong>{{ pair.name|capitalize }}</strong> · {{ pair.timeframe }}</td><td>{{ pair.numeric_signal or 'Waiting' }}</td><td>{{ pair.vision_signal or 'Waiting' }}</td><td>{{ 'Matched' if pair.same_bar else 'Waiting' }}{% if pair.bar_time %}<div class="subtle">{{ pair.bar_time }}</div>{% endif %}</td><td>${{ '{:,.2f}'.format(pair.numeric_equity) }}</td><td>${{ '{:,.2f}'.format(pair.vision_equity) }}</td></tr>{% endfor %}
+      </tbody></table><p class="note">The numeric accounts have earlier trading history, so these equity values are snapshots rather than a fair performance ranking. Compare forward decisions on matched candles.</p></div>
+    </section>{% endif %}
     <section aria-label="Account details">
       <div class="section-title"><h2>Accounts</h2><p>One minute candles drive fills and stops</p></div>
       <label class="subtle" for="account-search">Find an account</label><br><input class="search" id="account-search" type="search" placeholder="Search by name or strategy" autocomplete="off" style="margin:6px 0 17px">

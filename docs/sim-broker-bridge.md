@@ -2,7 +2,7 @@
 
 The legacy bot's original broker boundary was `api.py` plus the SignalR listener. `BROKER_MODE=sim` uses the persistent `tradingview-bot-v2` SQLite ledger for account, position, bracket order, and trade-fill views. It accepts decisions through the existing `/webhook` route. In this mode, startup does not authenticate to ProjectX, launch SignalR, or start the legacy broker scheduler. Direct ProjectX API calls are rejected before authentication.
 
-The legacy service on the Pi remains disabled. The bridge is intended to run as a separate local instance until the feed and result dispatch are validated.
+The original ProjectX service on the Pi remains disabled. The separate `tradingview-bot-sim` bridge is active and uses only the simulated broker.
 
 ## Configuration
 
@@ -12,19 +12,19 @@ On the Pi, the bridge virtual environment uses an editable install of `/home/the
 
 ```text
 BROKER_MODE=sim
-SIM_BROKER_DB=/home/thetopham/tradingview-bot-v2/data/sim_broker.sqlite
+SIM_BROKER_DB=/home/thetopham/tradingview-bot-v2/data/sim_broker_local.sqlite
 TV_PORT=5001
 WEBHOOK_SECRET=<local secret>
 DASHBOARD_PASSWORD=<local password>
 SIM_MAX_BAR_LAG_SECONDS=600
-SIM_DECISION_SOURCE=feed
+SIM_DECISION_SOURCE=scheduler
 ```
 
 Simulation mode reads account names from the v2 ledger at startup. It assigns stable compatibility account IDs from SQLite row IDs, starting at 900001. Add accounts with the v2 `init --portfolio` command, then restart this legacy bridge to refresh its account map. Profile names must be lowercase for legacy webhook routing. New accounts can use `N8N_OVERSEER_URL_<ACCOUNT>`; the historical alpha through practice URL variables continue to work. `PROJECTX_*` settings are unused in sim mode.
 
 `SIM_MAX_BAR_LAG_SECONDS` rejects stale bars in forward operation. Set it to `0` only for an isolated replay or test database.
 
-For the Pi's separate decision scheduler, set `SIM_DECISION_SOURCE=scheduler` and install `deploy/tradingview-bot-sim-decisions.service` and `.timer`. The 5-minute, 15-minute, and 30-minute n8n datafeeds forward their saved candles; `/sim/feed` caches them without calling the AI. Each timer run checks for a fresh cached candle and invokes each configured overseer once per account and candle. Eligible accounts run concurrently so a 30-minute boundary can handle all five without serial model delays. The resulting decision enters the local broker and is filled from the next eligible one-minute bar. This setting avoids running both the feed and scheduler as decision triggers. Accounts without configured overseer URLs are skipped. The old live-broker scheduler and its chart jobs remain disabled.
+For the Pi's separate decision scheduler, set `SIM_DECISION_SOURCE=scheduler` and install `deploy/tradingview-bot-sim-decisions.service` and `.timer`. The 5-minute, 15-minute, and 30-minute n8n datafeeds forward their saved candles; `/sim/feed` caches them without calling the AI. Each timer run checks for a fresh cached candle and invokes each configured overseer once per account and candle. Eligible accounts run concurrently so a 30-minute boundary can handle all ten without serial model delays. The resulting decision enters the local broker and is filled from the next eligible one-minute bar. This setting avoids running both the feed and scheduler as decision triggers. Accounts without configured overseer URLs are skipped. The old live-broker scheduler remains disabled.
 
 ## Webhook contract
 
@@ -67,13 +67,13 @@ For a profile with 30-minute decisions and 1-minute execution, the 30-minute rou
 
 The route fans the bar out to **every** configured account with the matching timeframe. Each account can call its own n8n overseer URL. For isolated replay, an optional `decisions` object may contain account-keyed decisions; production feed rows have none. The response lists account snapshots and any per-account errors. Retrying a bar is safe.
 
-On the Pi, the published `datafeed_5m`, `datafeed_15m`, and `datafeed_30m` workflows forward their inserted Supabase rows to this route with a dedicated n8n Header Auth credential. The bridge binds to Pi loopback and the private n8n Docker gateway at port 5001. Epsilon calls `MES 30m ProDex numeric simulator`; alpha, beta, gamma, and delta call the simulator-only numeric ProDex workflows in `n8n/sim/`. They use the local feed and continuity lookup and exclude the expired chart-image service. The old chart workflows remain available separately but are not used by these five accounts. Each new numeric workflow has a distinct entry thesis.
+On the Pi, the published `datafeed_5m`, `datafeed_15m`, and `datafeed_30m` workflows forward their inserted Supabase rows to this route with a dedicated n8n Header Auth credential. The bridge binds to Pi loopback and the private n8n Docker gateway at port 5001. Alpha through epsilon call their distinct numeric ProDex workflows. The paired `*_vision` accounts call separate workflows that retain each strategy's prompt and add a Chart-Img screenshot before the decision. Chart uploads and permanent Google Cloud Storage URL logging run after the broker response. See [the paired experiment](paired-chart-vision-experiment.md).
 
 ### Live bracket settings
 
 The running `tradingview-bot-sim` service reads its ledger path from `SIM_BROKER_DB` in its private environment file. On 2026-09-23 this is `data/sim_broker_local.sqlite`; `data/sim_broker.sqlite` is an older, inactive ledger with different settings. Check the service's configured path before reading account profiles or balances.
 
-All five active accounts currently execute on the **1-minute** feed, while their decisions arrive on 5-minute (alpha, beta, gamma), 15-minute (delta), or 30-minute (epsilon) candles. All five have the same choices below; account-specific brackets are supported by the v2 profile format but have not yet been assigned to these live accounts.
+All ten active accounts currently execute on the **1-minute** feed, while their decisions arrive on 5-minute (alpha, beta, gamma, and their vision pairs), 15-minute (delta and its pair), or 30-minute (epsilon and its pair) candles. All ten have the same choices below; account-specific brackets are supported by the v2 profile format but have not yet been assigned to these live accounts.
 
 | Decision `size` | MES contracts | Stop | Target | Gross stop / target |
 | --- | ---: | ---: | ---: | ---: |

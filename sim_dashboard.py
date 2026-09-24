@@ -68,6 +68,7 @@ def _dashboard_payload() -> dict:
         decision = json.loads(row["decision_json"]) if row else None
         account["latest_decision"] = {
             "signal": decision.get("signal"), "reason": decision.get("reason"),
+            "bar_ts": row["bar_ts"],
             "bar_time": _local_time(row["bar_ts"]),
             "received_time": _local_time(row["available_at"]),
         } if decision else None
@@ -82,10 +83,30 @@ def _dashboard_payload() -> dict:
             else "Short" if account["position"] else None)
         account["progress_pct"] = max(0, min(100, round(
             100 * account["net_pnl"] / account["effective_profit_target"])))
+    by_name = {account["account"]: account for account in accounts}
+    pairs = []
+    for name in ("alpha", "beta", "gamma", "delta", "epsilon"):
+        numeric, vision = by_name.get(name), by_name.get(f"{name}_vision")
+        if not numeric or not vision:
+            continue
+        numeric_decision = numeric["latest_decision"]
+        vision_decision = vision["latest_decision"]
+        pairs.append({
+            "name": name,
+            "timeframe": numeric["timeframe"],
+            "numeric_signal": numeric_decision["signal"] if numeric_decision else None,
+            "vision_signal": vision_decision["signal"] if vision_decision else None,
+            "same_bar": bool(numeric_decision and vision_decision and
+                             numeric_decision["bar_ts"] == vision_decision["bar_ts"]),
+            "bar_time": (numeric_decision or vision_decision or {}).get("bar_time"),
+            "numeric_equity": numeric["equity"],
+            "vision_equity": vision["equity"],
+        })
     trade_rows = [{**dict(row), "exit_time": _local_time(row["exit_ts"])} for row in trades]
     return {
         "updated_at": now.astimezone(MOUNTAIN).strftime("%b %d, %I:%M:%S %p MT"),
         "accounts": accounts,
+        "pairs": pairs,
         "trades": trade_rows,
         "summary": {
             "total": len(accounts),
