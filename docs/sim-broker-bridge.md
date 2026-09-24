@@ -8,6 +8,8 @@ The legacy service on the Pi remains disabled. The bridge is intended to run as 
 
 Install `requirements-sim.txt` (or install the local v2 checkout into the same environment). Point the bridge to an **already initialized** v2 database:
 
+On the Pi, the bridge virtual environment uses an editable install of `/home/thetopham/tradingview-bot-v2`. After pulling v2 changes, verify that `tvbot_v2.simulate.ledger.__file__` points into that checkout. A stale installed wheel can leave the bridge running old ledger code even after both repositories are updated. The systemd override uses two Gunicorn workers and a 120-second timeout so one-minute bars can continue while a 30-minute ProDex request is in flight.
+
 ```text
 BROKER_MODE=sim
 SIM_BROKER_DB=/home/thetopham/tradingview-bot-v2/data/sim_broker.sqlite
