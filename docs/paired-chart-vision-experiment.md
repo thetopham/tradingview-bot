@@ -24,6 +24,8 @@ The user's repaired 5-minute alpha workflow is the source for the chart fetch pa
 
 The ProDex Chat Model used by n8n's Basic LLM Chain drops image pixels even when the chain's message type is `imageBinary`. The standalone ProDex node has a small local patch (`scripts/patch_prodex_vision.py`) that writes the incoming image to a private temporary file, passes it as a Codex `local_image` input, reports `imageIncluded`, and deletes the temporary file. The patch was tested with a direct image recognition check and an isolated n8n webhook before deployment. It applies to ProDex 0.5.1 and may need review after a package upgrade. Its working directory, `/home/node/.n8n/prodex-trading-workspace`, must exist in the n8n container.
 
+Both groups use ProDex's `gpt-6-sol` model with medium reasoning. Numeric controls still use the n8n Basic LLM Chain while image variants use the standalone ProDex node, because the chain drops images. This model-wrapper difference can affect outputs, so the current trial is exploratory rather than an image-only causal test.
+
 Chart-Img session headers, Google OAuth credentials, Supabase credentials, and webhook secrets remain in the private n8n/Pi configuration. Do not export them into this repository. The cache is shared by timeframe, but concurrent workflows can still request duplicate images at a candle boundary; monitor Chart-Img usage.
 
 ## Validation and interpretation
