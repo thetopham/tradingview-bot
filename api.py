@@ -109,8 +109,13 @@ def post(path, payload):
     return data
 
 
-def place_market(acct_id, cid, side, size):
+def place_market(acct_id, cid, side, size, *, client_order_id=None, metadata=None):
     logging.info("Placing market order acct=%s cid=%s side=%s size=%s", acct_id, cid, side, size)
+    if BROKER_MODE == "sim":
+        if cid != OVERRIDE_CONTRACT_ID:
+            raise ValueError("simulated broker supports the configured MES contract only")
+        return get_sim_adapter().submit_market_order(acct_id, side, size,
+                                                     client_order_id, metadata)
     return post("/api/Order/place", {
         "accountId": acct_id, "contractId": cid,
         "type": 2, "side": side, "size": size
@@ -159,6 +164,8 @@ def search_open(acct_id):
     return orders
 
 def cancel(acct_id, order_id):
+    if BROKER_MODE == "sim":
+        return {"success": get_sim_adapter().cancel_order(acct_id, order_id)}
     resp = post("/api/Order/cancel", {"accountId": acct_id, "orderId": order_id})
     if not resp.get("success", True):
         logging.warning("Cancel reported failure: %s", resp)
@@ -183,6 +190,10 @@ def search_accounts(only_active_accounts: bool = True) -> List[Dict]:
     return accounts
 
 def close_pos(acct_id, cid):
+    if BROKER_MODE == "sim":
+        if cid != OVERRIDE_CONTRACT_ID:
+            raise ValueError("simulated broker supports the configured MES contract only")
+        return get_sim_adapter().flatten(acct_id)
     resp = post("/api/Position/closeContract", {"accountId": acct_id, "contractId": cid})
     if not resp.get("success", True):
         logging.warning("Close position reported failure: %s", resp)
@@ -196,7 +207,8 @@ def search_trades(acct_id, since):
 
 def flatten_contract(acct_id, cid, timeout=10):
     if BROKER_MODE == "sim":
-        raise RuntimeError("simulated FLAT requires a closed-bar decision envelope")
+        close_pos(acct_id, cid)
+        return True
     logging.info("Flattening contract %s for acct %s", cid, acct_id)
     end = time.time() + timeout
     while time.time() < end:

@@ -82,6 +82,52 @@ def test_one_minute_feed_advances_execution_without_calling_overseer(one_minute_
         assert conn.execute("SELECT count(*) FROM sim_bar").fetchone()[0] == 1
 
 
+def test_scheduler_webhook_queues_broker_order_for_one_minute_fill(one_minute_sim, monkeypatch):
+    bot = one_minute_sim
+    adapter = bot.get_sim_adapter()
+    original = adapter.broker.submit_order
+    available = datetime.fromisoformat("2026-09-22T14:30:20+00:00")
+    monkeypatch.setattr(adapter.broker, "submit_order",
+                        lambda *args, **kwargs: original(*args, available_at=available, **kwargs))
+    client = bot.app.test_client()
+    headers = {"X-Webhook-Secret": "test-only"}
+    row = {"symbol": "MES", "timeframe": "1", "o": 6000, "h": 6001,
+           "l": 5999, "c": 6000, "v": 100}
+    assert client.post("/sim/feed?source_table=tv_datafeed",
+                       json={**row, "ts": "2026-09-22T14:30:02Z"},
+                       headers=headers).status_code == 200
+    payload = {"secret": "test-only", "account": "epsilon",
+               "decision": {"signal": "BUY", "size": 1, "ai_decision_id": 123},
+               "client_order_id": "decision-123"}
+    queued = client.post("/webhook", json=payload)
+    assert queued.status_code == 200
+    assert queued.json["account"]["order"]["status"] == "queued"
+    assert client.post("/webhook", json=payload).json == queued.json
+    before = client.post("/sim/feed?source_table=tv_datafeed",
+                         json={**row, "ts": "2026-09-22T14:31:02Z"},
+                         headers=headers)
+    assert before.json["accounts"]["epsilon"]["position"] is None
+    filled = client.post("/sim/feed?source_table=tv_datafeed",
+                         json={**row, "ts": "2026-09-22T14:32:02Z"},
+                         headers=headers)
+    assert filled.json["accounts"]["epsilon"]["position"]["entry_price"] == 6000.25
+    stopped = client.post("/sim/feed?source_table=tv_datafeed",
+                          json={**row, "l": 5993, "ts": "2026-09-22T14:33:02Z"},
+                          headers=headers)
+    assert stopped.json["accounts"]["epsilon"]["trade_count"] == 1
+    result = client.get("/sim/results?after_id=0", headers=headers).json["results"][0]
+    assert result["payload"]["ai_decision_id"] == 123
+    assert result["payload"]["order_id"] == '["' + queued.json["account"]["order"]["orderId"] + '"]'
+    broker_events = client.get("/sim/broker-events?after_id=0", headers=headers)
+    assert broker_events.status_code == 200
+    names = [event["event"] for event in broker_events.json["events"]]
+    assert "GatewayUserOrder" in names
+    assert "GatewayUserPosition" in names
+    assert "GatewayUserTrade" in names
+    cursor = broker_events.json["next_cursor"]
+    assert client.get(f"/sim/broker-events?after_id={cursor}", headers=headers).json["events"] == []
+
+
 def test_sim_webhook_persists_next_bar_fill_without_live_broker(legacy_sim, monkeypatch):
     bot = legacy_sim
     assert "signalr_listener" not in sys.modules
@@ -186,7 +232,7 @@ def test_sim_webhook_rejects_missing_bar(legacy_sim):
     response = legacy_sim.app.test_client().post("/webhook", json={
         "secret": "test-only", "account": "epsilon", "signal": "BUY"})
     assert response.status_code == 422
-    assert "closed bar" in response.json["error"]
+    assert "requires a decision or configured overseer" in response.json["error"]
 
 
 def test_sim_events_replace_signalr_observation(legacy_sim):
