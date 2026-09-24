@@ -82,6 +82,36 @@ def test_one_minute_feed_advances_execution_without_calling_overseer(one_minute_
         assert conn.execute("SELECT count(*) FROM sim_bar").fetchone()[0] == 1
 
 
+def test_scheduler_caches_decision_bar_and_calls_overseer_once(one_minute_sim, monkeypatch):
+    bot = one_minute_sim
+    bot.config["SIM_DECISION_SOURCE"] = "scheduler"
+    bot.AI_TEST_ENDPOINTS["epsilon"] = "http://unused.invalid/overseer"
+    calls = []
+
+    def decide(*args, **kwargs):
+        calls.append(args[0])
+        return {"signal": "BUY", "size": 1, "ai_decision_id": 1234}
+
+    monkeypatch.setattr(bot, "ai_trade_decision", decide)
+    row = {"symbol": "MES", "timeframe": "30", "o": 6000, "h": 6001,
+           "l": 5999, "c": 6000, "v": 100, "ts": "2026-09-22T14:30:02Z"}
+    client = bot.app.test_client()
+    headers = {"X-Webhook-Secret": "test-only"}
+    response = client.post("/sim/feed?source_table=tv_datafeed_30m",
+                           json=row, headers=headers)
+    assert response.status_code == 200
+    assert response.json["status"] == "cached"
+    assert calls == []
+    from scripts.run_sim_decisions import run_pending
+    now = datetime(2026, 9, 22, 14, 31, tzinfo=timezone.utc)
+    assert run_pending(bot, now) == [("epsilon", "BUY")]
+    assert run_pending(bot, now) == []
+    assert calls == ["epsilon"]
+    with bot.get_sim_adapter().ledger.connection() as conn:
+        decision = conn.execute("SELECT decision_json FROM sim_decision").fetchone()[0]
+    assert '"decision_id":"1234"' in decision
+
+
 def test_scheduler_webhook_queues_broker_order_for_one_minute_fill(one_minute_sim, monkeypatch):
     bot = one_minute_sim
     adapter = bot.get_sim_adapter()

@@ -1,0 +1,14 @@
+[Unit]
+Description=Publish simulated broker trade results to Supabase
+After=network-online.target tradingview-bot-sim.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=thetopham
+Group=thetopham
+WorkingDirectory=/home/thetopham/tradingview-bot-sim
+EnvironmentFile=/home/thetopham/.config/tradingview-bot-sim-results.env
+ExecStart=/home/thetopham/tradingview-bot-sim/.venv/bin/python scripts/publish_sim_results.py
+NoNewPrivileges=true
+

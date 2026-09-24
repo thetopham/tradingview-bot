@@ -160,6 +160,14 @@ def sim_feed():
         return jsonify(error="decisions must be an account-keyed object"), 422
     if execution_feed and decisions:
         return jsonify(error="1m execution feed cannot carry decisions"), 422
+    if not execution_feed and not decisions and config['SIM_DECISION_SOURCE'] == "scheduler":
+        from brokers.sim_decision_feed import record
+        try:
+            record(config['SIM_BROKER_DB'], timeframe, bar)
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 422
+        return jsonify(status="cached", timeframe=timeframe, bar_ts=bar["timestamp"],
+                       accounts=matching), 200
     snapshots, errors = {}, {}
     for name in matching:
         envelope = {"account": name, "bar": bar}
@@ -222,6 +230,8 @@ def process_sim_webhook(data):
         raise ValueError("decision must be an object")
     decision = dict(recorded)
     decision["size"] = int(decision.get("size", 1))
+    if decision.get("decision_id") is None and decision.get("ai_decision_id") is not None:
+        decision["decision_id"] = decision["ai_decision_id"]
     decision.setdefault("source", "n8n_overseer" if AI_TEST_ENDPOINTS.get(account) else "webhook")
     status = adapter.status(account)
     if status["execution_timeframe"] != status["timeframe"]:

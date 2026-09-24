@@ -1,0 +1,12 @@
+[Unit]
+Description=Check for fresh simulated decision candles each minute
+
+[Timer]
+OnCalendar=*-*-* *:*:05
+AccuracySec=5s
+Persistent=false
+Unit=tradingview-bot-sim-decisions.service
+
+[Install]
+WantedBy=timers.target
+
