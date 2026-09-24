@@ -105,11 +105,11 @@ def legacy_sim(tmp_path, monkeypatch):
     monkeypatch.delenv("PROJECTX_API_KEY", raising=False)
     import logging_config
     monkeypatch.setattr(logging_config, "setup_logging", lambda: None)
-    for name in ("tradingview_projectx_bot", "dashboard", "position_manager", "api", "auth", "config"):
+    for name in ("tradingview_projectx_bot", "dashboard", "sim_dashboard", "position_manager", "api", "auth", "config"):
         sys.modules.pop(name, None)
     bot = importlib.import_module("tradingview_projectx_bot")
     yield bot
-    for name in ("tradingview_projectx_bot", "dashboard", "position_manager", "api", "auth", "config"):
+    for name in ("tradingview_projectx_bot", "dashboard", "sim_dashboard", "position_manager", "api", "auth", "config"):
         sys.modules.pop(name, None)
 
 
@@ -126,11 +126,11 @@ def one_minute_sim(tmp_path, monkeypatch):
     monkeypatch.delenv("PROJECTX_API_KEY", raising=False)
     import logging_config
     monkeypatch.setattr(logging_config, "setup_logging", lambda: None)
-    for name in ("tradingview_projectx_bot", "dashboard", "position_manager", "api", "auth", "config"):
+    for name in ("tradingview_projectx_bot", "dashboard", "sim_dashboard", "position_manager", "api", "auth", "config"):
         sys.modules.pop(name, None)
     bot = importlib.import_module("tradingview_projectx_bot")
     yield bot
-    for name in ("tradingview_projectx_bot", "dashboard", "position_manager", "api", "auth", "config"):
+    for name in ("tradingview_projectx_bot", "dashboard", "sim_dashboard", "position_manager", "api", "auth", "config"):
         sys.modules.pop(name, None)
 
 
