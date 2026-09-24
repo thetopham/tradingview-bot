@@ -81,7 +81,10 @@ def build_variant(control,alpha_vision,account,variant_id,timeframe):
  agent=copy.deepcopy(source['ProDex Vision'])
  agent['id']=str(uuid.uuid4())
  agent['parameters']['prompt']=prompt
+ agent['parameters']['model']='gpt-6-sol'
  agent['parameters']['reasoningEffort']='medium'
+ agent['parameters']['useInputImage']=True
+ agent['parameters']['imageBinaryProperty']='data'
  agent['parameters']['workingDirectory']='/home/node/.n8n/prodex-trading-workspace'
  w['nodes'].append(agent)
  webhook=nodes['Webhook']
@@ -110,7 +113,10 @@ assert any(n['name']=='ProDex Vision' for n in alpha_vision['nodes'])
 
 # Correct the alpha chart interval copied from 30m in the user's repaired file.
 alpha_nodes={n['name']:n for n in alpha_vision['nodes']}
+alpha_nodes['ProDex Vision']['parameters']['model']='gpt-6-sol'
 alpha_nodes['ProDex Vision']['parameters']['reasoningEffort']='medium'
+alpha_nodes['ProDex Vision']['parameters']['useInputImage']=True
+alpha_nodes['ProDex Vision']['parameters']['imageBinaryProperty']='data'
 interval=[x for x in alpha_nodes['Tradingview Chart']['parameters']['bodyParameters']['parameters'] if x.get('name')=='interval']
 assert len(interval)==1
 interval[0]['value']='5m'
@@ -121,6 +127,9 @@ for account,(control_id,vision_id,timeframe) in CONTROL.items():
  if account=='alpha':continue
  assert vision_id not in live
  variants.append(build_variant(live[control_id],alpha_vision,account,vision_id,timeframe))
+
+assert all(next(n for n in w['nodes'] if n['name']=='ProDex Vision')['parameters'].get('useInputImage') is True
+           for w in variants)
 
 if '--dry-run' in sys.argv:
  print(json.dumps({'planned':[(a,CONTROL[a][1],len(w['nodes'])) for a,w in zip(CONTROL,variants)]}))
