@@ -20,6 +20,9 @@ def run_pending(bot, now: datetime | None = None) -> list[tuple[str, str]]:
     ready = []
     for snapshot in adapter.ledger.status():
         account = snapshot["account"]
+        if (account not in bot.config['SIM_ACTIVE_ACCOUNTS']
+                or snapshot['manual_paused'] or snapshot['status'] != 'active'):
+            continue
         if not bot.AI_TEST_ENDPOINTS.get(account):
             continue
         bar = latest_fresh(bot.config["SIM_BROKER_DB"], snapshot["timeframe"], now)

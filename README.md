@@ -2,13 +2,13 @@
 
 This repository runs the **Flask bridge** between TradingView/n8n and the [TradingView Bot v2 simulated broker](https://github.com/thetopham/tradingview-bot-v2). It retains the original ProjectX adapter for historical reference, but the Pi's active `tradingview-bot-sim.service` uses `BROKER_MODE=sim`. The original `tradingview_bot.service` is masked. The running setup places no real broker orders.
 
-**Start here:** [User guide](https://github.com/thetopham/tradingview-bot-v2/blob/main/documentation/user-guide.md) · [Simulator bridge runbook](docs/sim-broker-bridge.md) · [Numeric versus chart trial](docs/paired-chart-vision-experiment.md) · [Pi services](documentation/pi-systemd.md)
+**Start here:** [Numeric-only runbook](docs/numeric-only-simulator.md) · [Simulator bridge](docs/sim-broker-bridge.md) · [Pi services](documentation/pi-systemd.md)
 
 ## Use the running simulator
 
-Open the [authenticated account dashboard](https://sim.thetopham.com/sim/dashboard). The browser username is `dashboard`; use the password set in the Pi's private simulator environment. The dashboard shows all registered accounts, positions, brackets, P&L, loss room, recent decisions, and closed trades. It is read-only.
+Open the [authenticated account dashboard](https://sim.thetopham.com/sim/dashboard). The browser username is `dashboard`; use the password set in the Pi's private simulator environment. The dashboard shows the enabled numeric accounts, positions, brackets, P&L, loss room, recent decisions, and closed trades. It is read-only.
 
-The Pi currently runs five numeric ProDex strategies and five corresponding chart-image variants. Alpha, beta, and gamma decide on five-minute candles; delta on fifteen-minute candles; epsilon on thirty-minute candles. All ten receive the same closed **one-minute MES feed for fills, stops, targets, and risk checks**. The one-minute feed does not call ProDex. New independent demo accounts can be added without a software count limit, provided each has a profile and an overseer route.
+The Pi runs **five numeric-only ProDex strategies**. Alpha, beta, and gamma decide on five-minute candles; delta on fifteen-minute candles; epsilon on thirty-minute candles. The **one-minute MES feed drives fills, stops, targets, and risk checks** without calling ProDex. Image-input split tests are retired: their routes and deployment utilities are removed, their accounts are paused and hidden from the dashboard, and their historical records remain in the ledger. An explicit `SIM_ACTIVE_ACCOUNTS` allowlist controls future decisions and dashboard membership.
 
 ```text
 TradingView/n8n 1m feed -> POST /sim/feed -> v2 broker ledger
