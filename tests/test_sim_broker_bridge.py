@@ -62,32 +62,34 @@ def test_sim_dashboard_is_private_and_reads_all_current_accounts(legacy_sim, mon
     assert b"<script>alert(1)</script>" not in page.data
 
 
-def test_sim_dashboard_counts_only_forward_decisions_on_matched_bars(legacy_sim, monkeypatch):
+def test_sim_dashboard_hides_retired_accounts_and_has_no_split_test(legacy_sim, monkeypatch):
     bot = legacy_sim
-    bot.get_sim_adapter().ledger.register((SimVariant("epsilon_vision", "30m", "vision_test",
-                                                         {1: Bracket(1, 24, 48)}),))
-    with bot.get_sim_adapter().ledger.connection() as conn:
-        for bar, when, numeric_signal, vision_signal in (
-            ("2026-09-24T06:30:00+00:00", "2026-09-24T06:31:00+00:00", "HOLD", "HOLD"),
-            ("2026-09-24T07:00:00+00:00", "2026-09-24T07:01:00+00:00", "BUY", "BUY"),
-            ("2026-09-24T07:30:00+00:00", "2026-09-24T07:31:00+00:00", "HOLD", "SELL"),
-        ):
-            for account, signal in (("epsilon", numeric_signal),
-                                    ("epsilon_vision", vision_signal)):
-                conn.execute(
-                    "INSERT INTO sim_decision(account,generation,bar_ts,input_hash,decision_json,"
-                    "available_at,snapshot_json) VALUES (?,?,?,?,?,?,?)",
-                    (account, 1, bar, "test", f'{{"signal":"{signal}"}}', when, "{}"),
-                )
-        conn.commit()
+    adapter = bot.get_sim_adapter()
+    adapter.ledger.register((SimVariant("epsilon_vision", "30m", "vision_test",
+                                        {1: Bracket(1, 24, 48)}),))
+    # Retired trades must not consume the dashboard's 30-row numeric window.
+    with adapter.ledger.connection() as conn:
+        for account in ["epsilon"] + ["epsilon_vision"] * 31:
+            conn.execute(
+                "INSERT INTO sim_trade(account,generation,entry_ts,exit_ts,direction,quantity,"
+                "entry_price,exit_price,gross_pnl,net_pnl,reason) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (account, 1, "2026-09-24T07:00:00+00:00", "2026-09-24T07:01:00+00:00",
+                 "long", 1, 6000, 6001, 5, 2, "target"),
+            )
     monkeypatch.setenv("DASHBOARD_PASSWORD", "dashboard-test")
     good = base64.b64encode(b"dashboard:dashboard-test").decode()
-    response = bot.app.test_client().get(
-        "/sim/dashboard/data", headers={"Authorization": f"Basic {good}"})
+    headers = {"Authorization": f"Basic {good}"}
+    client = bot.app.test_client()
+    response = client.get("/sim/dashboard/data", headers=headers)
     assert response.status_code == 200
-    assert len(response.json["pairs"]) == 1
-    assert response.json["pairs"][0]["matched_decisions"] == 2
-    assert response.json["pairs"][0]["agreed_decisions"] == 1
+    assert "pairs" not in response.json
+    assert {a["account"] for a in response.json["accounts"]} == {"epsilon", "zeta"}
+    assert [t["account"] for t in response.json["trades"]] == ["epsilon"]
+    assert response.json["summary"]["total"] == 2
+    page = client.get("/sim/dashboard", headers=headers)
+    assert b"Numeric-only" in page.data
+    assert b"split test" not in page.data.lower()
+    assert b"epsilon_vision" not in page.data.lower()
 
 
 @pytest.fixture

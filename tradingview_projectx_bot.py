@@ -53,12 +53,16 @@ AI_TEST_ENDPOINTS.update({
     name: os.getenv(f"N8N_OVERSEER_URL_{name.upper()}") or AI_TEST_ENDPOINTS.get(name)
     for name in ACCOUNTS
 })
+if BROKER_MODE == "sim":
+    AI_TEST_ENDPOINTS = {name: url for name, url in AI_TEST_ENDPOINTS.items()
+                         if name in config['SIM_ACTIVE_ACCOUNTS']}
 
 POSITION_MANAGER = PositionManager(ACCOUNTS)
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.register_blueprint(dashboard_bp)
 if BROKER_MODE == "sim":
+    app.config['SIM_ACTIVE_ACCOUNTS'] = config['SIM_ACTIVE_ACCOUNTS']
     app.register_blueprint(sim_dashboard_bp)
 
 # --- Health Check Route (optional, but recommended for uptime monitoring) ---
@@ -155,7 +159,8 @@ def sim_feed():
            "close": normalized["close"], "volume": normalized["volume"] or 0}
     execution_feed = source_table == "tv_datafeed"
     matching = [item["account"] for item in get_sim_adapter().ledger.status()
-                if item["execution_timeframe" if execution_feed else "timeframe"] == timeframe]
+                if item["execution_timeframe" if execution_feed else "timeframe"] == timeframe
+                and (execution_feed or item['account'] in config['SIM_ACTIVE_ACCOUNTS'])]
     if not matching:
         return jsonify(error=f"no simulated accounts use {timeframe}"), 422
     decisions = data.get("decisions") or {}
@@ -192,6 +197,8 @@ def process_sim_webhook(data):
     account = (data.get("account") or DEFAULT_ACCOUNT).lower()
     if account not in ACCOUNTS:
         raise ValueError(f"unknown simulated account: {account}")
+    if account not in config['SIM_ACTIVE_ACCOUNTS']:
+        raise ValueError(f"simulated decisions disabled for account: {account}")
     bar = data.get("bar")
     if not isinstance(bar, dict) or not bar.get("timestamp"):
         raise ValueError("simulated webhook requires a closed bar with timestamp")
@@ -247,6 +254,8 @@ def process_sim_order_webhook(data):
     account = (data.get("account") or DEFAULT_ACCOUNT).lower()
     if account not in ACCOUNTS:
         raise ValueError(f"unknown simulated account: {account}")
+    if account not in config['SIM_ACTIVE_ACCOUNTS']:
+        raise ValueError(f"simulated decisions disabled for account: {account}")
     adapter = get_sim_adapter()
     recorded = data.get("decision")
     if recorded is None:

@@ -1,4 +1,8 @@
-# Paired numeric and chart-image simulator trial
+# Archived: paired numeric and chart-image simulator trial
+
+**Retired.** This document preserves the old experiment setup, not an operating
+instruction. The current pipeline is [numeric-only](numeric-only-simulator.md).
+Do not recreate image routes, publish these workflows, or resume their accounts.
 
 For everyday dashboard use and fill interpretation, see the [user guide](https://github.com/thetopham/tradingview-bot-v2/blob/main/documentation/user-guide.md). Validation below records the initial 2026-09-24 setup, not a continuously refreshed performance result.
 

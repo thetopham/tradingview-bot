@@ -1,6 +1,6 @@
 # Plugging the v2 simulator into the legacy bot
 
-For dashboard use and a plain-language overview, start with the [user guide](https://github.com/thetopham/tradingview-bot-v2/blob/main/documentation/user-guide.md). This runbook describes the Pi simulator bridge; the historical ProjectX service is masked.
+The current deployment is **numeric-only**; start with the [numeric-only runbook](numeric-only-simulator.md). This document describes the Pi simulator bridge; the historical ProjectX service remains masked.
 
 The legacy bot's original broker boundary was `api.py` plus the SignalR listener. `BROKER_MODE=sim` uses the persistent `tradingview-bot-v2` SQLite ledger for account, position, bracket order, and trade-fill views. It accepts decisions through the existing `/webhook` route. In this mode, startup does not authenticate to ProjectX, launch SignalR, or start the legacy broker scheduler. Direct ProjectX API calls are rejected before authentication.
 
@@ -20,13 +20,14 @@ WEBHOOK_SECRET=<local secret>
 DASHBOARD_PASSWORD=<local password>
 SIM_MAX_BAR_LAG_SECONDS=600
 SIM_DECISION_SOURCE=scheduler
+SIM_ACTIVE_ACCOUNTS=alpha,beta,gamma,delta,epsilon
 ```
 
 Simulation mode reads account names from the v2 ledger at startup. It assigns stable compatibility account IDs from SQLite row IDs, starting at 900001. Add accounts with the v2 `init --portfolio` command, then restart this legacy bridge to refresh its account map. Profile names must be lowercase for legacy webhook routing. New accounts can use `N8N_OVERSEER_URL_<ACCOUNT>`; the historical alpha through practice URL variables continue to work. `PROJECTX_*` settings are unused in sim mode.
 
 `SIM_MAX_BAR_LAG_SECONDS` rejects stale bars in forward operation. Set it to `0` only for an isolated replay or test database.
 
-For the Pi's separate decision scheduler, set `SIM_DECISION_SOURCE=scheduler` and install `deploy/tradingview-bot-sim-decisions.service` and `.timer`. The 5-minute, 15-minute, and 30-minute n8n datafeeds forward their saved candles; `/sim/feed` caches them without calling the AI. Each timer run checks for a fresh cached candle and invokes each configured overseer once per account and candle. Eligible accounts run concurrently so a 30-minute boundary can handle all ten without serial model delays. The resulting decision enters the local broker and is filled from the next eligible one-minute bar. This setting avoids running both the feed and scheduler as decision triggers. Accounts without configured overseer URLs are skipped. The old live-broker scheduler remains disabled.
+For the Pi's separate decision scheduler, set `SIM_DECISION_SOURCE=scheduler` and install `deploy/tradingview-bot-sim-decisions.service` and `.timer`. The 5-minute, 15-minute, and 30-minute n8n datafeeds forward their saved candles; `/sim/feed` caches them without calling the AI. Each timer run checks for a fresh cached candle and invokes each configured overseer once per account and candle. Enabled numeric accounts run concurrently without serial model delays. The resulting decision enters the local broker and is filled from the next eligible one-minute bar. This setting avoids running both the feed and scheduler as decision triggers. Retired, paused, non-active, and unconfigured accounts are skipped. The old live-broker scheduler remains disabled.
 
 ## Webhook contract
 
@@ -65,17 +66,17 @@ The bridge also renders `api.place_market`, account, position, open-order, trade
 
 `POST /sim/feed?source_table=tv_datafeed` accepts the one-minute MES rows for accounts whose `execution_timeframe` is `1m`. It advances fills, brackets, marked equity, and risk without calling an overseer. It rejects a `decisions` object. The row's `ts` is a post-close receipt timestamp; the normalizer assigns the preceding one-minute bar only when the receipt is at most 50 seconds after its minute boundary. A TradingView bar-open timestamp in the alert is preferable because a delayed receipt can otherwise be assigned to the wrong minute. The simulation's 1-minute OHLC cannot reveal the order of stop and target touches within the minute, so it charges the stop in that case.
 
-For a profile with 30-minute decisions and 1-minute execution, the 30-minute route records the ProDex decision separately and queues it for the first eligible one-minute bar **whose open follows the response time**. This prevents a delayed model response from receiving an earlier candle's open price. The running `epsilon` and `epsilon_vision` accounts both use this one-minute execution path. `epsilon_1m` is an older optional example profile for isolated experiments, not an additional live Pi account.
+For a profile with 30-minute decisions and 1-minute execution, the 30-minute route records the ProDex decision separately and queues it for the first eligible one-minute bar **whose open follows the response time**. This prevents a delayed model response from receiving an earlier candle's open price. The running `epsilon` account uses this one-minute execution path. `epsilon_1m` is an older optional example profile for isolated experiments, not an additional live Pi account.
 
-The route fans the bar out to **every** configured account with the matching timeframe. Each account can call its own n8n overseer URL. For isolated replay, an optional `decisions` object may contain account-keyed decisions; production feed rows have none. The response lists account snapshots and any per-account errors. Retrying a bar is safe.
+Decision bars target only `SIM_ACTIVE_ACCOUNTS`. Execution bars still reach all registered accounts with the matching execution timeframe so pausing or retiring an account does not orphan existing position brackets. Each account can call its own n8n overseer URL. For isolated replay, an optional `decisions` object may contain account-keyed decisions; production feed rows have none. The response lists account snapshots and any per-account errors. Retrying a bar is safe.
 
-On the Pi, the published `datafeed_5m`, `datafeed_15m`, and `datafeed_30m` workflows forward their inserted Supabase rows to this route with a dedicated n8n Header Auth credential. The bridge binds to Pi loopback and the private n8n Docker gateway at port 5001. Alpha through epsilon call their distinct numeric ProDex workflows. The paired `*_vision` accounts call separate workflows that retain each strategy's prompt and add a Chart-Img screenshot before the decision. Chart uploads and permanent Google Cloud Storage URL logging run after the broker response. See [the paired experiment](paired-chart-vision-experiment.md).
+On the Pi, the published `datafeed_5m`, `datafeed_15m`, and `datafeed_30m` workflows forward their inserted Supabase rows to this route with a dedicated n8n Header Auth credential. The bridge binds to Pi loopback and the private n8n Docker gateway at port 5001. Alpha through epsilon call their distinct numeric ProDex workflows. The former `*_vision` accounts are retired. Their workflows remain unpublished and their routes are removed. The active numeric workflows do not fetch, archive, or pass chart images.
 
 ### Live bracket settings
 
 The running `tradingview-bot-sim` service reads its ledger path from `SIM_BROKER_DB` in its private environment file. On 2026-09-23 this is `data/sim_broker_local.sqlite`; `data/sim_broker.sqlite` is an older, inactive ledger with different settings. Check the service's configured path before reading account profiles or balances.
 
-All ten active accounts currently execute on the **1-minute** feed, while their decisions arrive on 5-minute (alpha, beta, gamma, and their vision pairs), 15-minute (delta and its pair), or 30-minute (epsilon and its pair) candles. All ten have the same choices below; account-specific brackets are supported by the v2 profile format but have not yet been assigned to these live accounts.
+The five numeric accounts execute on the **1-minute** feed. Their decisions arrive on 5-minute (alpha, beta, gamma), 15-minute (delta), or 30-minute (epsilon) candles. All five retain the bracket choices below. Retired account history remains intact.
 
 | Decision `size` | MES contracts | Stop | Target | Gross stop / target |
 | --- | ---: | ---: | ---: | ---: |
@@ -105,13 +106,13 @@ The numeric ProDex workflows insert successful decisions into Supabase `ai_tradi
 
 - The v2 ledger is authoritative for fills, fees, positions, trailing loss, and pass/fail events. The bridge renders ProjectX-shaped read views for the old dashboard/position manager without making a broker call.
 - Closed simulated trades are queued locally in `sim_result_outbox` and exposed through `/sim/results`. The separate publisher delivers them to local Supabase with an idempotent trace ID. The Pi's current manual smoke trade was verified in `trade_results`; it has no AI decision ID, so the `ai_trade_feed` join does not include it.
-- The 5m, 15m, and 30m decision feeds are connected. The active one-minute feed advances fills and risk for all ten current accounts. The paired image workflows were separately checked for binary image delivery; see [the paired experiment](paired-chart-vision-experiment.md).
+- The 5m, 15m, and 30m decision feeds are connected. The active one-minute feed advances fills and risk, including any remaining positions in retired accounts. Only the five enabled numeric accounts receive new model decisions.
 - Keep the n8n header secret in its encrypted credential and the Pi environment file, never in exported workflow JSON. The original `tradingview-bot` service remains inactive; only `tradingview-bot-sim` runs.
 - The Pi's legacy `.env` points at an obsolete Supabase host. The result publisher uses a separate private environment file with the credential from the currently working n8n Supabase connection.
 
 ## Simulated account dashboard
 
-`GET /sim/dashboard` shows every account in the v2 ledger, including new variants after the bridge restarts. It displays current equity, realized and open P&L, remaining maximum-loss room, profit-goal progress, position brackets, the latest decision, the last execution candle, and up to 30 recently closed trades. The page refreshes every 30 seconds. `GET /sim/dashboard/data` returns the same read-only snapshot as JSON. Neither endpoint queries ProjectX or Supabase. The existing `/dashboard` remains the legacy Supabase trade feed.
+`GET /sim/dashboard` shows only enabled numeric accounts from `SIM_ACTIVE_ACCOUNTS`. Retired accounts and split-test comparisons are absent from the page and JSON API. It displays current equity, realized and open P&L, remaining maximum-loss room, profit-goal progress, position brackets, the latest decision, the last execution candle, and up to 30 recently closed trades. The page refreshes every 30 seconds. `GET /sim/dashboard/data` returns the same read-only snapshot as JSON. Neither endpoint queries ProjectX or Supabase. The existing `/dashboard` remains the legacy Supabase trade feed.
 
 Both new routes require `DASHBOARD_PASSWORD`; if it is unset they return 503. They should be published only over HTTPS or reached through an SSH tunnel. For the Pi tunnel, use `ssh -L 5001:127.0.0.1:5001 pi` and open `http://localhost:5001/sim/dashboard`. Use the dashboard password from the Pi's private simulator environment file. Browser user name is `dashboard`.
 

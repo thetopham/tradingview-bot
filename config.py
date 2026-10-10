@@ -54,6 +54,15 @@ def load_config():
         if any(name != name.lower() for _, name in rows):
             raise RuntimeError("simulated account names must be lowercase for legacy webhook routing")
         config['ACCOUNTS'] = {name: 900000 + rowid for rowid, name in rows}
+        # Retain archived account IDs for fills/history, but never route new
+        # decisions to the retired image-input cohort.
+        numeric = tuple(name for name in config['ACCOUNTS'] if not name.endswith('_vision'))
+        selection = os.getenv('SIM_ACTIVE_ACCOUNTS')
+        active = numeric if selection is None else tuple(name.strip() for name in selection.split(','))
+        if (not active or len(set(active)) != len(active)
+                or any(name not in numeric for name in active)):
+            raise ValueError('SIM_ACTIVE_ACCOUNTS must list distinct registered numeric accounts')
+        config['SIM_ACTIVE_ACCOUNTS'] = active
     else:
         config['ACCOUNTS'] = {
             k[len("ACCOUNT_"):].lower(): int(v)
@@ -65,7 +74,8 @@ def load_config():
     }
     if not config['ACCOUNTS']:
         raise RuntimeError("No accounts loaded from .env. Add ACCOUNT_<NAME>=<ID>.")
-    config['DEFAULT_ACCOUNT'] = next(iter(config['ACCOUNTS']))
+    config['DEFAULT_ACCOUNT'] = (config['SIM_ACTIVE_ACCOUNTS'][0] if broker_mode == 'sim'
+                                 else next(iter(config['ACCOUNTS'])))
     config['OVERRIDE_CONTRACT_ID'] = (
         "CON.F.US.MES.SIM" if broker_mode == "sim"
         else os.getenv("OVERRIDE_CONTRACT_ID", "CON.F.US.MES.H26")
